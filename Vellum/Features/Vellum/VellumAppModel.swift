@@ -269,9 +269,9 @@ final class VellumAppModel {
             guard let self else { return }
             Task {
                 try? await self.container.workspace.restoreNotes(ids: ids)
+                await self.trashScreen.refresh()
                 await self.library.refresh()
                 await self.refreshStats()
-                await self.trashScreen.refresh()
             }
         }
     }

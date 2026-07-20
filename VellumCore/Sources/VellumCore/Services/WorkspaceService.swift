@@ -112,6 +112,7 @@ public actor WorkspaceService {
     }
 
     public func purgeNote(id: UUID) async throws {
+        guard try await notes.purgeNote(id: id) else { return }
         for task in try await tasks.list() where task.noteID == id {
             try await tasks.delete(id: task.id)
         }
@@ -123,7 +124,6 @@ public actor WorkspaceService {
                 try await entities.save(entity)
             }
         }
-        try await notes.deleteNote(id: id)
         try await log(
             noteID: id,
             kind: .notePurged,
@@ -197,6 +197,11 @@ public actor WorkspaceService {
 
         for note in doomedNotes {
             try await trashNote(note)
+        }
+        for var note in try await notes.listNotes(scope: .all) {
+            guard let spaceID = note.spaceID, doomedIDs.contains(spaceID) else { continue }
+            note.spaceID = nil
+            try await notes.saveNote(note)
         }
         for doomedID in childIDs + [id] {
             try await spaces.delete(id: doomedID)

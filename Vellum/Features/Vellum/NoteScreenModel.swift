@@ -158,13 +158,6 @@ final class NoteScreenModel {
     }
 
     func flushPendingSave() async {
-        guard !autosaveDisabled else { return }
-
-        if let inFlightSave {
-            await inFlightSave.value
-            return
-        }
-
         pendingSaveTask?.cancel()
         pendingSaveTask = nil
         pendingSaveToken = nil
@@ -243,11 +236,24 @@ final class NoteScreenModel {
     }
 
     func assignToSpace(_ spaceID: UUID?) async {
+        await flushPendingSave()
+
         do {
             let updated = try await workspace.assignNote(id: noteID, toSpaceID: spaceID)
-            note = updated
-            try await refreshSpace(for: updated)
-            onNoteChanged(updated)
+            let merged: Note
+            if var currentNote = note {
+                currentNote.spaceID = updated.spaceID
+                currentNote.revision = updated.revision
+                currentNote.updatedAt = updated.updatedAt
+                currentNote.schemaVersion = updated.schemaVersion
+                note = currentNote
+                merged = currentNote
+            } else {
+                note = updated
+                merged = updated
+            }
+            try await refreshSpace(for: merged)
+            onNoteChanged(merged)
         } catch {
             handle(error)
         }
@@ -287,18 +293,19 @@ final class NoteScreenModel {
     }
 
     private func saveUntilCurrent() async {
-        if let inFlightSave {
-            await inFlightSave.value
-            return
+        while let inFlight = inFlightSave {
+            await inFlight.value
         }
         guard !autosaveDisabled else { return }
-        let task = Task { [weak self] in
-            guard let self else { return }
-            await self.performSaveLoop()
+        while savedGeneration < editGeneration && !autosaveDisabled {
+            let task = Task { [weak self] in
+                guard let self else { return }
+                await self.performSaveLoop()
+            }
+            inFlightSave = task
+            await task.value
+            inFlightSave = nil
         }
-        inFlightSave = task
-        await task.value
-        inFlightSave = nil
     }
 
     private func performSaveLoop() async {

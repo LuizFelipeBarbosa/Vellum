@@ -266,6 +266,33 @@ public actor FileNoteRepository: NoteRepository {
         }
     }
 
+    @discardableResult
+    public func purgeNote(id: UUID) async throws -> Bool {
+        let package = try FilePersistence.requirePackage(rootDirectory: rootDirectory, noteID: id)
+        let manifest = package.appendingPathComponent("manifest.json")
+        let data: Data
+        do {
+            data = try Data(contentsOf: manifest)
+        } catch {
+            throw VellumError.corruptManifest(id)
+        }
+
+        let note: Note
+        do {
+            note = try FilePersistence.decoder().decode(Note.self, from: data)
+        } catch {
+            throw VellumError.corruptManifest(id)
+        }
+
+        guard note.deletedAt != nil else { return false }
+        do {
+            try FileManager.default.removeItem(at: package)
+        } catch {
+            throw VellumError.persistenceFailure("Could not delete note \(id.uuidString): \(error.localizedDescription)")
+        }
+        return true
+    }
+
     public func loadAsset(noteID: UUID, relativePath: String) async throws -> Data? {
         _ = try FilePersistence.requirePackage(rootDirectory: rootDirectory, noteID: noteID)
         let url = try FilePersistence.validatedAssetURL(

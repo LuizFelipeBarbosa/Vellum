@@ -11,6 +11,8 @@ public protocol NoteRepository: Sendable {
     func loadNote(id: UUID) async throws -> Note
     func saveNote(_ note: Note) async throws
     func deleteNote(id: UUID) async throws
+    @discardableResult
+    func purgeNote(id: UUID) async throws -> Bool
     func loadAsset(noteID: UUID, relativePath: String) async throws -> Data?
     func assetSize(noteID: UUID, relativePath: String) async throws -> Int?
     func saveAsset(_ data: Data, noteID: UUID, relativePath: String) async throws

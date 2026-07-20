@@ -1,4 +1,3 @@
-import CoreText
 import SwiftUI
 import VellumCore
 import UIKit
@@ -77,27 +76,11 @@ enum VellumTheme {
 }
 
 extension Font {
-    private static let registerVellumFonts: Void = {
-        let filenames = [
-            "Newsreader[opsz,wght].ttf",
-            "Newsreader-Italic[opsz,wght].ttf",
-            "Caveat[wght].ttf"
-        ]
-
-        for filename in filenames {
-            guard let url = Bundle.main.url(forResource: filename, withExtension: nil) else {
-                continue
-            }
-            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-        }
-    }()
-
     static func vellumNewsreader(
         _ size: CGFloat,
         weight: Font.Weight = .regular,
         italic: Bool = false
     ) -> Font {
-        _ = registerVellumFonts
         let candidates = italic
             ? ["Newsreader", "Newsreader16pt-Italic", "NewsreaderItalic-Regular"]
             : ["Newsreader", "Newsreader16pt-Regular", "Newsreader-Regular"]
@@ -113,7 +96,6 @@ extension Font {
     }
 
     static func vellumCaveat(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        _ = registerVellumFonts
         let candidates = ["Caveat", "Caveat-Regular"]
         if let name = candidates.first(where: { UIFont(name: $0, size: size) != nil }) {
             return .custom(name, fixedSize: size).weight(weight)

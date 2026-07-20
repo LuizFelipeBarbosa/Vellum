@@ -140,17 +140,26 @@ func deleteSpaceCascadesToSubspacesAndNotes() async throws {
     )
     let parentNote = try await fixture.service.createNote(title: "Parent note")
     let childNote = try await fixture.service.createNote(title: "Child note")
+    let alreadyTrashedNote = try await fixture.service.createNote(title: "Already trashed note")
     _ = try await fixture.service.assignNote(id: parentNote.id, toSpaceID: parent.id)
     _ = try await fixture.service.assignNote(id: childNote.id, toSpaceID: child.id)
+    _ = try await fixture.service.assignNote(id: alreadyTrashedNote.id, toSpaceID: parent.id)
+    try await fixture.service.deleteNote(id: alreadyTrashedNote.id)
 
     try await fixture.service.deleteSpace(id: parent.id)
 
     #expect(try await fixture.spaces.list().isEmpty)
     let trashedIDs = Set(try await fixture.service.listTrashedNotes().map(\.id))
-    #expect(trashedIDs == Set([parentNote.id, childNote.id]))
+    #expect(trashedIDs == Set([parentNote.id, childNote.id, alreadyTrashedNote.id]))
+    #expect(try await fixture.service.loadNote(id: parentNote.id).spaceID == nil)
+    #expect(try await fixture.service.loadNote(id: alreadyTrashedNote.id).spaceID == nil)
+
+    let restored = try await fixture.service.restoreNote(id: parentNote.id)
+    #expect(restored.spaceID == nil)
     let activeIDs = Set(try await fixture.service.listNotes().map(\.id))
-    #expect(!activeIDs.contains(parentNote.id))
+    #expect(activeIDs.contains(parentNote.id))
     #expect(!activeIDs.contains(childNote.id))
+    #expect(!activeIDs.contains(alreadyTrashedNote.id))
     #expect(try await fixture.service.activity(noteID: nil).contains { $0.kind == .spaceDeleted })
 }
 

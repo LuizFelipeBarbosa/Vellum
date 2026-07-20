@@ -235,6 +235,18 @@ func saveNotePreservesDeletedAt() async throws {
     #expect(try await fixture.service.listNotes().isEmpty)
 }
 
+@Test("Purging an active note is a no-op")
+func purgeActiveNoteDoesNothing() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    let note = try await fixture.service.createNote(title: "Keep")
+
+    try await fixture.service.purgeNote(id: note.id)
+
+    #expect(try await fixture.service.loadNote(id: note.id).id == note.id)
+    #expect(try await fixture.service.listNotes().map(\.id) == [note.id])
+}
+
 @Test("Purging a note removes its package, tasks, and entity sources")
 func purgeNoteCascades() async throws {
     let fixture = try WorkspaceFixture()
@@ -267,6 +279,20 @@ func purgeNoteCascades() async throws {
     await #expect(throws: VellumError.noteNotFound(note.id)) {
         try await fixture.service.loadNote(id: note.id)
     }
+}
+
+@Test("A stale purge after restore is a no-op")
+func purgeAfterRestoreDoesNothing() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    let note = try await fixture.service.createNote(title: "Restored")
+    try await fixture.service.deleteNote(id: note.id)
+    _ = try await fixture.service.restoreNote(id: note.id)
+
+    try await fixture.service.purgeNote(id: note.id)
+
+    #expect(try await fixture.service.loadNote(id: note.id).deletedAt == nil)
+    #expect(try await fixture.service.listNotes().map(\.id) == [note.id])
 }
 
 @Test("Emptying Trash permanently removes every trashed note")
@@ -318,6 +344,7 @@ func bulkTrashSkipsAlreadyTrashedAndMissingNotes() async throws {
     let second = try await fixture.service.createNote(title: "Second")
     let third = try await fixture.service.createNote(title: "Third")
     try await fixture.service.deleteNote(id: first.id)
+    try await fixture.service.deleteNote(id: second.id)
     try await fixture.service.purgeNote(id: second.id)
 
     let trashedIDs = try await fixture.service.deleteNotes(ids: [first.id, second.id, third.id])
