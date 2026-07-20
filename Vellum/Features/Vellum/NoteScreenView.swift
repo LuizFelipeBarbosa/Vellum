@@ -64,16 +64,16 @@ struct NoteScreenView: View {
             }
         }
         .confirmationDialog(
-            "Delete this note?",
+            "Move to Trash?",
             isPresented: $isConfirmingDelete,
             titleVisibility: .visible
         ) {
-            Button("Delete Note", role: .destructive) {
+            Button("Move to Trash", role: .destructive) {
                 deleteNote()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the note and its local assets.")
+            Text("The note moves to the Trash. You can restore it there later.")
         }
         .alert(
             "Vellum",
@@ -116,20 +116,44 @@ struct NoteScreenView: View {
                 .frame(minWidth: 180, idealWidth: 300, maxWidth: 390)
                 .accessibilityIdentifier("note-screen-title-field")
 
-            if let space = model.space {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(VellumTheme.color(for: space.color))
-                        .frame(width: 6, height: 6)
-                    Text(space.name)
-                        .lineLimit(1)
+            Menu {
+                Button {
+                    Task { await model.assignToSpace(nil) }
+                } label: {
+                    spaceMenuItemLabel("Unfiled", isSelected: model.space == nil)
                 }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(VellumTheme.accentDark)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3)
-                .background(VellumTheme.accent(0.12), in: Capsule())
+
+                ForEach(
+                    model.spaces.filter { $0.space.parentID == nil },
+                    id: \.space.id
+                ) { root in
+                    Button {
+                        Task { await model.assignToSpace(root.space.id) }
+                    } label: {
+                        spaceMenuItemLabel(
+                            root.space.name,
+                            isSelected: model.space?.id == root.space.id
+                        )
+                    }
+
+                    ForEach(
+                        model.spaces.filter { $0.space.parentID == root.space.id },
+                        id: \.space.id
+                    ) { child in
+                        Button {
+                            Task { await model.assignToSpace(child.space.id) }
+                        } label: {
+                            spaceMenuItemLabel(
+                                "— \(child.space.name)",
+                                isSelected: model.space?.id == child.space.id
+                            )
+                        }
+                    }
+                }
+            } label: {
+                spaceChip
             }
+            .buttonStyle(.plain)
 
             Text(saveStateLabel)
                 .font(.vellumMono(11))
@@ -166,7 +190,7 @@ struct NoteScreenView: View {
                 Button(role: .destructive) {
                     isConfirmingDelete = true
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label("Move to Trash", systemImage: "trash")
                 }
             } label: {
                 Text("⋯")
@@ -179,6 +203,46 @@ struct NoteScreenView: View {
         .padding(.horizontal, 24)
         .padding(.top, 14)
         .padding(.bottom, 12)
+    }
+
+    @ViewBuilder
+    private var spaceChip: some View {
+        if let space = model.space {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(VellumTheme.color(for: space.color))
+                    .frame(width: 6, height: 6)
+                Text(space.name)
+                    .lineLimit(1)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(VellumTheme.accentDark)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(VellumTheme.accent(0.12), in: Capsule())
+        } else {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(VellumTheme.muted)
+                    .frame(width: 6, height: 6)
+                Text("Unfiled")
+                    .lineLimit(1)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(VellumTheme.mutedDark)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(VellumTheme.muted.opacity(0.12), in: Capsule())
+        }
+    }
+
+    @ViewBuilder
+    private func spaceMenuItemLabel(_ name: String, isSelected: Bool) -> some View {
+        if isSelected {
+            Label(name, systemImage: "checkmark")
+        } else {
+            Text(name)
+        }
     }
 
     private var entityChips: some View {

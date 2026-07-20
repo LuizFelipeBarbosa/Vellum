@@ -1,11 +1,16 @@
 import Observation
 import SwiftUI
+import VellumCore
 
 struct VellumSidebarView: View {
     @Bindable var model: VellumAppModel
     @State private var showingActivity = false
+    @State private var pendingSpaceDeletion: Space?
+    @State private var spaceEditor: SpaceEditorContext?
 
     var body: some View {
+        let roots = model.spaceListings.filter { $0.space.parentID == nil }
+
         VStack(spacing: 0) {
             HStack {
                 HStack(spacing: 8) {
@@ -57,45 +62,44 @@ struct VellumSidebarView: View {
                     count: String(model.openTaskCount),
                     model: model
                 )
+                VellumSidebarNavRow(
+                    id: "trash",
+                    label: "Trash",
+                    count: model.trashCount > 0 ? String(model.trashCount) : "",
+                    model: model
+                )
             }
 
-            Text("SPACES · ORGANIZED FOR YOU")
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(0.99)
-                .foregroundStyle(VellumTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.top, 24)
-                .padding(.bottom, 8)
+            HStack {
+                Text("SPACES · ORGANIZED FOR YOU")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(0.99)
+                Spacer()
+                Button {
+                    spaceEditor = SpaceEditorContext(parent: nil)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("New Space")
+            }
+            .foregroundStyle(VellumTheme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.top, 24)
+            .padding(.bottom, 8)
 
             VStack(spacing: 2) {
-                ForEach(model.spaceListings, id: \.space.id) { listing in
-                    let selected = model.library.selectedSpaceID == listing.space.id
-                    Button {
-                        model.library.selectedSpaceID = selected ? nil : listing.space.id
-                        Task { await model.navigate(to: .library) }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(VellumTheme.color(for: listing.space.color))
-                                .frame(width: 7, height: 7)
-                            Text(listing.space.name)
-                            Spacer()
-                            Text(String(listing.noteCount))
-                                .font(.system(size: 12))
-                                .foregroundStyle(selected ? VellumTheme.accent : VellumTheme.mutedCount)
-                        }
-                        .font(.system(size: 14, weight: selected ? .semibold : .regular))
-                        .foregroundStyle(selected ? VellumTheme.ink : VellumTheme.bodyMuted)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(
-                            selected ? VellumTheme.accent(0.1) : .clear,
-                            in: RoundedRectangle(cornerRadius: 8)
-                        )
-                        .contentShape(Rectangle())
+                ForEach(roots, id: \.space.id) { root in
+                    spaceRow(root)
+                    ForEach(
+                        model.spaceListings.filter { $0.space.parentID == root.space.id },
+                        id: \.space.id
+                    ) { child in
+                        spaceRow(child)
+                            .padding(.leading, 18)
                     }
-                    .buttonStyle(.plain)
                 }
             }
 
@@ -137,6 +141,70 @@ struct VellumSidebarView: View {
                 ActivityView(workspace: model.container.workspace, noteID: nil)
             }
         }
+        .sheet(item: $spaceEditor) { context in
+            SpaceEditorView(model: model, context: context)
+        }
+        .confirmationDialog(
+            "Delete '\(pendingSpaceDeletion?.name ?? "")'?",
+            isPresented: Binding(
+                get: { pendingSpaceDeletion != nil },
+                set: { if !$0 { pendingSpaceDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let space = pendingSpaceDeletion {
+                Button("Delete Space", role: .destructive) {
+                    let id = space.id
+                    pendingSpaceDeletion = nil
+                    Task { await model.deleteSpace(id) }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingSpaceDeletion = nil
+            }
+        } message: {
+            Text("Its subspaces are also removed, and all contained notes move to the Trash.")
+        }
+    }
+
+    private func spaceRow(_ listing: SpaceListing) -> some View {
+        let selected = model.library.selectedSpaceID == listing.space.id
+
+        return Button {
+            model.library.selectedSpaceID = selected ? nil : listing.space.id
+            Task { await model.navigate(to: .library) }
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(VellumTheme.color(for: listing.space.color))
+                    .frame(width: 7, height: 7)
+                Text(listing.space.name)
+                Spacer()
+                Text(String(listing.noteCount))
+                    .font(.system(size: 12))
+                    .foregroundStyle(selected ? VellumTheme.accent : VellumTheme.mutedCount)
+            }
+            .font(.system(size: 14, weight: selected ? .semibold : .regular))
+            .foregroundStyle(selected ? VellumTheme.ink : VellumTheme.bodyMuted)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                selected ? VellumTheme.accent(0.1) : .clear,
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if listing.space.parentID == nil {
+                Button("New Subspace") {
+                    spaceEditor = SpaceEditorContext(parent: listing.space)
+                }
+            }
+            Button("Delete Space…", role: .destructive) {
+                pendingSpaceDeletion = listing.space
+            }
+        }
     }
 
     private func createNote() {
@@ -156,7 +224,8 @@ private struct VellumSidebarNavRow: View {
 
     private var active: Bool {
         (id == "library" && model.screen == .library) ||
-        (id == "graph" && model.screen == .graph)
+        (id == "graph" && model.screen == .graph) ||
+        (id == "trash" && model.screen == .trash)
     }
 
     var body: some View {
@@ -182,6 +251,7 @@ private struct VellumSidebarNavRow: View {
         switch id {
         case "library": Task { await model.navigate(to: .library) }
         case "graph": Task { await model.navigate(to: .graph) }
+        case "trash": Task { await model.navigate(to: .trash) }
         case "today": model.showToast("Today — the daily digest isn’t in this proto" + "type yet")
         case "tasks": model.showToast("Tasks — extracted to-dos live here (not in proto" + "type)")
         default: break

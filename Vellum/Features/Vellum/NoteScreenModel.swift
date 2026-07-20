@@ -37,7 +37,7 @@ final class NoteScreenModel {
     private var pendingSaveToken: UUID?
     private var editGeneration = 0
     private var savedGeneration = 0
-    private var isSaveInFlight = false
+    private var inFlightSave: Task<Void, Never>?
     private var drawingDataPendingSave: Data?
     private var autosaveDisabled = false
 
@@ -51,6 +51,7 @@ final class NoteScreenModel {
     var errorMessage: String?
 
     var space: Space?
+    var spaces: [SpaceListing] = []
     var backlinks: [Backlink] = []
     var noteEntities: [Entity] = []
     var isShowingSuggestions = false
@@ -132,6 +133,7 @@ final class NoteScreenModel {
             note = loadedNote
             drawingData = drawing
             self.proposals = sortedProposals(proposals)
+            self.spaces = spaces
             space = spaces.first { $0.space.id == loadedNote.spaceID }?.space
             self.backlinks = backlinks
             noteEntities = entities
@@ -158,9 +160,8 @@ final class NoteScreenModel {
     func flushPendingSave() async {
         guard !autosaveDisabled else { return }
 
-        if isSaveInFlight {
-            let task = pendingSaveTask
-            await task?.value
+        if let inFlightSave {
+            await inFlightSave.value
             return
         }
 
@@ -241,6 +242,17 @@ final class NoteScreenModel {
         }
     }
 
+    func assignToSpace(_ spaceID: UUID?) async {
+        do {
+            let updated = try await workspace.assignNote(id: noteID, toSpaceID: spaceID)
+            note = updated
+            try await refreshSpace(for: updated)
+            onNoteChanged(updated)
+        } catch {
+            handle(error)
+        }
+    }
+
     private func noteWasEdited() {
         guard note != nil, !autosaveDisabled else { return }
         editGeneration += 1
@@ -249,7 +261,7 @@ final class NoteScreenModel {
     }
 
     private func scheduleDebouncedSave() {
-        if isSaveInFlight {
+        if inFlightSave != nil {
             return
         }
 
@@ -275,10 +287,22 @@ final class NoteScreenModel {
     }
 
     private func saveUntilCurrent() async {
-        guard !isSaveInFlight, !autosaveDisabled else { return }
-        isSaveInFlight = true
+        if let inFlightSave {
+            await inFlightSave.value
+            return
+        }
+        guard !autosaveDisabled else { return }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performSaveLoop()
+        }
+        inFlightSave = task
+        await task.value
+        inFlightSave = nil
+    }
+
+    private func performSaveLoop() async {
         saveState = .saving
-        defer { isSaveInFlight = false }
 
         while savedGeneration < editGeneration, !autosaveDisabled {
             guard let noteSnapshot = note else { return }
@@ -389,9 +413,9 @@ final class NoteScreenModel {
     }
 
     private func refreshSpace(for note: Note) async throws {
-        space = try await workspace.listSpaces()
-            .first { $0.space.id == note.spaceID }?
-            .space
+        let spaces = try await workspace.listSpaces()
+        self.spaces = spaces
+        space = spaces.first { $0.space.id == note.spaceID }?.space
     }
 
     private func handle(_ error: Error) {

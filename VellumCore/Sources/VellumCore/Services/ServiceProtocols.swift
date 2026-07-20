@@ -1,7 +1,11 @@
 import Foundation
 
+public enum NoteListScope: Sendable {
+    case active, trashed, all
+}
+
 public protocol NoteRepository: Sendable {
-    func listNotes() async throws -> [Note]
+    func listNotes(scope: NoteListScope) async throws -> [Note]
     func createNote(title: String) async throws -> Note
     func insertNote(_ note: Note) async throws
     func loadNote(id: UUID) async throws -> Note
@@ -10,6 +14,12 @@ public protocol NoteRepository: Sendable {
     func loadAsset(noteID: UUID, relativePath: String) async throws -> Data?
     func assetSize(noteID: UUID, relativePath: String) async throws -> Int?
     func saveAsset(_ data: Data, noteID: UUID, relativePath: String) async throws
+}
+
+public extension NoteRepository {
+    func listNotes() async throws -> [Note] {
+        try await listNotes(scope: .active)
+    }
 }
 
 public protocol SpaceRepository: Sendable {

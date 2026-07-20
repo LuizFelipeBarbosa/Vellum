@@ -46,6 +46,22 @@ func graphSnapshotFiltersDanglingLinks() async throws {
     #expect(alphaNode.connectionCount == 4)
 }
 
+@Test("Trashed notes are excluded from the graph and backlinks")
+func graphSnapshotFiltersTrashedNotes() async throws {
+    let fixture = try GraphFixture()
+    defer { fixture.cleanup() }
+    let seeded = try await seedGraph(in: fixture)
+    try await fixture.workspace.deleteNote(id: seeded.alpha.id)
+
+    let snapshot = try await fixture.service.snapshot()
+    let backlinks = try await fixture.service.backlinks(noteID: seeded.gamma.id)
+
+    #expect(!snapshot.nodes.contains { $0.id == .note(seeded.alpha.id) })
+    #expect(!snapshot.edges.contains { $0.source == .note(seeded.alpha.id) })
+    #expect(!backlinks.contains { $0.sourceNoteID == seeded.alpha.id })
+    #expect(backlinks.map(\.sourceNoteID) == [seeded.beta.id])
+}
+
 @Test("Multiple sources from one note produce one entity mention edge")
 func graphSnapshotDeduplicatesEntityMentions() async throws {
     let fixture = try GraphFixture()
@@ -157,6 +173,7 @@ private struct GraphFixture {
     let spaces: FileSpaceRepository
     let entities: FileEntityRepository
     let service: KnowledgeGraphService
+    let workspace: WorkspaceService
 
     init() throws {
         root = FileManager.default.temporaryDirectory
@@ -166,6 +183,15 @@ private struct GraphFixture {
         spaces = FileSpaceRepository(rootDirectory: root)
         entities = FileEntityRepository(rootDirectory: root)
         service = KnowledgeGraphService(notes: notes, spaces: spaces, entities: entities)
+        workspace = WorkspaceService(
+            notes: notes,
+            proposals: FileProposalRepository(rootDirectory: root),
+            activity: FileActivityRepository(rootDirectory: root),
+            agent: MockVellumAgent(),
+            spaces: spaces,
+            entities: entities,
+            tasks: FileTaskRepository(rootDirectory: root)
+        )
     }
 
     func cleanup() {

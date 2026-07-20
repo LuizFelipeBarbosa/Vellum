@@ -4,8 +4,17 @@ import SwiftUI
 import VellumCore
 
 enum AppScreen: Hashable {
-    case library, graph, ask
+    case library, graph, ask, trash
     case note(UUID?)
+}
+
+struct Toast: Equatable, Identifiable {
+    let id = UUID()
+    let text: String
+    let actionLabel: String?
+    let action: (@MainActor () -> Void)?
+
+    static func == (lhs: Toast, rhs: Toast) -> Bool { lhs.id == rhs.id }
 }
 
 @MainActor
@@ -15,6 +24,7 @@ final class VellumAppModel {
     let library: LibraryScreenModel
     let graphScreen: GraphScreenModel
     let askScreen: AskScreenModel
+    let trashScreen: TrashScreenModel
     var screen: AppScreen {
         didSet {
             guard screen == .library else { return }
@@ -26,10 +36,11 @@ final class VellumAppModel {
         }
     }
     var currentNote: NoteScreenModel?
-    var toastText: String?
+    var toast: Toast?
     var showAgent = true
     var noteCount = 0
     var openTaskCount = 0
+    var trashCount = 0
     var spaceListings: [SpaceListing] = []
     var activityMessage = "No recent activity"
     var activityCount = 0
@@ -47,6 +58,7 @@ final class VellumAppModel {
         library = LibraryScreenModel(workspace: container.workspace)
         graphScreen = GraphScreenModel(container: container)
         askScreen = AskScreenModel(container: container)
+        trashScreen = TrashScreenModel(workspace: container.workspace)
         #if DEBUG
         if let flagIndex = arguments.firstIndex(of: "-askQuestion"),
            arguments.indices.contains(flagIndex + 1) {
@@ -103,6 +115,7 @@ final class VellumAppModel {
             noteCount = library.summaries.count
             spaceListings = library.spaces
             openTaskCount = try await container.workspace.listTasks().count { !$0.isDone }
+            trashCount = try await container.workspace.listTrashedNotes().count
 
             let events = try await container.workspace.activity(noteID: nil)
             let digest = try await container.workspace.activityDigest(
@@ -151,9 +164,23 @@ final class VellumAppModel {
         if newScreen == .graph {
             await graphScreen.refresh()
         }
+        if newScreen == .trash {
+            await trashScreen.refresh()
+        }
     }
 
     func openNote(_ id: UUID) async {
+        do {
+            let note = try await container.workspace.loadNote(id: id)
+            if note.isTrashed {
+                showToast("This note is in the Trash")
+                return
+            }
+        } catch {
+            library.errorMessage = error.localizedDescription
+            return
+        }
+
         await currentNote?.flushPendingSave()
         currentNote = nil
 
@@ -179,15 +206,73 @@ final class VellumAppModel {
         await navigate(to: .library)
         await library.refresh()
         await refreshStats()
+        notifyTrashed([id])
+    }
+
+    func createSpace(name: String, color: SpaceColor, parentID: UUID?) async {
+        do {
+            _ = try await container.workspace.createSpace(
+                name: name,
+                color: color,
+                parentID: parentID
+            )
+            await library.refresh()
+            await refreshStats()
+        } catch {
+            library.errorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteSpace(_ id: UUID) async {
+        do {
+            try await container.workspace.deleteSpace(id: id)
+            await library.refresh()
+            await refreshStats()
+            await trashScreen.refresh()
+        } catch {
+            library.errorMessage = error.localizedDescription
+        }
     }
 
     func showToast(_ message: String) {
         toastTask?.cancel()
-        toastText = message
+        let newToast = Toast(text: message, actionLabel: nil, action: nil)
+        toast = newToast
         toastTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2.4))
             guard !Task.isCancelled else { return }
-            self?.toastText = nil
+            guard self?.toast?.id == newToast.id else { return }
+            self?.toast = nil
+        }
+    }
+
+    func showToast(
+        _ message: String,
+        actionLabel: String,
+        action: @escaping @MainActor () -> Void
+    ) {
+        toastTask?.cancel()
+        let newToast = Toast(text: message, actionLabel: actionLabel, action: action)
+        toast = newToast
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            guard self?.toast?.id == newToast.id else { return }
+            self?.toast = nil
+        }
+    }
+
+    func notifyTrashed(_ ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        let text = ids.count == 1 ? "Moved to Trash" : "Moved \(ids.count) notes to Trash"
+        showToast(text, actionLabel: "Undo") { [weak self] in
+            guard let self else { return }
+            Task {
+                try? await self.container.workspace.restoreNotes(ids: ids)
+                await self.library.refresh()
+                await self.refreshStats()
+                await self.trashScreen.refresh()
+            }
         }
     }
 

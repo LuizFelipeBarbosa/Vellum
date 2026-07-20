@@ -99,6 +99,9 @@ public enum ActivityKind: String, Codable, Sendable {
     case noteCreated
     case noteUpdated
     case noteDeleted
+    case noteTrashed
+    case noteRestored
+    case notePurged
     case analysisRequested
     case proposalAccepted
     case proposalRejected
@@ -109,6 +112,7 @@ public enum ActivityKind: String, Codable, Sendable {
     case taskCompleted
     case entityExtracted
     case spaceCreated
+    case spaceDeleted
     case questionAnswered
     case workspaceSeeded
     case unknown

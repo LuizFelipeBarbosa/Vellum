@@ -27,6 +27,26 @@ func noteLifecycle() async throws {
     }
 }
 
+@Test("Note listing scopes filter active and trashed notes")
+func noteListingScopes() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let active = try await repository.createNote(title: "Active")
+    var trashed = try await repository.createNote(title: "Trashed")
+    trashed.deletedAt = Date(timeIntervalSince1970: 10)
+    try await repository.saveNote(trashed)
+
+    let activeNotes = try await repository.listNotes(scope: .active)
+    let trashedNotes = try await repository.listNotes(scope: .trashed)
+    let allNotes = try await repository.listNotes(scope: .all)
+
+    #expect(activeNotes.map(\.id) == [active.id])
+    #expect(trashedNotes.map(\.id) == [trashed.id])
+    #expect(Set(allNotes.map(\.id)) == Set([active.id, trashed.id]))
+    #expect(try await repository.listNotes().map(\.id) == activeNotes.map(\.id))
+}
+
 @Test("Page plain text survives save and load")
 func pagePlainTextRoundTrip() async throws {
     let root = try makeTemporaryDirectory()

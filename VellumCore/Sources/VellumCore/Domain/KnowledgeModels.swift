@@ -24,12 +24,14 @@ public struct Space: Identifiable, Codable, Sendable, Equatable {
     public var name: String
     public var color: SpaceColor
     public let createdAt: Date
+    public var parentID: UUID?
 
-    public init(id: UUID, name: String, color: SpaceColor, createdAt: Date) {
+    public init(id: UUID, name: String, color: SpaceColor, createdAt: Date, parentID: UUID? = nil) {
         self.id = id
         self.name = name
         self.color = color
         self.createdAt = createdAt
+        self.parentID = parentID
     }
 }
 

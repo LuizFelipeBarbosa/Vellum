@@ -41,6 +41,9 @@ final class LibraryScreenModel {
     var selectedSpaceID: UUID?
     var isLoading = false
     var errorMessage: String?
+    var isSelecting = false
+    var selectedIDs: Set<UUID> = []
+    var isConfirmingBulkDelete = false
 
     var renamingNoteID: UUID?
     var renameDraft = ""
@@ -63,6 +66,7 @@ final class LibraryScreenModel {
                !refreshedSpaces.contains(where: { $0.space.id == selectedSpaceID }) {
                 self.selectedSpaceID = nil
             }
+            selectedIDs = selectedIDs.intersection(Set(summaries.map(\.id)))
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -71,10 +75,16 @@ final class LibraryScreenModel {
 
     var cards: [LibraryCardData] {
         let spacesByID = Dictionary(uniqueKeysWithValues: spaces.map { ($0.space.id, $0.space) })
+        let allowedSpaceIDs: Set<UUID>? = selectedSpaceID.map { selected in
+            Set([selected] + spaces.filter { $0.space.parentID == selected }.map(\.space.id))
+        }
 
         return summaries.compactMap { summary in
             guard filter == nil || summary.noteType == filter else { return nil }
-            guard selectedSpaceID == nil || summary.spaceID == selectedSpaceID else { return nil }
+            if let allowedSpaceIDs {
+                guard let spaceID = summary.spaceID,
+                      allowedSpaceIDs.contains(spaceID) else { return nil }
+            }
 
             let treatment = treatment(for: summary)
             let descriptor = descriptor(for: treatment, summary: summary)
@@ -134,6 +144,48 @@ final class LibraryScreenModel {
         }
     }
 
+    func beginSelecting() {
+        isSelecting = true
+    }
+
+    func endSelecting() {
+        isSelecting = false
+        selectedIDs = []
+        isConfirmingBulkDelete = false
+    }
+
+    func toggleSelection(_ id: UUID) {
+        if selectedIDs.contains(id) {
+            selectedIDs.remove(id)
+        } else {
+            selectedIDs.insert(id)
+        }
+    }
+
+    func moveSelected(toSpaceID spaceID: UUID?) async {
+        do {
+            try await workspace.assignNotes(ids: Array(selectedIDs), toSpaceID: spaceID)
+            await refresh()
+            endSelecting()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func deleteSelected() async -> [UUID] {
+        let ids = Array(selectedIDs)
+
+        do {
+            let trashedIDs = try await workspace.deleteNotes(ids: ids)
+            await refresh()
+            endSelecting()
+            return trashedIDs
+        } catch {
+            errorMessage = error.localizedDescription
+            return []
+        }
+    }
+
     func beginRename(_ summary: LibraryCardData) {
         renamingNoteID = summary.id
         renameDraft = summary.title
@@ -141,13 +193,11 @@ final class LibraryScreenModel {
 
     func cancelRename() {
         renamingNoteID = nil
-        renameDraft = ""
     }
 
-    func commitRename() async {
-        guard let noteID = renamingNoteID else { return }
+    func commitRename(noteID: UUID) async {
         let newTitle = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        cancelRename()
+        renamingNoteID = nil
 
         do {
             var note = try await workspace.loadNote(id: noteID)
@@ -167,15 +217,16 @@ final class LibraryScreenModel {
         notePendingDeletionID = nil
     }
 
-    func confirmDelete() async {
-        guard let noteID = notePendingDeletionID else { return }
+    func confirmDelete(_ noteID: UUID) async -> UUID? {
         notePendingDeletionID = nil
 
         do {
             try await workspace.deleteNote(id: noteID)
             await refresh()
+            return noteID
         } catch {
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 

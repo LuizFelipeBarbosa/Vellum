@@ -184,6 +184,168 @@ func requestAnalysisCarriesKnowledgeContext() async throws {
     #expect(context.canonicalText == "Context text")
 }
 
+@Test("Soft-deleted notes are hidden from workspace knowledge listings")
+func softDeleteHidesNoteFromWorkspaceKnowledge() async throws {
+    let agent = CapturingAgent()
+    let fixture = try WorkspaceFixture(agent: agent)
+    defer { fixture.cleanup() }
+    let space = try await fixture.service.createSpace(name: "Research", color: .blue)
+    var current = try await fixture.service.createNote(title: "Current")
+    current.pages[0].plainText = "Current context"
+    try await fixture.notes.saveNote(current)
+    let trashed = try await fixture.service.createNote(title: "Trashed")
+    try await fixture.service.assignNotes(ids: [current.id, trashed.id], toSpaceID: space.id)
+
+    try await fixture.service.deleteNote(id: trashed.id)
+
+    #expect(try await fixture.service.loadNote(id: trashed.id).deletedAt != nil)
+    #expect(try await fixture.service.listNotes().map(\.id) == [current.id])
+    #expect(try await fixture.service.listNoteSummaries().map(\.id) == [current.id])
+    #expect(try await fixture.service.listSpaces().first?.noteCount == 1)
+
+    _ = try await fixture.service.requestAnalysis(noteID: current.id)
+    let context = try #require(await agent.context())
+    #expect(context.otherNotes.isEmpty)
+}
+
+@Test("Restoring a note returns it to active listings")
+func restoreNoteRoundTrip() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    let note = try await fixture.service.createNote(title: "Restore")
+    try await fixture.service.deleteNote(id: note.id)
+
+    let restored = try await fixture.service.restoreNote(id: note.id)
+
+    #expect(restored.deletedAt == nil)
+    #expect(try await fixture.service.loadNote(id: note.id).deletedAt == nil)
+    #expect(try await fixture.service.listNotes().map(\.id) == [note.id])
+}
+
+@Test("Saving a stale note preserves its on-disk deletion state")
+func saveNotePreservesDeletedAt() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    let stale = try await fixture.service.createNote(title: "Stale")
+    try await fixture.service.deleteNote(id: stale.id)
+
+    _ = try await fixture.service.saveNote(stale)
+
+    #expect(try await fixture.service.loadNote(id: stale.id).deletedAt != nil)
+    #expect(try await fixture.service.listNotes().isEmpty)
+}
+
+@Test("Purging a note removes its package, tasks, and entity sources")
+func purgeNoteCascades() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    let note = try await fixture.service.createNote(title: "Purge")
+    let task = TaskItem(
+        id: UUID(),
+        noteID: note.id,
+        pageID: nil,
+        text: "Remove",
+        isDone: false,
+        createdAt: Date(),
+        completedAt: nil
+    )
+    let entity = Entity(
+        id: UUID(),
+        name: "Remove",
+        kind: .topic,
+        sources: [EntitySource(noteID: note.id, pageID: nil, excerpt: nil)],
+        createdAt: Date()
+    )
+    try await fixture.tasks.save(task)
+    try await fixture.entities.save(entity)
+    try await fixture.service.deleteNote(id: note.id)
+
+    try await fixture.service.purgeNote(id: note.id)
+
+    #expect(try await fixture.tasks.list().isEmpty)
+    #expect(try await fixture.entities.list().isEmpty)
+    await #expect(throws: VellumError.noteNotFound(note.id)) {
+        try await fixture.service.loadNote(id: note.id)
+    }
+}
+
+@Test("Emptying Trash permanently removes every trashed note")
+func emptyTrashPurgesTrashedNotes() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    let first = try await fixture.service.createNote(title: "First")
+    let second = try await fixture.service.createNote(title: "Second")
+    try await fixture.service.deleteNotes(ids: [first.id, second.id])
+
+    try await fixture.service.emptyTrash()
+
+    #expect(try await fixture.service.listTrashedNotes().isEmpty)
+    await #expect(throws: VellumError.noteNotFound(first.id)) {
+        try await fixture.service.loadNote(id: first.id)
+    }
+    await #expect(throws: VellumError.noteNotFound(second.id)) {
+        try await fixture.service.loadNote(id: second.id)
+    }
+}
+
+@Test("Bulk note operations assign, trash, and restore notes")
+func bulkNoteOperations() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    let space = try await fixture.service.createSpace(name: "Bulk", color: .green)
+    let first = try await fixture.service.createNote(title: "First")
+    let second = try await fixture.service.createNote(title: "Second")
+    try await fixture.service.assignNotes(ids: [first.id, second.id], toSpaceID: space.id)
+
+    #expect(try await fixture.service.loadNote(id: first.id).spaceID == space.id)
+    #expect(try await fixture.service.loadNote(id: second.id).spaceID == space.id)
+
+    try await fixture.service.deleteNotes(ids: [first.id, second.id])
+    #expect(Set(try await fixture.service.listTrashedNotes().map(\.id)) == Set([first.id, second.id]))
+
+    try await fixture.service.purgeNote(id: first.id)
+    try await fixture.service.restoreNotes(ids: [first.id, UUID(), second.id])
+
+    #expect(try await fixture.service.loadNote(id: second.id).deletedAt == nil)
+    #expect(try await fixture.service.listNotes().map(\.id) == [second.id])
+}
+
+@Test("Bulk trash skips already trashed and missing notes")
+func bulkTrashSkipsAlreadyTrashedAndMissingNotes() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    let first = try await fixture.service.createNote(title: "First")
+    let second = try await fixture.service.createNote(title: "Second")
+    let third = try await fixture.service.createNote(title: "Third")
+    try await fixture.service.deleteNote(id: first.id)
+    try await fixture.service.purgeNote(id: second.id)
+
+    let trashedIDs = try await fixture.service.deleteNotes(ids: [first.id, second.id, third.id])
+
+    #expect(trashedIDs == [third.id])
+    #expect(try await fixture.service.loadNote(id: third.id).isTrashed)
+}
+
+@Test("Trash lifecycle records dedicated activity kinds")
+func trashLifecycleActivity() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    let note = try await fixture.service.createNote(title: "Activity")
+
+    try await fixture.service.deleteNote(id: note.id)
+    var activity = try await fixture.service.activity(noteID: note.id)
+    #expect(activity.contains { $0.kind.rawValue == ActivityKind.noteTrashed.rawValue })
+
+    _ = try await fixture.service.restoreNote(id: note.id)
+    activity = try await fixture.service.activity(noteID: note.id)
+    #expect(activity.contains { $0.kind.rawValue == ActivityKind.noteRestored.rawValue })
+
+    try await fixture.service.deleteNote(id: note.id)
+    try await fixture.service.purgeNote(id: note.id)
+    activity = try await fixture.service.activity(noteID: nil)
+    #expect(activity.contains { $0.kind.rawValue == ActivityKind.notePurged.rawValue })
+}
+
 @Test("Note summaries expose preview, ink, links, space, and deterministic order")
 func workspaceNoteSummaries() async throws {
     let fixture = try WorkspaceFixture()
@@ -262,7 +424,7 @@ private struct WorkspaceFixture {
     let tasks: FileTaskRepository
     let service: WorkspaceService
 
-    init() throws {
+    init(agent: any VellumAgent = MockVellumAgent()) throws {
         let root = try makeWorkspaceTemporaryDirectory()
         self.root = root
         notes = FileNoteRepository(rootDirectory: root)
@@ -274,7 +436,7 @@ private struct WorkspaceFixture {
             notes: notes,
             proposals: proposals,
             activity: FileActivityRepository(rootDirectory: root),
-            agent: MockVellumAgent(),
+            agent: agent,
             spaces: spaces,
             entities: entities,
             tasks: tasks

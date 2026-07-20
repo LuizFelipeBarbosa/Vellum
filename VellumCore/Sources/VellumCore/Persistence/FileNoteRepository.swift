@@ -117,7 +117,7 @@ public actor FileNoteRepository: NoteRepository {
         self.rootDirectory = rootDirectory
     }
 
-    public func listNotes() async throws -> [Note] {
+    public func listNotes(scope: NoteListScope) async throws -> [Note] {
         let packages = try FilePersistence.packageDirectories(rootDirectory: rootDirectory)
         var notes: [Note] = []
         var failures: [String] = []
@@ -139,7 +139,17 @@ public actor FileNoteRepository: NoteRepository {
             )
         }
 
-        return notes.sorted {
+        let filteredNotes: [Note]
+        switch scope {
+        case .active:
+            filteredNotes = notes.filter { !$0.isTrashed }
+        case .trashed:
+            filteredNotes = notes.filter(\.isTrashed)
+        case .all:
+            filteredNotes = notes
+        }
+
+        return filteredNotes.sorted {
             if $0.updatedAt == $1.updatedAt {
                 return $0.id.uuidString < $1.id.uuidString
             }

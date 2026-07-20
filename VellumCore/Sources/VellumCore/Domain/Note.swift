@@ -9,7 +9,7 @@ public enum NoteType: String, Codable, Sendable, CaseIterable {
 }
 
 public struct Note: Identifiable, Codable, Sendable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public let id: UUID
     public var schemaVersion: Int
@@ -22,6 +22,9 @@ public struct Note: Identifiable, Codable, Sendable {
     public var noteType: NoteType
     public var spaceID: UUID?
     public var links: [NoteLink]
+    public var deletedAt: Date?
+
+    public var isTrashed: Bool { deletedAt != nil }
 
     public init(
         id: UUID,
@@ -34,7 +37,8 @@ public struct Note: Identifiable, Codable, Sendable {
         pages: [NotePage],
         noteType: NoteType = .note,
         spaceID: UUID? = nil,
-        links: [NoteLink] = []
+        links: [NoteLink] = [],
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.schemaVersion = schemaVersion
@@ -47,6 +51,7 @@ public struct Note: Identifiable, Codable, Sendable {
         self.noteType = noteType
         self.spaceID = spaceID
         self.links = links
+        self.deletedAt = deletedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -62,6 +67,7 @@ public struct Note: Identifiable, Codable, Sendable {
         noteType = try container.decodeIfPresent(NoteType.self, forKey: .noteType) ?? .note
         spaceID = try container.decodeIfPresent(UUID.self, forKey: .spaceID)
         links = try container.decodeIfPresent([NoteLink].self, forKey: .links) ?? []
+        deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
     }
 }
 

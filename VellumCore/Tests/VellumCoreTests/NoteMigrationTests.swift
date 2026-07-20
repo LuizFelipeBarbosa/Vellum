@@ -10,6 +10,7 @@ func v1ManifestDefaults() throws {
     object.removeValue(forKey: "noteType")
     object.removeValue(forKey: "spaceID")
     object.removeValue(forKey: "links")
+    object.removeValue(forKey: "deletedAt")
     let data = try JSONSerialization.data(withJSONObject: object)
 
     let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
@@ -17,6 +18,22 @@ func v1ManifestDefaults() throws {
     #expect(decoded.noteType == .note)
     #expect(decoded.spaceID == nil)
     #expect(decoded.links.isEmpty)
+    #expect(decoded.deletedAt == nil)
+    #expect(!decoded.isTrashed)
+}
+
+@Test("A v2 manifest decodes with soft-delete defaults")
+func v2ManifestDefaults() throws {
+    let original = migrationNote(schemaVersion: 2)
+    let encoded = try FilePersistence.encoder().encode(original)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "deletedAt")
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
+    #expect(decoded.schemaVersion == 2)
+    #expect(decoded.deletedAt == nil)
+    #expect(!decoded.isTrashed)
 }
 
 @Test("A full v2 note round trips every knowledge field")
@@ -39,7 +56,7 @@ func v2NoteRoundTrip() throws {
     #expect(decoded.links == [link])
 }
 
-@Test("Saving a v1 note normalizes its schema version to v2")
+@Test("Saving a v1 note normalizes its schema version to v3")
 func saveNormalizesSchemaVersion() async throws {
     let root = try migrationTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -49,7 +66,7 @@ func saveNormalizesSchemaVersion() async throws {
 
     try await repository.saveNote(note)
 
-    #expect(try await repository.loadNote(id: note.id).schemaVersion == 2)
+    #expect(try await repository.loadNote(id: note.id).schemaVersion == 3)
 }
 
 @Test("A future inserted manifest is rejected")
@@ -57,10 +74,10 @@ func insertedFutureSchemaIsRejected() async throws {
     let root = try migrationTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
-    let note = migrationNote(schemaVersion: 3)
+    let note = migrationNote(schemaVersion: 4)
     try await repository.insertNote(note)
 
-    await #expect(throws: VellumError.unsupportedSchemaVersion(found: 3, supported: 2)) {
+    await #expect(throws: VellumError.unsupportedSchemaVersion(found: 4, supported: 3)) {
         try await repository.loadNote(id: note.id)
     }
 }

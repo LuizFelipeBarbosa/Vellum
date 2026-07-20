@@ -47,7 +47,9 @@ public actor WorkspaceService {
 
     @discardableResult
     public func saveNote(_ note: Note) async throws -> Note {
+        let persisted = try await notes.loadNote(id: note.id)
         var saved = note
+        saved.deletedAt = persisted.deletedAt
         saved.updatedAt = Date()
         saved.revision += 1
         try await notes.saveNote(saved)
@@ -60,6 +62,56 @@ public actor WorkspaceService {
     }
 
     public func deleteNote(id: UUID) async throws {
+        let note = try await notes.loadNote(id: id)
+        if note.isTrashed {
+            return
+        }
+        try await trashNote(note)
+    }
+
+    @discardableResult
+    public func deleteNotes(ids: [UUID]) async throws -> [UUID] {
+        var trashedIDs: [UUID] = []
+        for id in ids {
+            let note: Note
+            do {
+                note = try await notes.loadNote(id: id)
+            } catch VellumError.noteNotFound {
+                continue
+            }
+            if note.isTrashed {
+                continue
+            }
+            try await trashNote(note)
+            trashedIDs.append(id)
+        }
+        return trashedIDs
+    }
+
+    @discardableResult
+    public func restoreNote(id: UUID) async throws -> Note {
+        var note = try await notes.loadNote(id: id)
+        note.deletedAt = nil
+        try await notes.saveNote(note)
+        try await log(
+            noteID: id,
+            kind: .noteRestored,
+            message: "Restored note \(id.uuidString) from Trash."
+        )
+        return note
+    }
+
+    public func restoreNotes(ids: [UUID]) async throws {
+        for id in ids {
+            do {
+                try await restoreNote(id: id)
+            } catch VellumError.noteNotFound {
+                continue
+            }
+        }
+    }
+
+    public func purgeNote(id: UUID) async throws {
         for task in try await tasks.list() where task.noteID == id {
             try await tasks.delete(id: task.id)
         }
@@ -72,7 +124,26 @@ public actor WorkspaceService {
             }
         }
         try await notes.deleteNote(id: id)
-        try await log(noteID: id, kind: .noteDeleted, message: "Deleted note \(id.uuidString).")
+        try await log(
+            noteID: id,
+            kind: .notePurged,
+            message: "Permanently deleted note \(id.uuidString)."
+        )
+    }
+
+    public func emptyTrash() async throws {
+        for note in try await listTrashedNotes() {
+            try await purgeNote(id: note.id)
+        }
+    }
+
+    public func listTrashedNotes() async throws -> [Note] {
+        try await notes.listNotes(scope: .trashed).sorted {
+            if $0.deletedAt == $1.deletedAt {
+                return $0.id.uuidString < $1.id.uuidString
+            }
+            return ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast)
+        }
     }
 
     public func listSpaces() async throws -> [SpaceListing] {
@@ -86,11 +157,55 @@ public actor WorkspaceService {
     }
 
     @discardableResult
-    public func createSpace(name: String, color: SpaceColor) async throws -> Space {
-        let space = Space(id: UUID(), name: name, color: color, createdAt: Date())
+    public func createSpace(
+        name: String,
+        color: SpaceColor,
+        parentID: UUID? = nil
+    ) async throws -> Space {
+        if let parentID {
+            let allSpaces = try await spaces.list()
+            guard let parent = allSpaces.first(where: { $0.id == parentID }) else {
+                throw VellumError.spaceNotFound(parentID)
+            }
+            guard parent.parentID == nil else {
+                throw VellumError.invalidSubspaceNesting
+            }
+        }
+        let space = Space(
+            id: UUID(),
+            name: name,
+            color: color,
+            createdAt: Date(),
+            parentID: parentID
+        )
         try await spaces.save(space)
         try await log(noteID: nil, kind: .spaceCreated, message: "Created space '\(name)'.")
         return space
+    }
+
+    public func deleteSpace(id: UUID) async throws {
+        let allSpaces = try await spaces.list()
+        guard let target = allSpaces.first(where: { $0.id == id }) else {
+            throw VellumError.spaceNotFound(id)
+        }
+        let childIDs = allSpaces.filter { $0.parentID == id }.map(\.id)
+        let doomedIDs = Set([id] + childIDs)
+        let doomedNotes = try await notes.listNotes().filter { note in
+            guard let spaceID = note.spaceID else { return false }
+            return doomedIDs.contains(spaceID)
+        }
+
+        for note in doomedNotes {
+            try await trashNote(note)
+        }
+        for doomedID in childIDs + [id] {
+            try await spaces.delete(id: doomedID)
+        }
+        try await log(
+            noteID: nil,
+            kind: .spaceDeleted,
+            message: "Deleted space '\(target.name)' (\(childIDs.count) subspaces, \(doomedNotes.count) notes trashed)."
+        )
     }
 
     @discardableResult
@@ -104,6 +219,12 @@ public actor WorkspaceService {
             message: "Changed the space for note \(note.id.uuidString)."
         )
         return saved
+    }
+
+    public func assignNotes(ids: [UUID], toSpaceID: UUID?) async throws {
+        for id in ids {
+            try await assignNote(id: id, toSpaceID: toSpaceID)
+        }
     }
 
     @discardableResult
@@ -350,7 +471,13 @@ public actor WorkspaceService {
             if let existing {
                 spaceID = existing.id
             } else {
-                let space = Space(id: UUID(), name: spaceName, color: color, createdAt: Date())
+                let space = Space(
+                    id: UUID(),
+                    name: spaceName,
+                    color: color,
+                    createdAt: Date(),
+                    parentID: nil
+                )
                 try await spaces.save(space)
                 try await log(
                     noteID: nil,
@@ -462,6 +589,17 @@ public actor WorkspaceService {
 
     public func activity(noteID: UUID?) async throws -> [ActivityEvent] {
         try await activityRepository.list(noteID: noteID)
+    }
+
+    private func trashNote(_ note: Note) async throws {
+        var trashedNote = note
+        trashedNote.deletedAt = Date()
+        try await notes.saveNote(trashedNote)
+        try await log(
+            noteID: note.id,
+            kind: .noteTrashed,
+            message: "Moved note \(note.id.uuidString) to Trash."
+        )
     }
 
     private func log(noteID: UUID?, kind: ActivityKind, message: String) async throws {

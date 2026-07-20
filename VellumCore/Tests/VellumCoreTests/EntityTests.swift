@@ -78,8 +78,13 @@ func deleteNotePrunesEntities() async throws {
     try await fixture.entities.save(entity)
 
     try await fixture.service.deleteNote(id: first.id)
+    #expect(
+        try await fixture.entities.list().first?.sources.map(\.noteID)
+            == [first.id, second.id]
+    )
+    try await fixture.service.purgeNote(id: first.id)
     #expect(try await fixture.entities.list().first?.sources.map(\.noteID) == [second.id])
-    try await fixture.service.deleteNote(id: second.id)
+    try await fixture.service.purgeNote(id: second.id)
     #expect(try await fixture.entities.list().isEmpty)
 }
 

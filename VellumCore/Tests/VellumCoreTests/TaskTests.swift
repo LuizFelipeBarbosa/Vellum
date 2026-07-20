@@ -103,6 +103,10 @@ func deleteNotePrunesTasks() async throws {
 
     try await fixture.service.deleteNote(id: removedNote.id)
 
+    #expect(Set(try await fixture.tasks.list().map(\.id)) == Set([removed.id, kept.id]))
+
+    try await fixture.service.purgeNote(id: removedNote.id)
+
     #expect(try await fixture.tasks.list().map(\.id) == [kept.id])
 }
 

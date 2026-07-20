@@ -26,6 +26,35 @@ func askSingleNoteMatch() async throws {
     #expect(citationSegments == [citation.index])
 }
 
+@Test("Trashed notes are excluded from Ask sources")
+func askExcludesTrashedNotes() async throws {
+    let root = try makeAskTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let notes = FileNoteRepository(rootDirectory: root)
+    let workspace = WorkspaceService(
+        notes: notes,
+        proposals: FileProposalRepository(rootDirectory: root),
+        activity: FileActivityRepository(rootDirectory: root),
+        agent: MockVellumAgent(),
+        spaces: FileSpaceRepository(rootDirectory: root),
+        entities: FileEntityRepository(rootDirectory: root),
+        tasks: FileTaskRepository(rootDirectory: root)
+    )
+    var active = try await workspace.createNote(title: "Active")
+    active.pages[0].plainText = "Zephyr appears in this active note."
+    try await notes.saveNote(active)
+    var trashed = try await workspace.createNote(title: "Trashed")
+    trashed.pages[0].plainText = "Zephyr appears in this trashed note."
+    try await notes.saveNote(trashed)
+    try await workspace.deleteNote(id: trashed.id)
+    let service = AskService(notes: notes, answerer: MockAskAnswerer(), activity: nil)
+
+    let answer = try await service.ask("What do my notes say about zephyr?")
+
+    #expect(answer.citations.map(\.noteID) == [active.id])
+    #expect(!answer.citations.contains { $0.noteID == trashed.id })
+}
+
 @Test("Multiple matching sources retain deterministic ranking and content")
 func askRankingIsStable() async throws {
     let firstNoteID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))

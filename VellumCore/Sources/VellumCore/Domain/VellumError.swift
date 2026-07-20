@@ -2,6 +2,8 @@ import Foundation
 
 public enum VellumError: Error, Equatable, Sendable, LocalizedError {
     case noteNotFound(UUID)
+    case spaceNotFound(UUID)
+    case invalidSubspaceNesting
     case corruptManifest(UUID)
     case unsupportedSchemaVersion(found: Int, supported: Int)
     case invalidAssetPath(String)
@@ -14,6 +16,10 @@ public enum VellumError: Error, Equatable, Sendable, LocalizedError {
         switch self {
         case .noteNotFound(let id):
             "Note \(id.uuidString) was not found."
+        case .spaceNotFound(let id):
+            "Space \(id.uuidString) was not found."
+        case .invalidSubspaceNesting:
+            "Subspaces cannot contain their own subspaces."
         case .corruptManifest(let id):
             "The manifest for note \(id.uuidString) is corrupt."
         case .unsupportedSchemaVersion(let found, let supported):

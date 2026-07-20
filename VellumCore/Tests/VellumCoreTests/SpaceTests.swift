@@ -53,6 +53,118 @@ func createAndListSpaces() async throws {
     #expect(try await fixture.service.activity(noteID: nil).contains { $0.kind == .spaceCreated })
 }
 
+@Test("Space repository decodes legacy spaces without parent IDs")
+func legacySpaceWithoutParentIDDecodes() async throws {
+    let fixture = try SpaceFixture()
+    defer { fixture.cleanup() }
+    let id = UUID()
+    let json = """
+        [
+          {
+            "color": "blue",
+            "createdAt": "2024-01-01T00:00:00.000Z",
+            "id": "\(id.uuidString)",
+            "name": "Legacy"
+          }
+        ]
+        """
+    try Data(json.utf8).write(to: fixture.root.appendingPathComponent("spaces.json"))
+
+    let listed = try await fixture.spaces.list()
+
+    #expect(listed.count == 1)
+    #expect(listed[0].id == id)
+    #expect(listed[0].parentID == nil)
+}
+
+@Test("Creating a subspace stores its parent ID")
+func createSubspaceStoresParentID() async throws {
+    let fixture = try SpaceFixture()
+    defer { fixture.cleanup() }
+    let root = try await fixture.service.createSpace(name: "Root", color: .blue)
+
+    let child = try await fixture.service.createSpace(
+        name: "Child",
+        color: .teal,
+        parentID: root.id
+    )
+
+    #expect(child.parentID == root.id)
+    #expect(try await fixture.spaces.list().first { $0.id == child.id }?.parentID == root.id)
+}
+
+@Test("Subspaces cannot contain subspaces")
+func subspaceNestingIsRejected() async throws {
+    let fixture = try SpaceFixture()
+    defer { fixture.cleanup() }
+    let root = try await fixture.service.createSpace(name: "Root", color: .blue)
+    let child = try await fixture.service.createSpace(
+        name: "Child",
+        color: .teal,
+        parentID: root.id
+    )
+
+    await #expect(throws: VellumError.invalidSubspaceNesting) {
+        try await fixture.service.createSpace(
+            name: "Grandchild",
+            color: .green,
+            parentID: child.id
+        )
+    }
+}
+
+@Test("Creating a subspace requires an existing parent")
+func missingSubspaceParentIsRejected() async throws {
+    let fixture = try SpaceFixture()
+    defer { fixture.cleanup() }
+    let missingID = UUID()
+
+    await #expect(throws: VellumError.spaceNotFound(missingID)) {
+        try await fixture.service.createSpace(
+            name: "Orphan",
+            color: .gray,
+            parentID: missingID
+        )
+    }
+}
+
+@Test("Deleting a space removes subspaces and trashes contained notes")
+func deleteSpaceCascadesToSubspacesAndNotes() async throws {
+    let fixture = try SpaceFixture()
+    defer { fixture.cleanup() }
+    let parent = try await fixture.service.createSpace(name: "Parent", color: .purple)
+    let child = try await fixture.service.createSpace(
+        name: "Child",
+        color: .orange,
+        parentID: parent.id
+    )
+    let parentNote = try await fixture.service.createNote(title: "Parent note")
+    let childNote = try await fixture.service.createNote(title: "Child note")
+    _ = try await fixture.service.assignNote(id: parentNote.id, toSpaceID: parent.id)
+    _ = try await fixture.service.assignNote(id: childNote.id, toSpaceID: child.id)
+
+    try await fixture.service.deleteSpace(id: parent.id)
+
+    #expect(try await fixture.spaces.list().isEmpty)
+    let trashedIDs = Set(try await fixture.service.listTrashedNotes().map(\.id))
+    #expect(trashedIDs == Set([parentNote.id, childNote.id]))
+    let activeIDs = Set(try await fixture.service.listNotes().map(\.id))
+    #expect(!activeIDs.contains(parentNote.id))
+    #expect(!activeIDs.contains(childNote.id))
+    #expect(try await fixture.service.activity(noteID: nil).contains { $0.kind == .spaceDeleted })
+}
+
+@Test("Deleting an unknown space reports space not found")
+func deleteUnknownSpaceIsRejected() async throws {
+    let fixture = try SpaceFixture()
+    defer { fixture.cleanup() }
+    let missingID = UUID()
+
+    await #expect(throws: VellumError.spaceNotFound(missingID)) {
+        try await fixture.service.deleteSpace(id: missingID)
+    }
+}
+
 @Test("Assign note bumps revision and records filing activity")
 func assignNoteToSpace() async throws {
     let fixture = try SpaceFixture()
@@ -106,6 +218,12 @@ func unknownActivityKindIsTolerated() throws {
     let decoded = try JSONDecoder().decode(ActivityKind.self, from: Data("\"futureKind\"".utf8))
     #expect(decoded == .unknown)
     #expect(String(decoding: try JSONEncoder().encode(decoded), as: UTF8.self) == "\"unknown\"")
+
+    let spaceDeleted = try JSONDecoder().decode(
+        ActivityKind.self,
+        from: JSONEncoder().encode(ActivityKind.spaceDeleted)
+    )
+    #expect(spaceDeleted == .spaceDeleted)
 }
 
 private struct SpaceFixture {

@@ -35,6 +35,8 @@ struct VellumRootView: View {
                         VellumGraphView(model: model)
                     case .ask:
                         VellumAskView(model: model)
+                    case .trash:
+                        VellumTrashView(model: model)
                     }
                 }
                 .id(model.screen)
@@ -44,8 +46,18 @@ struct VellumRootView: View {
                 ))
             }
 
-            if let toast = model.toastText {
-                Text(toast)
+            if let toast = model.toast {
+                HStack(spacing: 14) {
+                    Text(toast.text)
+                    if let actionLabel = toast.actionLabel {
+                        Button(actionLabel) {
+                            toast.action?()
+                            model.toast = nil
+                        }
+                        .fontWeight(.semibold)
+                        .buttonStyle(.plain)
+                    }
+                }
                     .font(.system(size: 13))
                     .foregroundStyle(VellumTheme.paper)
                     .padding(.horizontal, 18)
@@ -66,7 +78,7 @@ struct VellumRootView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: model.screen)
-        .animation(.easeOut(duration: 0.2), value: model.toastText)
+        .animation(.easeOut(duration: 0.2), value: model.toast)
     }
 
     private var showsSidebar: Bool {
