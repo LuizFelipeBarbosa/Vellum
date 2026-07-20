@@ -71,7 +71,7 @@ struct VellumSidebarView: View {
             }
 
             HStack {
-                Text("SPACES · ORGANIZED FOR YOU")
+                Text("SPACES")
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.99)
                 Spacer()
