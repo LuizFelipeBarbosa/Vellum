@@ -1,0 +1,433 @@
+import SwiftUI
+import UIKit
+import VellumCore
+
+struct ToolOptionsPopover: View {
+    let tool: ToolID
+    let store: ToolPreferencesStore
+
+    var body: some View {
+        Group {
+            switch tool {
+            case .pen, .pencil, .highlighter:
+                InkToolOptionsView(tool: tool, store: store)
+            case .eraser:
+                EraserOptionsView(store: store)
+            case .select:
+                SelectionOptionsView(store: store)
+            case .text:
+                TextOptionsView(store: store)
+            }
+        }
+    }
+}
+
+struct InkToolOptionsView: View {
+    let tool: ToolID
+    let store: ToolPreferencesStore
+
+    var body: some View {
+        let config = tool.inkConfigKeyPath.map { store.preferences[keyPath: $0] }
+            ?? store.preferences.pen
+        let widthRange = NoteToolFactory.widthRange(for: config.style)
+        let presetWidths = [
+            widthRange.lowerBound,
+            (widthRange.lowerBound + widthRange.upperBound) / 2,
+            widthRange.upperBound,
+        ]
+
+        VStack(alignment: .leading, spacing: 14) {
+            Text("\(tool.displayName) Options")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(VellumTheme.ink)
+
+            OptionsSectionCaption("Style")
+
+            Picker("Style", selection: styleBinding) {
+                ForEach(
+                    Array(NoteToolFactory.validStyles(for: tool).enumerated()),
+                    id: \.offset
+                ) { _, style in
+                    Text(style.shortLabel)
+                        .tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Ink style")
+
+            OptionsDivider()
+
+            OptionsSectionCaption("Width")
+
+            HStack(spacing: 12) {
+                Slider(value: widthBinding, in: widthRange)
+                    .accessibilityLabel("Stroke width")
+                    .accessibilityValue("\(Int(config.width.rounded())) points")
+
+                Capsule()
+                    .fill(config.color.swiftUIColor)
+                    .frame(width: 34, height: strokePreviewHeight(for: config))
+                    .frame(width: 38, height: 16)
+                    .accessibilityHidden(true)
+            }
+
+            HStack(spacing: 20) {
+                ForEach(Array(presetWidths.enumerated()), id: \.offset) { index, width in
+                    Button {
+                        store.setWidth(width, for: tool)
+                    } label: {
+                        Circle()
+                            .fill(VellumTheme.mutedDark)
+                            .frame(
+                                width: CGFloat(4 + (index * 2)),
+                                height: CGFloat(4 + (index * 2))
+                            )
+                            .frame(width: 28, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Set width \(Int(width.rounded())) points")
+                }
+            }
+
+            OptionsDivider()
+
+            OptionsSectionCaption("Color")
+
+            ColorSwatchGrid(
+                favorites: store.preferences.favorites,
+                selectedColor: config.color,
+                onSelect: { color in
+                    store.setColor(color, for: tool)
+                }
+            )
+
+            HStack(spacing: 12) {
+                ColorPicker(
+                    "Custom",
+                    selection: colorBinding,
+                    supportsOpacity: false
+                )
+                .accessibilityLabel("Custom ink color")
+
+                Spacer()
+
+                Button {
+                    store.addFavorite(config.color)
+                } label: {
+                    Image(
+                        systemName: store.preferences.favorites.contains(config.color)
+                            ? "star.fill"
+                            : "star"
+                    )
+                    .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(store.preferences.favorites.contains(config.color))
+                .accessibilityLabel("Add to Favorites")
+                .accessibilityValue(
+                    store.preferences.favorites.contains(config.color)
+                        ? "Already a favorite"
+                        : config.color.hexString
+                )
+            }
+        }
+        .padding(18)
+        .frame(width: 300, alignment: .leading)
+        .background(VellumTheme.popover)
+    }
+
+    private var styleBinding: Binding<InkStyle> {
+        Binding(
+            get: {
+                guard let keyPath = tool.inkConfigKeyPath else {
+                    return store.preferences.pen.style
+                }
+                return store.preferences[keyPath: keyPath].style
+            },
+            set: { style in
+                store.setStyle(style, for: tool)
+            }
+        )
+    }
+
+    private var widthBinding: Binding<Double> {
+        Binding(
+            get: {
+                guard let keyPath = tool.inkConfigKeyPath else {
+                    return store.preferences.pen.width
+                }
+                return store.preferences[keyPath: keyPath].width
+            },
+            set: { width in
+                store.setWidth(width, for: tool)
+            }
+        )
+    }
+
+    private var colorBinding: Binding<Color> {
+        Binding(
+            get: {
+                guard let keyPath = tool.inkConfigKeyPath else {
+                    return store.preferences.pen.color.swiftUIColor
+                }
+                return store.preferences[keyPath: keyPath].color.swiftUIColor
+            },
+            set: { color in
+                store.setColor(CodableColor(UIColor(color)), for: tool)
+            }
+        )
+    }
+
+    private func strokePreviewHeight(for config: InkToolConfig) -> CGFloat {
+        let widthRange = NoteToolFactory.widthRange(for: config.style)
+        let span = widthRange.upperBound - widthRange.lowerBound
+        let normalizedWidth = (config.width - widthRange.lowerBound) / span
+        let clampedWidth = min(max(normalizedWidth, 0), 1)
+
+        return CGFloat(2 + (clampedWidth * 8))
+    }
+}
+
+struct EraserOptionsView: View {
+    let store: ToolPreferencesStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Eraser Options")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(VellumTheme.ink)
+
+            OptionsSectionCaption("Mode")
+
+            Picker("Mode", selection: modeBinding) {
+                Text("Partial")
+                    .tag(EraserMode.partial)
+                Text("Whole Stroke")
+                    .tag(EraserMode.wholeStroke)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Eraser mode")
+
+            Text("Partial erases pixels; whole stroke removes entire strokes.")
+                .font(.system(size: 12))
+                .foregroundStyle(VellumTheme.mutedDark)
+
+            if store.preferences.eraser.mode == .partial {
+                OptionsDivider()
+
+                OptionsSectionCaption("Width")
+
+                HStack(spacing: 16) {
+                    Slider(value: widthBinding, in: 8...60)
+                        .accessibilityLabel("Eraser width")
+                        .accessibilityValue(
+                            "\(Int(store.preferences.eraser.width.rounded())) points"
+                        )
+
+                    Circle()
+                        .stroke(VellumTheme.mutedDark, lineWidth: 2)
+                        .frame(width: eraserPreviewSize, height: eraserPreviewSize)
+                        .frame(width: 40, height: 40)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .padding(18)
+        .frame(width: 300, alignment: .leading)
+        .background(VellumTheme.popover)
+    }
+
+    private var modeBinding: Binding<EraserMode> {
+        Binding(
+            get: { store.preferences.eraser.mode },
+            set: { mode in
+                store.update { preferences in
+                    preferences.eraser.mode = mode
+                }
+            }
+        )
+    }
+
+    private var widthBinding: Binding<Double> {
+        Binding(
+            get: { store.preferences.eraser.width },
+            set: { width in
+                store.update { preferences in
+                    preferences.eraser.width = width
+                }
+            }
+        )
+    }
+
+    private var eraserPreviewSize: CGFloat {
+        let normalizedWidth = (store.preferences.eraser.width - 8) / 52
+        let clampedWidth = min(max(normalizedWidth, 0), 1)
+        return CGFloat(12 + (clampedWidth * 28))
+    }
+}
+
+struct SelectionOptionsView: View {
+    let store: ToolPreferencesStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Selection Options")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(VellumTheme.ink)
+
+            OptionsSectionCaption("Mode")
+
+            Picker("Mode", selection: modeBinding) {
+                Text("Freeform")
+                    .tag(SelectionMode.freeform)
+                Text("Box")
+                    .tag(SelectionMode.boxed)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Selection mode")
+
+            Text("Drag to select strokes and objects.")
+                .font(.system(size: 12))
+                .foregroundStyle(VellumTheme.mutedDark)
+        }
+        .padding(18)
+        .frame(width: 300, alignment: .leading)
+        .background(VellumTheme.popover)
+    }
+
+    private var modeBinding: Binding<SelectionMode> {
+        Binding(
+            get: { store.preferences.selection.mode },
+            set: { mode in
+                store.update { preferences in
+                    preferences.selection.mode = mode
+                }
+            }
+        )
+    }
+}
+
+struct TextOptionsView: View {
+    let store: ToolPreferencesStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Text Options")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(VellumTheme.ink)
+
+            OptionsSectionCaption("Size")
+
+            HStack(spacing: 16) {
+                Slider(value: fontSizeBinding, in: 10...48)
+                    .accessibilityLabel("Text size")
+                    .accessibilityValue(
+                        "\(Int(store.preferences.text.fontSize.rounded())) points"
+                    )
+
+                Text("Aa")
+                    .font(.system(size: store.preferences.text.fontSize))
+                    .foregroundStyle(store.preferences.text.color.swiftUIColor)
+                    .frame(width: 54, height: 54)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityHidden(true)
+            }
+
+            OptionsDivider()
+
+            OptionsSectionCaption("Color")
+
+            ColorSwatchGrid(
+                favorites: store.preferences.favorites,
+                selectedColor: store.preferences.text.color,
+                onSelect: { color in
+                    store.update { preferences in
+                        preferences.text.color = color
+                    }
+                }
+            )
+        }
+        .padding(18)
+        .frame(width: 300, alignment: .leading)
+        .background(VellumTheme.popover)
+    }
+
+    private var fontSizeBinding: Binding<Double> {
+        Binding(
+            get: { store.preferences.text.fontSize },
+            set: { fontSize in
+                store.update { preferences in
+                    preferences.text.fontSize = fontSize
+                }
+            }
+        )
+    }
+}
+
+struct ColorSwatchGrid: View {
+    let favorites: [CodableColor]
+    let selectedColor: CodableColor
+    let onSelect: (CodableColor) -> Void
+
+    private let columns = Array(
+        repeating: GridItem(.flexible(), spacing: 10),
+        count: 6
+    )
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 12) {
+            ForEach(Array(swatches.enumerated()), id: \.offset) { _, swatch in
+                Button {
+                    onSelect(swatch)
+                } label: {
+                    Circle()
+                        .fill(swatch.swiftUIColor)
+                        .frame(width: 24, height: 24)
+                        .overlay {
+                            Circle()
+                                .stroke(
+                                    swatch == selectedColor ? VellumTheme.accent : .clear,
+                                    lineWidth: 2
+                                )
+                                .padding(-4)
+                        }
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Color \(swatch.hexString)")
+            }
+        }
+    }
+
+    private var swatches: [CodableColor] {
+        var swatches = ToolPreferences.defaultFavorites
+        for color in favorites where !swatches.contains(color) {
+            swatches.append(color)
+        }
+        return swatches
+    }
+}
+
+private struct OptionsSectionCaption: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title.uppercased())
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(VellumTheme.mutedDark)
+    }
+}
+
+private struct OptionsDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(VellumTheme.ink(0.12))
+            .frame(height: 1)
+    }
+}

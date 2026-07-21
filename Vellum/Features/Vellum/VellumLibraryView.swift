@@ -31,6 +31,11 @@ struct VellumLibraryView: View {
                     .foregroundStyle(VellumTheme.muted)
                     .padding(.bottom, 16)
 
+                if library.unsupportedNoteCount > 0 {
+                    unsupportedNotesBanner(count: library.unsupportedNoteCount)
+                        .padding(.bottom, 16)
+                }
+
                 ScrollView {
                     if library.cards.isEmpty && !library.isLoading {
                         VStack(spacing: 14) {
@@ -160,6 +165,30 @@ struct VellumLibraryView: View {
         } message: {
             Text(library.errorMessage ?? "An unknown error occurred.")
         }
+    }
+
+    private func unsupportedNotesBanner(count: Int) -> some View {
+        let message = count == 1
+            ? "1 note needs a newer version of Vellum"
+            : "\(count) notes need a newer version of Vellum"
+
+        return HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(VellumTheme.accentDark)
+            Text(message)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(VellumTheme.bodyMuted)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(VellumTheme.popover, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(VellumTheme.ink(0.12), lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(message)
     }
 
     private var selectionChip: some View {

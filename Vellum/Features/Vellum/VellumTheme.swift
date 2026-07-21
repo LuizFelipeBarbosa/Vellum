@@ -29,32 +29,32 @@ extension Color {
 }
 
 enum VellumTheme {
-    static let paper = Color(hex: "#F6F2E9")
-    static let ink = Color(hex: "#26221B")
-    static let accent = Color(hex: "#9A6B35")
-    static let accentDark = Color(hex: "#8A5A28")
-    static let card = Color(hex: "#FBF8F1")
-    static let popover = Color(hex: "#FFFDF8")
-    static let libraryBody = Color(hex: "#FDFBF6")
-    static let stripeCard = Color(hex: "#F1EDE2")
-    static let muted = Color(hex: "#9C927E")
-    static let mutedCount = Color(hex: "#A99F8B")
-    static let mutedControl = Color(hex: "#8B8272")
-    static let mutedDark = Color(hex: "#7A7264")
-    static let bodyMuted = Color(hex: "#4A4438")
-    static let bodyInk = Color(hex: "#33302A")
-    static let waveform = Color(hex: "#B9AE97")
-    static let toolbarMarker = Color(hex: "#C9BFA8")
-    static let dottedUnderline = Color(hex: "#B98A4E")
-    static let studio = Color(hex: "#9A6B35")
-    static let thesis = Color(hex: "#4E6E58")
-    static let team = Color(hex: "#6E5E7A")
-    static let reading = Color(hex: "#8A6E4B")
-    static let spaceRed = Color(hex: "#955B52")
-    static let spaceTeal = Color(hex: "#4F7470")
-    static let spaceBlue = Color(hex: "#586E82")
-    static let spacePink = Color(hex: "#936B76")
-    static let spaceGray = Color(hex: "#7B776E")
+    static let paper = dynamic(light: "#F6F2E9", dark: "#1C1914")
+    static let ink = dynamic(light: "#26221B", dark: "#E9E3D6")
+    static let accent = dynamic(light: "#9A6B35", dark: "#C99A5F")
+    static let accentDark = dynamic(light: "#8A5A28", dark: "#B98A4E")
+    static let card = dynamic(light: "#FBF8F1", dark: "#242019")
+    static let popover = dynamic(light: "#FFFDF8", dark: "#2A2620")
+    static let libraryBody = dynamic(light: "#FDFBF6", dark: "#211D17")
+    static let stripeCard = dynamic(light: "#F1EDE2", dark: "#221E18")
+    static let muted = dynamic(light: "#9C927E", dark: "#8A8171")
+    static let mutedCount = dynamic(light: "#A99F8B", dark: "#A69C89")
+    static let mutedControl = dynamic(light: "#8B8272", dark: "#9C9384")
+    static let mutedDark = dynamic(light: "#7A7264", dark: "#B0A794")
+    static let bodyMuted = dynamic(light: "#4A4438", dark: "#C9C0AE")
+    static let bodyInk = dynamic(light: "#33302A", dark: "#DDD6C6")
+    static let waveform = dynamic(light: "#B9AE97", dark: "#8F866F")
+    static let toolbarMarker = dynamic(light: "#C9BFA8", dark: "#5A5344")
+    static let dottedUnderline = dynamic(light: "#B98A4E", dark: "#D9A968")
+    static let studio = dynamic(light: "#9A6B35", dark: "#C99A5F")
+    static let thesis = dynamic(light: "#4E6E58", dark: "#7FA98C")
+    static let team = dynamic(light: "#6E5E7A", dark: "#A896B5")
+    static let reading = dynamic(light: "#8A6E4B", dark: "#C2A379")
+    static let spaceRed = dynamic(light: "#955B52", dark: "#C99189")
+    static let spaceTeal = dynamic(light: "#4F7470", dark: "#82ACA7")
+    static let spaceBlue = dynamic(light: "#586E82", dark: "#8FA8BC")
+    static let spacePink = dynamic(light: "#936B76", dark: "#C8A0AB")
+    static let spaceGray = dynamic(light: "#7B776E", dark: "#A9A59B")
 
     static func ink(_ opacity: Double) -> Color { ink.opacity(opacity) }
     static func accent(_ opacity: Double) -> Color { accent.opacity(opacity) }
@@ -72,6 +72,12 @@ enum VellumTheme {
         case .pink: spacePink
         case .gray: spaceGray
         }
+    }
+
+    private static func dynamic(light: String, dark: String) -> Color {
+        Color(uiColor: UIColor { traits in
+            UIColor(Color(hex: traits.userInterfaceStyle == .dark ? dark : light))
+        })
     }
 }
 

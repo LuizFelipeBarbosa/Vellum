@@ -9,7 +9,7 @@ public enum NoteType: String, Codable, Sendable, CaseIterable {
 }
 
 public struct Note: Identifiable, Codable, Sendable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     public let id: UUID
     public var schemaVersion: Int
@@ -77,19 +77,37 @@ public struct NotePage: Identifiable, Codable, Sendable {
     public var plainText: String
     public var drawingAssetPath: String
     public var background: PageBackground
+    /// Rendering composites in three bands: image elements (in array order), then the
+    /// page's ink drawing, then text elements (in array order). Cross-kind array
+    /// interleaving is not visually significant in this schema version. Writers must
+    /// not rely on cross-kind ordering; readers may re-render interleaved arrays per
+    /// the band rule without normalizing the stored array.
+    public var elements: [CanvasElement]
 
     public init(
         id: UUID,
         order: Int,
         plainText: String,
         drawingAssetPath: String,
-        background: PageBackground
+        background: PageBackground,
+        elements: [CanvasElement] = []
     ) {
         self.id = id
         self.order = order
         self.plainText = plainText
         self.drawingAssetPath = drawingAssetPath
         self.background = background
+        self.elements = elements
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        order = try container.decode(Int.self, forKey: .order)
+        plainText = try container.decode(String.self, forKey: .plainText)
+        drawingAssetPath = try container.decode(String.self, forKey: .drawingAssetPath)
+        background = try container.decode(PageBackground.self, forKey: .background)
+        elements = try container.decodeIfPresent([CanvasElement].self, forKey: .elements) ?? []
     }
 }
 

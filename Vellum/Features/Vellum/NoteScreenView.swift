@@ -1,6 +1,8 @@
 import Observation
 import PencilKit
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 import VellumCore
 
 struct NoteScreenView: View {
@@ -9,9 +11,17 @@ struct NoteScreenView: View {
 
     @State private var isShowingActivity = false
     @State private var isConfirmingDelete = false
-    @State private var selectedTool: NoteDrawingTool = .pen
-    @State private var selectedColor: NoteInkColor = .ink
+    @State private var selectedTool: ToolID = .pen
+    @State private var squeezeEraser = SqueezeEraserController()
+    @State private var activeOptionsTool: ToolID?
+    @State private var lastNonNilTool: (any PKTool)?
     @State private var canvasReference = NoteCanvasReference()
+    @State private var selectionController = CanvasSelectionController()
+    @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
+    @State private var canvasSize: CGSize = .zero
+    @State private var photosPickerItem: PhotosPickerItem?
+    @State private var isShowingPhotosPicker = false
+    @State private var isShowingFileImporter = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,9 +56,34 @@ struct NoteScreenView: View {
         }
         .background(VellumTheme.paper)
         .task {
+            cacheCurrentTool()
+            selectedTool = app.toolPreferences.preferences.lastSelectedTool
+            model.canvasElements.canvasReference = canvasReference
+            selectionController.canvasReference = canvasReference
+            selectionController.elementsStore = model.canvasElements
+            model.canvasElements.onSnapshotApplied = { [weak selectionController] in
+                selectionController?.externalDrawingDidChange()
+            }
+            selectionController.persistImageData = { [weak model] data in
+                await model?.persistPastedImageData(data)
+            }
+            selectionController.onOperationFailed = { [weak model] message in
+                model?.errorMessage = message
+            }
+            cacheCurrentTool()
             if model.note == nil {
                 await model.load()
             }
+        }
+        .onChange(of: selectedTool) { _, newTool in
+            selectionController.clearSelection()
+            app.toolPreferences.update { preferences in
+                preferences.lastSelectedTool = newTool
+            }
+            cacheCurrentTool()
+        }
+        .onChange(of: app.toolPreferences.preferences) {
+            cacheCurrentTool()
         }
         .onChange(of: model.pendingProposals.count) { _, count in
             if count == 0 {
@@ -74,6 +109,51 @@ struct NoteScreenView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The note moves to the Trash. You can restore it there later.")
+        }
+        .photosPicker(
+            isPresented: $isShowingPhotosPicker,
+            selection: $photosPickerItem,
+            matching: .images
+        )
+        .onChange(of: photosPickerItem) {
+            Task {
+                if let item = photosPickerItem,
+                   let data = try? await item.loadTransferable(type: Data.self) {
+                    await model.importImage(
+                        data,
+                        visibleContentRect: currentVisibleContentRect
+                    )
+                }
+                photosPickerItem = nil
+            }
+        }
+        .fileImporter(
+            isPresented: $isShowingFileImporter,
+            allowedContentTypes: [.image]
+        ) { result in
+            switch result {
+            case .success(let url):
+                let isAccessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if isAccessing {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                do {
+                    let data = try Data(contentsOf: url)
+                    Task {
+                        await model.importImage(
+                            data,
+                            visibleContentRect: currentVisibleContentRect
+                        )
+                    }
+                } catch {
+                    model.errorMessage = error.localizedDescription
+                }
+            case .failure(let error):
+                model.errorMessage = error.localizedDescription
+            }
         }
         .alert(
             "Vellum",
@@ -286,6 +366,18 @@ struct NoteScreenView: View {
                     background: VellumTheme.card
                 )
 
+                ImageElementsLayer(
+                    store: model.canvasElements,
+                    viewport: canvasViewport
+                )
+                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
+                .offset(
+                    x: -canvasViewport.contentOffset.x,
+                    y: -canvasViewport.contentOffset.y
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
+
                 PencilCanvasView(
                     drawingData: model.drawingData,
                     onDrawingChanged: { data in
@@ -296,9 +388,63 @@ struct NoteScreenView: View {
                     showsSystemToolPicker: false,
                     onCanvasReady: { canvasView in
                         canvasReference.canvasView = canvasView
+                    },
+                    isDrawingEnabled: selectedTool.usesDrawingGesture,
+                    onViewportChanged: { canvasViewport = $0 },
+                    onExternalDrawingChange: {
+                        selectionController.externalDrawingDidChange()
+                    },
+                    onPencilSqueeze: { phase in
+                        switch phase {
+                        case .began:
+                            if let tool = squeezeEraser.begin(current: selectedTool) {
+                                selectedTool = tool
+                            }
+                        case .ended:
+                            if let tool = squeezeEraser.end(current: selectedTool) {
+                                selectedTool = tool
+                            }
+                        }
+                    },
+                    onTwoFingerTap: {
+                        if canvasReference.canvasView?.undoManager?.canUndo == true {
+                            canvasReference.canvasView?.undoManager?.undo()
+                        }
+                    },
+                    onThreeFingerTap: {
+                        if canvasReference.canvasView?.undoManager?.canRedo == true {
+                            canvasReference.canvasView?.undoManager?.redo()
+                        }
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                TextElementsLayer(
+                    store: model.canvasElements,
+                    textDefaults: app.toolPreferences.preferences.text,
+                    viewport: canvasViewport,
+                    isActive: selectedTool == .text
+                )
+                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
+                .offset(
+                    x: -canvasViewport.contentOffset.x,
+                    y: -canvasViewport.contentOffset.y
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
+
+                SelectionOverlayView(
+                    controller: selectionController,
+                    selectionMode: app.toolPreferences.preferences.selection.mode,
+                    isActive: selectedTool == .select
+                )
+                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
+                .offset(
+                    x: -canvasViewport.contentOffset.x,
+                    y: -canvasViewport.contentOffset.y
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
 
                 backlinksRail
                     .frame(width: 184)
@@ -324,12 +470,19 @@ struct NoteScreenView: View {
                 }
 
                 NoteToolbarView(
+                    store: app.toolPreferences,
                     selectedTool: $selectedTool,
-                    selectedColor: $selectedColor,
-                    canvasReference: canvasReference
+                    activeOptionsTool: $activeOptionsTool,
+                    canvasReference: canvasReference,
+                    onInsertPhoto: { isShowingPhotosPicker = true },
+                    onInsertFile: { isShowingFileImporter = true }
                 )
                 .fixedSize()
-                .position(x: geometry.size.width / 2, y: geometry.size.height - 43)
+                .position(
+                    x: geometry.size.width / 2,
+                    y: geometry.size.height
+                        - (app.toolPreferences.preferences.isToolbarCollapsed ? 43 : 87)
+                )
                 .zIndex(4)
 
                 if model.isShowingSuggestions {
@@ -339,6 +492,12 @@ struct NoteScreenView: View {
                 }
             }
             .clipped()
+            .onAppear {
+                canvasSize = geometry.size
+            }
+            .onChange(of: geometry.size) { _, newSize in
+                canvasSize = newSize
+            }
         }
     }
 
@@ -509,25 +668,32 @@ struct NoteScreenView: View {
         }
     }
 
-    private var activeTool: any PKTool {
-        switch selectedTool {
-        case .pen:
-            PKInkingTool(
-                .pen,
-                color: UIColor(selectedColor.color),
-                width: 4
+    private var activeTool: (any PKTool)? {
+        NoteToolFactory.tool(
+            for: selectedTool,
+            preferences: app.toolPreferences.preferences
+        ) ?? lastNonNilTool
+    }
+
+    private var currentVisibleContentRect: CGRect {
+        CGRect(
+            origin: CGPoint(
+                x: canvasViewport.contentOffset.x / canvasViewport.zoomScale,
+                y: canvasViewport.contentOffset.y / canvasViewport.zoomScale
+            ),
+            size: CGSize(
+                width: canvasSize.width / canvasViewport.zoomScale,
+                height: canvasSize.height / canvasViewport.zoomScale
             )
-        case .highlighter:
-            PKInkingTool(
-                .marker,
-                color: UIColor(VellumTheme.accent).withAlphaComponent(0.55),
-                width: 12
-            )
-        case .eraser:
-            PKEraserTool(.vector)
-        case .lasso:
-            PKLassoTool()
-        }
+        )
+    }
+
+    private func cacheCurrentTool() {
+        guard let tool = NoteToolFactory.tool(
+            for: selectedTool,
+            preferences: app.toolPreferences.preferences
+        ) else { return }
+        lastNonNilTool = tool
     }
 
     private var saveStateLabel: String {
@@ -573,5 +739,11 @@ struct NoteScreenView: View {
                 model.errorMessage = error.localizedDescription
             }
         }
+    }
+}
+
+extension ToolID {
+    var usesDrawingGesture: Bool {
+        self != .text && self != .select
     }
 }

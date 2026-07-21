@@ -69,12 +69,16 @@ struct VellumRootView: View {
                     .zIndex(50)
             }
         }
+        .preferredColorScheme(model.appearanceMode.colorScheme)
         .foregroundStyle(VellumTheme.ink)
         .tint(VellumTheme.accentDark)
         .task { await model.bootstrap() }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .inactive || newPhase == .background {
                 Task { await model.currentNote?.flushPendingSave() }
+            }
+            if newPhase == .background {
+                model.toolPreferences.flush()
             }
         }
         .animation(.easeOut(duration: 0.25), value: model.screen)

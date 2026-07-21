@@ -31,6 +31,10 @@ public actor WorkspaceService {
         try await notes.listNotes()
     }
 
+    public func unsupportedNotes() async throws -> [UnsupportedNotePackage] {
+        try await notes.unsupportedNotes()
+    }
+
     public func loadNote(id: UUID) async throws -> Note {
         try await notes.loadNote(id: id)
     }

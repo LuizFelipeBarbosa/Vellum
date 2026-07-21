@@ -56,7 +56,7 @@ func v2NoteRoundTrip() throws {
     #expect(decoded.links == [link])
 }
 
-@Test("Saving a v1 note normalizes its schema version to v3")
+@Test("Saving a v1 note normalizes its schema version to v4")
 func saveNormalizesSchemaVersion() async throws {
     let root = try migrationTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -66,7 +66,7 @@ func saveNormalizesSchemaVersion() async throws {
 
     try await repository.saveNote(note)
 
-    #expect(try await repository.loadNote(id: note.id).schemaVersion == 3)
+    #expect(try await repository.loadNote(id: note.id).schemaVersion == 4)
 }
 
 @Test("A future inserted manifest is rejected")
@@ -74,12 +74,108 @@ func insertedFutureSchemaIsRejected() async throws {
     let root = try migrationTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
-    let note = migrationNote(schemaVersion: 4)
+    let note = migrationNote(schemaVersion: 5)
     try await repository.insertNote(note)
 
-    await #expect(throws: VellumError.unsupportedSchemaVersion(found: 4, supported: 3)) {
+    await #expect(throws: VellumError.unsupportedSchemaVersion(found: 5, supported: 4)) {
         try await repository.loadNote(id: note.id)
     }
+}
+
+@Test("A v3 manifest decodes pages with an empty canvas")
+func v3ManifestDefaultsCanvasElements() throws {
+    let data = Data(
+        """
+        {
+          "id": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+          "schemaVersion": 3,
+          "revision": 1,
+          "title": "Legacy canvas",
+          "tags": ["migration"],
+          "createdAt": "1970-01-01T00:00:01.000Z",
+          "updatedAt": "1970-01-01T00:00:02.000Z",
+          "pages": [
+            {
+              "id": "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB",
+              "order": 0,
+              "plainText": "Before elements",
+              "drawingAssetPath": "pages/BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB/drawing.data",
+              "background": "blank"
+            }
+          ],
+          "noteType": "note",
+          "links": []
+        }
+        """.utf8
+    )
+
+    let note = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    #expect(note.schemaVersion == 3)
+    #expect(note.pages[0].elements == [])
+}
+
+@Test("A v4 manifest preserves text and image canvas elements through persistence")
+func v4ManifestCanvasElementsRoundTrip() async throws {
+    let root = try migrationTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let data = Data(
+        """
+        {
+          "id": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+          "schemaVersion": 4,
+          "revision": 1,
+          "title": "Canvas",
+          "tags": ["migration"],
+          "createdAt": "1970-01-01T00:00:01.000Z",
+          "updatedAt": "1970-01-01T00:00:02.000Z",
+          "pages": [
+            {
+              "id": "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB",
+              "order": 0,
+              "plainText": "Elements",
+              "drawingAssetPath": "pages/BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB/drawing.data",
+              "background": "grid",
+              "elements": [
+                {
+                  "id": "11111111-1111-1111-1111-111111111111",
+                  "kind": "text",
+                  "text": {
+                    "text": "Caption",
+                    "fontSize": 20,
+                    "color": { "red": 0.25, "green": 0.5, "blue": 0.75, "alpha": 1 }
+                  },
+                  "frame": { "x": 10, "y": 20, "width": 240, "height": 60 },
+                  "rotation": 0.125,
+                  "createdAt": "1970-01-01T00:00:03.000Z"
+                },
+                {
+                  "id": "22222222-2222-2222-2222-222222222222",
+                  "kind": "image",
+                  "image": {
+                    "assetPath": "assets/photo.jpg",
+                    "originalPixelSize": { "width": 1600, "height": 1200 }
+                  },
+                  "frame": { "x": 30, "y": 40, "width": 400, "height": 300 },
+                  "rotation": -0.25,
+                  "createdAt": "1970-01-01T00:00:04.000Z"
+                }
+              ]
+            }
+          ],
+          "noteType": "note",
+          "links": []
+        }
+        """.utf8
+    )
+    let note = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    try await repository.insertNote(note)
+    let loaded = try await repository.loadNote(id: note.id)
+
+    #expect(loaded.schemaVersion == 4)
+    #expect(loaded.pages[0].elements == note.pages[0].elements)
 }
 
 @Test("Insert note preserves IDs and creates every package directory")

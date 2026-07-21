@@ -1,39 +1,78 @@
 import PencilKit
 import SwiftUI
-
-enum NoteDrawingTool: Hashable {
-    case pen
-    case highlighter
-    case eraser
-    case lasso
-}
-
-enum NoteInkColor: Hashable {
-    case ink
-    case accent
-    case thesis
-
-    var color: Color {
-        switch self {
-        case .ink: VellumTheme.ink
-        case .accent: VellumTheme.accent
-        case .thesis: VellumTheme.thesis
-        }
-    }
-}
+import VellumCore
 
 @MainActor
 final class NoteCanvasReference {
     weak var canvasView: PKCanvasView?
+
+    var coordinator: PencilCanvasView.Coordinator? {
+        canvasView?.delegate as? PencilCanvasView.Coordinator
+    }
 }
 
 struct NoteToolbarView: View {
-    @Binding var selectedTool: NoteDrawingTool
-    @Binding var selectedColor: NoteInkColor
+    let store: ToolPreferencesStore
+    @Binding var selectedTool: ToolID
+    @Binding var activeOptionsTool: ToolID?
+    @State private var isShowingFavoritesEditor = false
     let canvasReference: NoteCanvasReference
+    var onInsertPhoto: (() -> Void)? = nil
+    var onInsertFile: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 18) {
+        Group {
+            if store.preferences.isToolbarCollapsed {
+                collapsedToolbar
+            } else {
+                expandedToolbar
+            }
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 18, weight: .medium))
+        .foregroundStyle(VellumTheme.mutedDark)
+        .background(
+            VellumTheme.popover,
+            in: RoundedRectangle(cornerRadius: 22)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(VellumTheme.ink(0.12), lineWidth: 1)
+        }
+        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+        .popover(item: $activeOptionsTool, arrowEdge: .bottom) { tool in
+            ToolOptionsPopover(tool: tool, store: store)
+        }
+        .popover(isPresented: $isShowingFavoritesEditor, arrowEdge: .bottom) {
+            FavoritesEditView(store: store)
+        }
+    }
+
+    private var expandedToolbar: some View {
+        VStack(spacing: 0) {
+            toolbarRow
+
+            if selectedTool.isInkTool {
+                Rectangle()
+                    .fill(VellumTheme.ink(0.12))
+                    .frame(height: 1)
+
+                FavoriteColorRow(
+                    store: store,
+                    activeInkTool: selectedTool,
+                    onRequestOptions: {
+                        activeOptionsTool = selectedTool
+                    },
+                    onRequestFavoritesEditor: {
+                        isShowingFavoritesEditor = true
+                    }
+                )
+            }
+        }
+    }
+
+    private var toolbarRow: some View {
+        HStack(spacing: 14) {
             Button {
                 canvasReference.canvasView?.undoManager?.undo()
             } label: {
@@ -50,25 +89,52 @@ struct NoteToolbarView: View {
 
             divider
 
-            toolButton(.pen, systemImage: "pencil.tip", label: "Pen")
-            toolButton(.highlighter, systemImage: "highlighter", label: "Highlighter")
-            toolButton(.eraser, systemImage: "eraser", label: "Eraser")
-            toolButton(.lasso, systemImage: "lasso", label: "Lasso")
+            toolButton(.pen, systemImage: "pencil.tip")
+            toolButton(.pencil, systemImage: "pencil")
+            toolButton(.highlighter, systemImage: "highlighter")
+            toolButton(.eraser, systemImage: "eraser")
+            toolButton(.select, systemImage: "lasso")
+            toolButton(.text, systemImage: "character.cursor.ibeam")
 
             divider
 
-            colorDot(.ink)
-            colorDot(.accent)
-            colorDot(.thesis)
+            Menu {
+                Button {
+                    onInsertPhoto?()
+                } label: {
+                    Label("Photo Library", systemImage: "photo.on.rectangle")
+                }
+                .disabled(onInsertPhoto == nil)
+
+                Button {
+                    onInsertFile?()
+                } label: {
+                    Label("Files", systemImage: "folder")
+                }
+                .disabled(onInsertFile == nil)
+            } label: {
+                Image(systemName: "plus.circle")
+                    .frame(width: 24, height: 24)
+            }
+            .accessibilityLabel("Insert")
+
+            collapseButton
         }
-        .buttonStyle(.plain)
-        .font(.system(size: 18, weight: .medium))
-        .foregroundStyle(VellumTheme.mutedDark)
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
-        .background(VellumTheme.popover, in: Capsule())
-        .overlay(Capsule().stroke(VellumTheme.ink(0.12), lineWidth: 1))
-        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+    }
+
+    private var collapsedToolbar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage(for: selectedTool))
+                .frame(width: 24, height: 24)
+                .foregroundStyle(VellumTheme.accentDark)
+                .accessibilityHidden(true)
+
+            collapseButton
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     private var divider: some View {
@@ -78,12 +144,15 @@ struct NoteToolbarView: View {
     }
 
     private func toolButton(
-        _ tool: NoteDrawingTool,
-        systemImage: String,
-        label: String
+        _ tool: ToolID,
+        systemImage: String
     ) -> some View {
         Button {
-            selectedTool = tool
+            if selectedTool == tool {
+                activeOptionsTool = tool
+            } else {
+                selectedTool = tool
+            }
         } label: {
             Image(systemName: systemImage)
                 .frame(width: 24, height: 24)
@@ -99,34 +168,37 @@ struct NoteToolbarView: View {
                     in: RoundedRectangle(cornerRadius: 6)
                 )
         }
-        .accessibilityLabel(label)
+        .accessibilityLabel(tool.displayName)
     }
 
-    private func colorDot(_ inkColor: NoteInkColor) -> some View {
+    private var collapseButton: some View {
         Button {
-            selectedColor = inkColor
-            selectedTool = .pen
-        } label: {
-            Circle()
-                .fill(inkColor.color)
-                .frame(width: 17, height: 17)
-                .overlay {
-                    Circle()
-                        .stroke(
-                            selectedColor == inkColor ? VellumTheme.accent : .clear,
-                            lineWidth: 2
-                        )
-                        .padding(-4)
+            withAnimation(.easeOut(duration: 0.2)) {
+                store.update { preferences in
+                    preferences.isToolbarCollapsed.toggle()
                 }
+            }
+        } label: {
+            Image(
+                systemName: store.preferences.isToolbarCollapsed
+                    ? "chevron.up"
+                    : "chevron.down"
+            )
+            .frame(width: 24, height: 24)
         }
-        .accessibilityLabel(colorLabel(for: inkColor))
+        .accessibilityLabel(
+            store.preferences.isToolbarCollapsed ? "Expand toolbar" : "Collapse toolbar"
+        )
     }
 
-    private func colorLabel(for color: NoteInkColor) -> String {
-        switch color {
-        case .ink: "Ink color"
-        case .accent: "Bronze color"
-        case .thesis: "Green color"
+    private func systemImage(for tool: ToolID) -> String {
+        switch tool {
+        case .pen: "pencil.tip"
+        case .pencil: "pencil"
+        case .highlighter: "highlighter"
+        case .eraser: "eraser"
+        case .select: "lasso"
+        case .text: "character.cursor.ibeam"
         }
     }
 }

@@ -5,6 +5,7 @@ import VellumCore
 struct VellumSidebarView: View {
     @Bindable var model: VellumAppModel
     @State private var showingActivity = false
+    @State private var showingSettings = false
     @State private var pendingSpaceDeletion: Space?
     @State private var spaceEditor: SpaceEditorContext?
 
@@ -20,6 +21,16 @@ struct VellumSidebarView: View {
                         .tracking(0.42)
                 }
                 Spacer()
+                Button {
+                    showingSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(VellumTheme.mutedControl)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Settings")
                 Button(action: createNote) {
                     VellumPencilGlyph(size: 15)
                         .frame(width: 30, height: 30)
@@ -140,9 +151,17 @@ struct VellumSidebarView: View {
             NavigationStack {
                 ActivityView(workspace: model.container.workspace, noteID: nil)
             }
+            .preferredColorScheme(model.appearanceMode.colorScheme)
         }
         .sheet(item: $spaceEditor) { context in
             SpaceEditorView(model: model, context: context)
+                .preferredColorScheme(model.appearanceMode.colorScheme)
+        }
+        .sheet(isPresented: $showingSettings) {
+            NavigationStack {
+                SettingsView(model: model)
+            }
+            .preferredColorScheme(model.appearanceMode.colorScheme)
         }
         .confirmationDialog(
             "Delete '\(pendingSpaceDeletion?.name ?? "")'?",

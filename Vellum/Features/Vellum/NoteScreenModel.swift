@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 import VellumCore
 
 @MainActor
@@ -27,6 +28,7 @@ final class NoteScreenModel {
     }
 
     let noteID: UUID
+    let canvasElements = CanvasElementsStore()
 
     private let notes: any NoteRepository
     private let workspace: WorkspaceService
@@ -72,6 +74,9 @@ final class NoteScreenModel {
         workspace = container.workspace
         graph = container.graph
         self.onNoteChanged = onNoteChanged
+        canvasElements.onElementsChanged = { [weak self] elements in
+            self?.elementsChanged(elements)
+        }
     }
 
     var title: String {
@@ -130,7 +135,10 @@ final class NoteScreenModel {
                 loadedSummaries
             )
 
+            let elements = loadedNote.pages.first?.elements ?? []
             note = loadedNote
+            canvasElements.hydrate(elements)
+            await cacheImages(for: elements, noteID: loadedNote.id)
             drawingData = drawing
             self.proposals = sortedProposals(proposals)
             self.spaces = spaces
@@ -145,6 +153,11 @@ final class NoteScreenModel {
             saveState = .saved
             errorMessage = nil
             onNoteChanged(loadedNote)
+            let referencedPaths = Set(loadedNote.pages.map(\.drawingAssetPath))
+            try? await notes.purgeUnreferencedDrawingAssets(
+                noteID: loadedNote.id,
+                referencedPaths: referencedPaths
+            )
         } catch {
             handle(error)
         }
@@ -155,6 +168,102 @@ final class NoteScreenModel {
         drawingData = data
         drawingDataPendingSave = data
         noteWasEdited()
+    }
+
+    func elementsChanged(_ elements: [CanvasElement]) {
+        guard var currentNote = note,
+              !currentNote.pages.isEmpty,
+              currentNote.pages[0].elements != elements else {
+            return
+        }
+        currentNote.pages[0].elements = elements
+        note = currentNote
+        noteWasEdited()
+    }
+
+    func importImage(_ data: Data, visibleContentRect: CGRect) async {
+        let processed: ImageImportPipeline.ProcessedImage
+        do {
+            processed = try await ImageImportPipeline.processForStorage(data)
+        } catch {
+            handle(error)
+            return
+        }
+
+        let assetPath = "assets/\(UUID().uuidString).jpg"
+        guard let note else {
+            errorMessage = "The note must be loaded before inserting an image."
+            return
+        }
+
+        do {
+            try await notes.saveAsset(
+                processed.jpegData,
+                noteID: note.id,
+                relativePath: assetPath
+            )
+        } catch {
+            handle(error)
+            return
+        }
+
+        let longEdge = max(processed.pixelSize.width, processed.pixelSize.height)
+        let fittedLongEdge = 0.6 * min(
+            visibleContentRect.width,
+            visibleContentRect.height
+        )
+        let scale = fittedLongEdge / longEdge
+        let fittedSize = CGSize(
+            width: processed.pixelSize.width * scale,
+            height: processed.pixelSize.height * scale
+        )
+        let frame = CanvasRect(
+            x: Double(visibleContentRect.midX - fittedSize.width / 2),
+            y: Double(visibleContentRect.midY - fittedSize.height / 2),
+            width: Double(fittedSize.width),
+            height: Double(fittedSize.height)
+        )
+
+        if let image = UIImage(data: processed.jpegData) {
+            canvasElements.cacheImage(
+                image,
+                data: processed.jpegData,
+                forAssetPath: assetPath
+            )
+        }
+        canvasElements.addElement(
+            CanvasElement(
+                content: .image(
+                    ImageContent(
+                        assetPath: assetPath,
+                        originalPixelSize: CanvasSize(
+                            width: Double(processed.pixelSize.width),
+                            height: Double(processed.pixelSize.height)
+                        )
+                    )
+                ),
+                frame: frame
+            )
+        )
+    }
+
+    func persistPastedImageData(_ data: Data) async -> String? {
+        guard let note else {
+            errorMessage = "The note must be loaded before pasting an image."
+            return nil
+        }
+        let assetPath = "assets/\(UUID().uuidString).jpg"
+        do {
+            try await notes.saveAsset(
+                data,
+                noteID: note.id,
+                relativePath: assetPath
+            )
+        } catch {
+            handle(error)
+            return nil
+        }
+        return assetPath
     }
 
     func flushPendingSave() async {
@@ -312,18 +421,23 @@ final class NoteScreenModel {
         saveState = .saving
 
         while savedGeneration < editGeneration, !autosaveDisabled {
-            guard let noteSnapshot = note else { return }
+            guard var noteSnapshot = note else { return }
             let generationBeingSaved = editGeneration
             let drawingSnapshot = drawingDataPendingSave
+            let oldAssetPath = noteSnapshot.pages.first?.drawingAssetPath
+            var newAssetPath: String?
 
             do {
-                if let drawingSnapshot,
-                   let assetPath = noteSnapshot.pages.first?.drawingAssetPath {
+                if let drawingSnapshot, !noteSnapshot.pages.isEmpty {
+                    let pageID = noteSnapshot.pages[0].id
+                    let assetPath = "pages/\(pageID.uuidString)/drawing-\(UUID().uuidString).data"
                     try await notes.saveAsset(
                         drawingSnapshot,
                         noteID: noteSnapshot.id,
                         relativePath: assetPath
                     )
+                    noteSnapshot.pages[0].drawingAssetPath = assetPath
+                    newAssetPath = assetPath
                 }
 
                 let savedNote = try await workspace.saveNote(noteSnapshot)
@@ -331,8 +445,17 @@ final class NoteScreenModel {
                     savedNote,
                     snapshot: noteSnapshot,
                     savedGeneration: generationBeingSaved,
-                    savedDrawingData: drawingSnapshot
+                    savedDrawingData: drawingSnapshot,
+                    newAssetPath: newAssetPath
                 )
+                if let newAssetPath,
+                   let oldAssetPath,
+                   newAssetPath != oldAssetPath {
+                    try? await notes.deleteAsset(
+                        noteID: noteSnapshot.id,
+                        relativePath: oldAssetPath
+                    )
+                }
                 await refreshProposalsAfterSave()
             } catch {
                 saveState = .unsaved
@@ -350,7 +473,8 @@ final class NoteScreenModel {
         _ savedNote: Note,
         snapshot: Note,
         savedGeneration generation: Int,
-        savedDrawingData: Data?
+        savedDrawingData: Data?,
+        newAssetPath: String?
     ) {
         savedGeneration = generation
 
@@ -360,6 +484,9 @@ final class NoteScreenModel {
             currentNote.schemaVersion = savedNote.schemaVersion
             currentNote.revision = savedNote.revision
             currentNote.updatedAt = savedNote.updatedAt
+            if let newAssetPath, !currentNote.pages.isEmpty {
+                currentNote.pages[0].drawingAssetPath = newAssetPath
+            }
             note = currentNote
         } else {
             note = savedNote
@@ -384,6 +511,28 @@ final class NoteScreenModel {
             noteID: note.id,
             relativePath: assetPath
         )
+    }
+
+    private func cacheImages(for elements: [CanvasElement], noteID: UUID) async {
+        for element in elements {
+            guard case .image(let content) = element.content else { continue }
+
+            do {
+                if let data = try await notes.loadAsset(
+                    noteID: noteID,
+                    relativePath: content.assetPath
+                ),
+                let image = UIImage(data: data) {
+                    canvasElements.cacheImage(
+                        image,
+                        data: data,
+                        forAssetPath: content.assetPath
+                    )
+                }
+            } catch {
+                continue
+            }
+        }
     }
 
     private func sortedProposals(_ proposals: [AgentProposal]) -> [AgentProposal] {

@@ -6,6 +6,7 @@ public enum NoteListScope: Sendable {
 
 public protocol NoteRepository: Sendable {
     func listNotes(scope: NoteListScope) async throws -> [Note]
+    func unsupportedNotes() async throws -> [UnsupportedNotePackage]
     func createNote(title: String) async throws -> Note
     func insertNote(_ note: Note) async throws
     func loadNote(id: UUID) async throws -> Note
@@ -16,11 +17,17 @@ public protocol NoteRepository: Sendable {
     func loadAsset(noteID: UUID, relativePath: String) async throws -> Data?
     func assetSize(noteID: UUID, relativePath: String) async throws -> Int?
     func saveAsset(_ data: Data, noteID: UUID, relativePath: String) async throws
+    func deleteAsset(noteID: UUID, relativePath: String) async throws
+    func purgeUnreferencedDrawingAssets(noteID: UUID, referencedPaths: Set<String>) async throws
 }
 
 public extension NoteRepository {
     func listNotes() async throws -> [Note] {
         try await listNotes(scope: .active)
+    }
+
+    func unsupportedNotes() async throws -> [UnsupportedNotePackage] {
+        []
     }
 }
 

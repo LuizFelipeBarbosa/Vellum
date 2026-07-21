@@ -110,6 +110,10 @@ enum FilePersistence {
     }
 }
 
+private struct SchemaProbe: Decodable {
+    let schemaVersion: Int
+}
+
 public actor FileNoteRepository: NoteRepository {
     private let rootDirectory: URL
 
@@ -126,6 +130,8 @@ public actor FileNoteRepository: NoteRepository {
             let manifest = package.appendingPathComponent("manifest.json")
             do {
                 let data = try Data(contentsOf: manifest)
+                let probe = try FilePersistence.decoder().decode(SchemaProbe.self, from: data)
+                guard probe.schemaVersion <= Note.currentSchemaVersion else { continue }
                 let note = try FilePersistence.decoder().decode(Note.self, from: data)
                 notes.append(note)
             } catch {
@@ -155,6 +161,28 @@ public actor FileNoteRepository: NoteRepository {
             }
             return $0.updatedAt > $1.updatedAt
         }
+    }
+
+    public func unsupportedNotes() async throws -> [UnsupportedNotePackage] {
+        let packages = try FilePersistence.packageDirectories(rootDirectory: rootDirectory)
+        var unsupportedPackages: [UnsupportedNotePackage] = []
+
+        for package in packages {
+            let manifest = package.appendingPathComponent("manifest.json")
+            guard let data = try? Data(contentsOf: manifest),
+                  let probe = try? FilePersistence.decoder().decode(SchemaProbe.self, from: data),
+                  probe.schemaVersion > Note.currentSchemaVersion else {
+                continue
+            }
+            unsupportedPackages.append(
+                UnsupportedNotePackage(
+                    packageName: package.lastPathComponent,
+                    schemaVersion: probe.schemaVersion
+                )
+            )
+        }
+
+        return unsupportedPackages.sorted { $0.packageName < $1.packageName }
     }
 
     public func createNote(title: String) async throws -> Note {
@@ -223,10 +251,6 @@ public actor FileNoteRepository: NoteRepository {
             throw VellumError.corruptManifest(id)
         }
 
-        struct SchemaProbe: Decodable {
-            let schemaVersion: Int
-        }
-
         let probe: SchemaProbe
         do {
             probe = try FilePersistence.decoder().decode(SchemaProbe.self, from: data)
@@ -250,6 +274,12 @@ public actor FileNoteRepository: NoteRepository {
 
     public func saveNote(_ note: Note) async throws {
         let package = try FilePersistence.requirePackage(rootDirectory: rootDirectory, noteID: note.id)
+        guard note.schemaVersion <= Note.currentSchemaVersion else {
+            throw VellumError.unsupportedSchemaVersion(
+                found: note.schemaVersion,
+                supported: Note.currentSchemaVersion
+            )
+        }
         var normalized = note
         if normalized.schemaVersion <= Note.currentSchemaVersion {
             normalized.schemaVersion = Note.currentSchemaVersion
@@ -342,6 +372,80 @@ public actor FileNoteRepository: NoteRepository {
             try data.write(to: url, options: .atomic)
         } catch {
             throw VellumError.persistenceFailure("Could not write asset \(relativePath): \(error.localizedDescription)")
+        }
+    }
+
+    public func deleteAsset(noteID: UUID, relativePath: String) async throws {
+        _ = try FilePersistence.requirePackage(rootDirectory: rootDirectory, noteID: noteID)
+        let url = try FilePersistence.validatedAssetURL(
+            rootDirectory: rootDirectory,
+            noteID: noteID,
+            relativePath: relativePath
+        )
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            throw VellumError.persistenceFailure(
+                "Could not delete asset \(relativePath): \(error.localizedDescription)"
+            )
+        }
+    }
+
+    public func purgeUnreferencedDrawingAssets(
+        noteID: UUID,
+        referencedPaths: Set<String>
+    ) async throws {
+        let fileManager = FileManager.default
+        let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: noteID)
+        var isPackageDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: package.path, isDirectory: &isPackageDirectory),
+              isPackageDirectory.boolValue else {
+            return
+        }
+
+        let pages = package.appendingPathComponent("pages", isDirectory: true)
+        var isPagesDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: pages.path, isDirectory: &isPagesDirectory),
+              isPagesDirectory.boolValue,
+              let pageDirectories = try? fileManager.contentsOfDirectory(
+                  at: pages,
+                  includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                  options: [.skipsHiddenFiles]
+              ) else {
+            return
+        }
+
+        for pageDirectory in pageDirectories {
+            guard let pageValues = try? pageDirectory.resourceValues(
+                forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+            ),
+            pageValues.isDirectory == true,
+            pageValues.isSymbolicLink != true,
+            let assets = try? fileManager.contentsOfDirectory(
+                at: pageDirectory,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            for asset in assets {
+                let filename = asset.lastPathComponent
+                guard filename.hasPrefix("drawing"),
+                      filename.hasSuffix(".data"),
+                      let assetValues = try? asset.resourceValues(
+                          forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+                      ),
+                      assetValues.isDirectory != true,
+                      assetValues.isSymbolicLink != true else {
+                    continue
+                }
+
+                let relativePath = "pages/\(pageDirectory.lastPathComponent)/\(filename)"
+                guard !referencedPaths.contains(relativePath) else { continue }
+                try? fileManager.removeItem(at: asset)
+            }
         }
     }
 }

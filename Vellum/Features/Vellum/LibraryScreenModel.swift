@@ -37,6 +37,7 @@ final class LibraryScreenModel {
 
     var summaries: [NoteSummary] = []
     var spaces: [SpaceListing] = []
+    var unsupportedNoteCount = 0
     var filter: NoteType?
     var selectedSpaceID: UUID?
     var isLoading = false
@@ -60,8 +61,10 @@ final class LibraryScreenModel {
         do {
             let refreshedSummaries = try await workspace.listNoteSummaries()
             let refreshedSpaces = try await workspace.listSpaces()
+            let unsupportedNotes = try await workspace.unsupportedNotes()
             summaries = refreshedSummaries
             spaces = refreshedSpaces
+            unsupportedNoteCount = unsupportedNotes.count
             if let selectedSpaceID,
                !refreshedSpaces.contains(where: { $0.space.id == selectedSpaceID }) {
                 self.selectedSpaceID = nil

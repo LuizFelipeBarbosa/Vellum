@@ -25,6 +25,12 @@ final class VellumAppModel {
     let graphScreen: GraphScreenModel
     let askScreen: AskScreenModel
     let trashScreen: TrashScreenModel
+    let toolPreferences: ToolPreferencesStore
+    var appearanceMode: AppearanceMode {
+        didSet {
+            UserDefaults.standard.set(appearanceMode.rawValue, forKey: "vellum.appearanceMode")
+        }
+    }
     var screen: AppScreen {
         didSet {
             guard screen == .library else { return }
@@ -53,8 +59,16 @@ final class VellumAppModel {
     private let debugAskQuestion: String?
     #endif
 
-    init(container: AppContainer, arguments: [String] = ProcessInfo.processInfo.arguments) {
+    init(
+        container: AppContainer,
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        toolPreferences: ToolPreferencesStore = ToolPreferencesStore()
+    ) {
         self.container = container
+        self.toolPreferences = toolPreferences
+        appearanceMode = AppearanceMode(
+            rawValue: UserDefaults.standard.string(forKey: "vellum.appearanceMode") ?? ""
+        ) ?? .system
         library = LibraryScreenModel(workspace: container.workspace)
         graphScreen = GraphScreenModel(container: container)
         askScreen = AskScreenModel(container: container)
