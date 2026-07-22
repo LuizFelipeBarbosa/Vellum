@@ -57,6 +57,7 @@ final class VellumAppModel {
 
     #if DEBUG
     private let debugAskQuestion: String?
+    private let debugAutoOpenMostRecentNote: Bool
     #endif
 
     init(
@@ -80,6 +81,7 @@ final class VellumAppModel {
         } else {
             debugAskQuestion = nil
         }
+        debugAutoOpenMostRecentNote = arguments.contains("-vellum-auto-open-note")
         #endif
         if let flagIndex = arguments.firstIndex(of: "-prototypeStartView"),
            arguments.indices.contains(flagIndex + 1) {
@@ -109,6 +111,13 @@ final class VellumAppModel {
                 screen = .library
             }
         }
+
+        #if DEBUG
+        if debugAutoOpenMostRecentNote,
+           let note = library.summaries.max(by: { $0.updatedAt < $1.updatedAt }) {
+            await openNote(note.id)
+        }
+        #endif
 
         await refreshStats()
         await askScreen.loadSuggestions()

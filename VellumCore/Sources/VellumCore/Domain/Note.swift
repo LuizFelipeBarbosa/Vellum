@@ -9,11 +9,13 @@ public enum NoteType: String, Codable, Sendable, CaseIterable {
 }
 
 public struct Note: Identifiable, Codable, Sendable {
-    public static let currentSchemaVersion = 4
+    public static let currentSchemaVersion = 5
+    public static let currentLayoutVersion = 2
 
     public let id: UUID
     public var schemaVersion: Int
     public var revision: Int
+    public var layoutVersion: Int
     public var title: String
     public var tags: [String]
     public let createdAt: Date
@@ -30,6 +32,7 @@ public struct Note: Identifiable, Codable, Sendable {
         id: UUID,
         schemaVersion: Int,
         revision: Int,
+        layoutVersion: Int = Note.currentLayoutVersion,
         title: String,
         tags: [String],
         createdAt: Date,
@@ -43,6 +46,7 @@ public struct Note: Identifiable, Codable, Sendable {
         self.id = id
         self.schemaVersion = schemaVersion
         self.revision = revision
+        self.layoutVersion = layoutVersion
         self.title = title
         self.tags = tags
         self.createdAt = createdAt
@@ -59,6 +63,7 @@ public struct Note: Identifiable, Codable, Sendable {
         id = try container.decode(UUID.self, forKey: .id)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         revision = try container.decode(Int.self, forKey: .revision)
+        layoutVersion = try container.decodeIfPresent(Int.self, forKey: .layoutVersion) ?? 1
         title = try container.decode(String.self, forKey: .title)
         tags = try container.decode([String].self, forKey: .tags)
         createdAt = try container.decode(Date.self, forKey: .createdAt)

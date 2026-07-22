@@ -229,12 +229,12 @@ func saveNoteRejectsFutureSchemaVersion() async throws {
     let package = FilePersistence.packageURL(rootDirectory: root, noteID: note.id)
     let manifest = package.appendingPathComponent("manifest.json")
     let originalData = try Data(contentsOf: manifest)
-    note.schemaVersion = 5
+    note.schemaVersion = Note.currentSchemaVersion + 1
     note.title = "Must not be written"
 
     await #expect(
         throws: VellumError.unsupportedSchemaVersion(
-            found: 5,
+            found: Note.currentSchemaVersion + 1,
             supported: Note.currentSchemaVersion
         )
     ) {

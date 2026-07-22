@@ -1,10 +1,231 @@
 import Foundation
 import PencilKit
+import QuartzCore
 import SwiftUI
+import VellumCore
 
 struct CanvasViewport: Equatable, Sendable {
     var contentOffset: CGPoint
     var zoomScale: CGFloat
+
+    func viewPoint(fromContent p: CGPoint) -> CGPoint {
+        CGPoint(
+            x: p.x * zoomScale - contentOffset.x,
+            y: p.y * zoomScale - contentOffset.y
+        )
+    }
+
+    func contentPoint(fromView p: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (p.x + contentOffset.x) / zoomScale,
+            y: (p.y + contentOffset.y) / zoomScale
+        )
+    }
+
+    func viewRect(fromContent r: CGRect) -> CGRect {
+        CGRect(
+            origin: viewPoint(fromContent: r.origin),
+            size: CGSize(
+                width: r.width * zoomScale,
+                height: r.height * zoomScale
+            )
+        )
+    }
+
+    func visibleContentRect(viewportSize: CGSize) -> CGRect {
+        CGRect(
+            x: contentOffset.x / zoomScale,
+            y: contentOffset.y / zoomScale,
+            width: viewportSize.width / zoomScale,
+            height: viewportSize.height / zoomScale
+        )
+    }
+}
+
+final class PagedCanvasView: PKCanvasView {
+    let haptics = CanvasHaptics()
+    private(set) var isAnimatingZoomSnap = false
+    private var zoomSnapDisplayLink: CADisplayLink?
+    private var zoomSnapStartScale: CGFloat = 0
+    private var zoomSnapTargetScale: CGFloat = 0
+    private var zoomSnapStartOffsetY: CGFloat = 0
+    private var zoomSnapTargetOffsetY: CGFloat = 0
+    private var zoomSnapStartTime: CFTimeInterval = 0
+    private static let zoomSnapDuration: CFTimeInterval = 0.25
+    private var isApplyingLayoutZoom = false
+
+    /// True while zoom/offset changes originate from a layout or SwiftUI update
+    /// pass rather than a user gesture or snap animation. Viewport reports made
+    /// in this window must be deferred: a synchronous @State write during a
+    /// SwiftUI update is dropped, leaving the overlays stuck on a stale viewport.
+    private(set) var isInLayoutDrivenChange = false
+
+    var contentHeightInContentSpace: CGFloat = PageLayout.pageHeight {
+        didSet {
+            guard oldValue != contentHeightInContentSpace else { return }
+            isInLayoutDrivenChange = true
+            defer { isInLayoutDrivenChange = false }
+            syncContentSize()
+        }
+    }
+    private var lastLayoutSize: CGSize = .zero
+    private var lastFitScale: CGFloat?
+
+    override func layoutSubviews() {
+        isInLayoutDrivenChange = true
+        defer { isInLayoutDrivenChange = false }
+        super.layoutSubviews()
+        guard bounds.size != lastLayoutSize else { return }
+        lastLayoutSize = bounds.size
+        updateZoomLimitsAndContentSize()
+    }
+
+    var expectedContentSize: CGSize {
+        CGSize(width: PageLayout.contentWidth * zoomScale,
+               height: contentHeightInContentSpace * zoomScale)
+    }
+
+    var fitZoomScale: CGFloat {
+        PageLayout.minZoom(forViewportWidth: bounds.width)
+    }
+
+    func resyncContentSizeIfStomped() {
+        let expected = expectedContentSize
+        guard abs(contentSize.height - expected.height) > 0.5
+           || abs(contentSize.width - expected.width) > 0.5 else { return }
+        syncContentSize()
+    }
+
+    /// Safe on every zoom tick: re-derives scaled content size and horizontal centering.
+    func syncContentSize() {
+        contentSize = expectedContentSize
+        centerContentHorizontally()
+    }
+
+    func centerContentHorizontally() {
+        let excess = max(0, bounds.width - contentSize.width)
+        contentInset.left = excess / 2
+        contentInset.right = excess / 2
+    }
+
+    /// Explicit reset: animate to fit-to-width with the snap haptic.
+    func snapZoomToFit() {
+        animateZoomSnap(to: fitZoomScale)
+    }
+
+    /// A user gesture interrupts any in-flight snap animation; clear tracking so
+    /// the next pinch gets haptics and its own snap decision.
+    func userGestureWillBegin() {
+        cancelZoomSnap()
+    }
+
+    /// Called from scrollViewDidEndZooming with the settled pinch scale.
+    func handleZoomGestureEnded(atScale scale: CGFloat) {
+        guard !isAnimatingZoomSnap else { return }
+        guard let target = PageLayout.settleTargetZoom(
+            forEndedZoomScale: scale,
+            viewportWidth: bounds.width
+        ), abs(scale - target) > 0.0001 else { return }
+
+        animateZoomSnap(to: target)
+    }
+
+    private func animateZoomSnap(to target: CGFloat) {
+        guard !isZooming else { return }
+        guard abs(zoomScale - target) > 0.0001 else { return }
+
+        cancelZoomSnap()
+        zoomSnapStartScale = zoomScale
+        zoomSnapTargetScale = target
+        let visibleCenterContentY = (contentOffset.y + bounds.height / 2) / zoomScale
+        zoomSnapStartOffsetY = contentOffset.y
+        zoomSnapTargetOffsetY = PageLayout.anchoredOffsetY(
+            visibleCenterContentY: visibleCenterContentY,
+            scale: target,
+            viewportHeight: bounds.height,
+            contentHeight: contentHeightInContentSpace
+        )
+        isAnimatingZoomSnap = true
+        haptics.prepare()
+        haptics.playSnapToFit()
+        let displayLink = CADisplayLink(target: self, selector: #selector(stepZoomSnap(_:)))
+        zoomSnapDisplayLink = displayLink
+        displayLink.add(to: .main, forMode: .common)
+        zoomSnapStartTime = CACurrentMediaTime()
+    }
+
+    @objc private func stepZoomSnap(_ displayLink: CADisplayLink) {
+        let t = min(
+            1,
+            (CACurrentMediaTime() - zoomSnapStartTime) / Self.zoomSnapDuration
+        )
+        let eased = CGFloat(1 - pow(1 - t, 3))
+        zoomScale = zoomSnapStartScale
+            + (zoomSnapTargetScale - zoomSnapStartScale) * eased
+        contentOffset.y = zoomSnapStartOffsetY
+            + (zoomSnapTargetOffsetY - zoomSnapStartOffsetY) * eased
+
+        if t >= 1 {
+            zoomScale = zoomSnapTargetScale
+            contentOffset.y = zoomSnapTargetOffsetY
+            finishZoomSnap()
+        }
+    }
+
+    private func finishZoomSnap() {
+        zoomSnapDisplayLink?.invalidate()
+        zoomSnapDisplayLink = nil
+        isAnimatingZoomSnap = false
+        (delegate as? PencilCanvasView.Coordinator)?.flushPendingDrawingSyncIfNeeded(for: self)
+    }
+
+    func cancelZoomSnap() {
+        zoomSnapDisplayLink?.invalidate()
+        zoomSnapDisplayLink = nil
+        isAnimatingZoomSnap = false
+        (delegate as? PencilCanvasView.Coordinator)?.flushPendingDrawingSyncIfNeeded(for: self)
+    }
+
+    /// Called from scrollViewDidZoom: limit haptics (suppressed during programmatic snap).
+    func handleZoomTick() {
+        guard !isAnimatingZoomSnap, !isApplyingLayoutZoom else { return }
+        haptics.zoomTick(
+            scale: zoomScale,
+            minScale: PageLayout.overviewMinZoom(forViewportWidth: bounds.width),
+            maxScale: PageLayout.maxZoom(forViewportWidth: bounds.width)
+        )
+    }
+
+    /// No horizontal drift at or below fit: pin the offset to the centered rest position.
+    func lockHorizontalOffsetIfAtOrBelowFit() {
+        guard contentSize.width <= bounds.width + 0.5 else { return }
+        let centeredX = -contentInset.left
+        if abs(contentOffset.x - centeredX) > 0.5 {
+            contentOffset.x = centeredX
+        }
+    }
+
+    /// Layout-driven: recompute fit limits and snap only outside an active pinch.
+    func updateZoomLimitsAndContentSize() {
+        guard bounds.width > 0 else { return }
+        let fit = PageLayout.minZoom(forViewportWidth: bounds.width)
+        let overviewFloor = PageLayout.overviewMinZoom(forViewportWidth: bounds.width)
+        let wasAtFit = lastFitScale.map { abs(zoomScale - $0) < 0.001 } ?? false
+        minimumZoomScale = PageLayout.elasticMinZoom(forViewportWidth: bounds.width)
+        maximumZoomScale = PageLayout.elasticMaxZoom(forViewportWidth: bounds.width)
+        isApplyingLayoutZoom = true
+        if !isZooming {
+            if lastFitScale == nil || wasAtFit {
+                zoomScale = fit
+            } else if zoomScale < overviewFloor {
+                zoomScale = overviewFloor
+            }
+        }
+        isApplyingLayoutZoom = false
+        haptics.resetLimitLatch()
+        lastFitScale = fit
+        syncContentSize()
+    }
 }
 
 enum PencilSqueezePhase: Sendable {
@@ -21,6 +242,7 @@ struct PencilCanvasView: UIViewRepresentable {
     var showsSystemToolPicker: Bool = true
     var onCanvasReady: ((PKCanvasView) -> Void)? = nil
     var isDrawingEnabled: Bool = true
+    var contentHeight: CGFloat = PageLayout.pageHeight
     var onViewportChanged: ((CanvasViewport) -> Void)? = nil
     var onExternalDrawingChange: (() -> Void)? = nil
     var onPencilSqueeze: ((PencilSqueezePhase) -> Void)? = nil
@@ -40,14 +262,24 @@ struct PencilCanvasView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> PKCanvasView {
-        let canvasView = PKCanvasView()
+        let canvasView: PKCanvasView = PagedCanvasView()
+        (canvasView as? PagedCanvasView)?.contentHeightInContentSpace = contentHeight
         canvasView.delegate = context.coordinator
-        canvasView.drawingPolicy = .anyInput
+#if targetEnvironment(simulator)
+        #if DEBUG
+        canvasView.drawingPolicy = ProcessInfo.processInfo.arguments.contains("-vellum-force-pencil-only")
+            ? .pencilOnly
+            : .anyInput
+        #else
+        canvasView.drawingPolicy = .anyInput      // mouse can draw in the simulator
+        #endif
+#else
+        canvasView.drawingPolicy = .pencilOnly    // fingers scroll & pinch; pencil draws
+#endif
         canvasView.backgroundColor = isTransparent ? .clear : .white
         canvasView.isOpaque = !isTransparent
-        canvasView.minimumZoomScale = 1
-        canvasView.maximumZoomScale = 3
-        canvasView.bouncesZoom = true
+        canvasView.bouncesZoom = false
+        canvasView.alwaysBounceVertical = true
         canvasView.drawingGestureRecognizer.isEnabled = isDrawingEnabled
 
         let undoTap = UITapGestureRecognizer(
@@ -88,12 +320,7 @@ struct PencilCanvasView: UIViewRepresentable {
         }
 
         onCanvasReady?(canvasView)
-        context.coordinator.onViewportChanged?(
-            CanvasViewport(
-                contentOffset: canvasView.contentOffset,
-                zoomScale: canvasView.zoomScale
-            )
-        )
+        context.coordinator.reportViewportDeferred(for: canvasView)
 
         return canvasView
     }
@@ -108,6 +335,7 @@ struct PencilCanvasView: UIViewRepresentable {
         canvasView.backgroundColor = isTransparent ? .clear : .white
         canvasView.isOpaque = !isTransparent
         canvasView.drawingGestureRecognizer.isEnabled = isDrawingEnabled
+        (canvasView as? PagedCanvasView)?.contentHeightInContentSpace = contentHeight
 
         if let tool, !Self.toolsMatch(canvasView.tool, tool) {
             canvasView.tool = tool
@@ -134,8 +362,10 @@ struct PencilCanvasView: UIViewRepresentable {
         }
 
         guard !context.coordinator.hasTransientDrawingOverride,
+              !canvasView.isZooming,
+              (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true,
               let drawingData,
-              drawingData != canvasView.drawing.dataRepresentation(),
+              drawingData != context.coordinator.lastSyncedDrawingData,
               let drawing = try? PKDrawing(data: drawingData) else {
             return
         }
@@ -143,6 +373,7 @@ struct PencilCanvasView: UIViewRepresentable {
         context.coordinator.isUpdatingFromModel = true
         canvasView.drawing = drawing
         context.coordinator.isUpdatingFromModel = false
+        context.coordinator.lastSyncedDrawingData = drawingData
         context.coordinator.onExternalDrawingChange?()
 
         if showsSystemToolPicker,
@@ -186,7 +417,10 @@ struct PencilCanvasView: UIViewRepresentable {
         var onTwoFingerTap: (() -> Void)?
         var onThreeFingerTap: (() -> Void)?
         var isUpdatingFromModel = false
+        var lastSyncedDrawingData: Data?
         var isObservingToolPicker = false
+        private var lastReportedViewport: CanvasViewport?
+        private var hasPendingDrawingSyncAfterGesture = false
         /// True while the selection controller has intentionally diverged canvasView.drawing
         /// from the model (strokes hidden during a drag); updateUIView must not re-sync
         /// the canvas from drawingData while set.
@@ -208,7 +442,9 @@ struct PencilCanvasView: UIViewRepresentable {
         func endProgrammaticChange(_ canvasView: PKCanvasView) {
             isProgrammaticChange = false
             if suppressedChangeOccurred {
-                onDrawingChanged(canvasView.drawing.dataRepresentation())
+                let drawingData = canvasView.drawing.dataRepresentation()
+                lastSyncedDrawingData = drawingData
+                onDrawingChanged(drawingData)
             }
         }
 
@@ -222,37 +458,95 @@ struct PencilCanvasView: UIViewRepresentable {
         }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            (canvasView as? PagedCanvasView)?.resyncContentSizeIfStomped()
             guard !isUpdatingFromModel else { return }
             if isProgrammaticChange {
                 suppressedChangeOccurred = true
                 return
             }
-            onDrawingChanged(canvasView.drawing.dataRepresentation())
+            // PencilKit can emit partial drawings while a zoom is in flight; defer the
+            // model push until the gesture settles and the drawing is consistent again.
+            if canvasView.isZooming
+                || (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap == true {
+                hasPendingDrawingSyncAfterGesture = true
+                return
+            }
+            let drawingData = canvasView.drawing.dataRepresentation()
+            lastSyncedDrawingData = drawingData
+            onDrawingChanged(drawingData)
             onExternalDrawingChange?()
         }
 
+        fileprivate func flushPendingDrawingSyncIfNeeded(for canvasView: PKCanvasView) {
+            guard hasPendingDrawingSyncAfterGesture else { return }
+            guard !canvasView.isZooming,
+                  (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else { return }
+            hasPendingDrawingSyncAfterGesture = false
+            let drawingData = canvasView.drawing.dataRepresentation()
+            lastSyncedDrawingData = drawingData
+            onDrawingChanged(drawingData)
+            onExternalDrawingChange?()
+        }
+
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            (scrollView as? PagedCanvasView)?.userGestureWillBegin()
+        }
+
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            (scrollView as? PagedCanvasView)?.resyncContentSizeIfStomped()
+            (scrollView as? PagedCanvasView)?.lockHorizontalOffsetIfAtOrBelowFit()
             reportViewport(for: scrollView)
         }
 
         func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            (scrollView as? PagedCanvasView)?.syncContentSize()
+            (scrollView as? PagedCanvasView)?.lockHorizontalOffsetIfAtOrBelowFit()
+            (scrollView as? PagedCanvasView)?.handleZoomTick()
             reportViewport(for: scrollView)
+        }
+
+        func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+            (scrollView as? PagedCanvasView)?.userGestureWillBegin()
+            (scrollView as? PagedCanvasView)?.haptics.prepare()
+        }
+
+        func scrollViewDidEndZooming(
+            _ scrollView: UIScrollView,
+            with view: UIView?,
+            atScale scale: CGFloat
+        ) {
+            (scrollView as? PagedCanvasView)?.syncContentSize()
+            reportViewport(for: scrollView)
+            (scrollView as? PagedCanvasView)?.handleZoomGestureEnded(atScale: scale)
+            if let canvasView = scrollView as? PKCanvasView {
+                flushPendingDrawingSyncIfNeeded(for: canvasView)
+            }
         }
 
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            true
+            // Undo/redo taps must never fire alongside a pinch: a quick two-finger
+            // pinch would otherwise also register as a tap and silently undo a stroke.
+            !(otherGestureRecognizer is UIPinchGestureRecognizer)
         }
 
         @objc func handleTwoFingerTap(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended else { return }
+            if let canvasView = recognizer.view as? PKCanvasView,
+               canvasView.isZooming || (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap == true {
+                return
+            }
             onTwoFingerTap?()
         }
 
         @objc func handleThreeFingerTap(_ recognizer: UITapGestureRecognizer) {
             guard recognizer.state == .ended else { return }
+            if let canvasView = recognizer.view as? PKCanvasView,
+               canvasView.isZooming || (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap == true {
+                return
+            }
             onThreeFingerTap?()
         }
 
@@ -270,13 +564,32 @@ struct PencilCanvasView: UIViewRepresentable {
             }
         }
 
-        private func reportViewport(for scrollView: UIScrollView) {
-            onViewportChanged?(
-                CanvasViewport(
-                    contentOffset: scrollView.contentOffset,
-                    zoomScale: scrollView.zoomScale
-                )
+        fileprivate func reportViewport(for scrollView: UIScrollView) {
+            if (scrollView as? PagedCanvasView)?.isInLayoutDrivenChange == true {
+                reportViewportDeferred(for: scrollView)
+                return
+            }
+            let viewport = CanvasViewport(
+                contentOffset: scrollView.contentOffset,
+                zoomScale: scrollView.zoomScale
             )
+            guard viewport != lastReportedViewport else { return }
+            lastReportedViewport = viewport
+            onViewportChanged?(viewport)
+        }
+
+        /// For call sites inside a SwiftUI update pass (makeUIView), where a synchronous
+        /// state write would be state-modification-during-view-update.
+        fileprivate func reportViewportDeferred(for scrollView: UIScrollView) {
+            let viewport = CanvasViewport(
+                contentOffset: scrollView.contentOffset,
+                zoomScale: scrollView.zoomScale
+            )
+            guard viewport != lastReportedViewport else { return }
+            lastReportedViewport = viewport
+            Task { @MainActor in
+                self.onViewportChanged?(viewport)
+            }
         }
     }
 }

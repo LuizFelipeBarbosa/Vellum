@@ -5,13 +5,8 @@ struct SelectionOverlayView: View {
     let selectionMode: SelectionMode
     let isActive: Bool
 
-    @State private var dragKind: DragKind?
     @State private var activeHandle: SelectionHandle?
-    @State private var isShowingStylePopover = false
-    @State private var styleColor = ToolPreferences.default.pen.color
-    @State private var styleWidth = ToolPreferences.default.pen.width
 
-    private let actionStripSize = CGSize(width: 510, height: 40)
     private static let coordinateSpaceName = "vellum-selection-overlay"
 
     var body: some View {
@@ -35,12 +30,6 @@ struct SelectionOverlayView: View {
                                 || controller.isHandleDragging {
                                 selectionHandles(in: bounds)
                             }
-
-                            if controller.strokesSnapshot == nil,
-                               controller.dragTranslation == .zero {
-                                actionStrip
-                                    .position(actionStripPosition(for: bounds, in: geometry.size))
-                            }
                         }
 
                         if let capturePath = controller.capturePath {
@@ -63,53 +52,9 @@ struct SelectionOverlayView: View {
     }
 
     private var captureSurface: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .gesture(captureGesture)
-            .onTapGesture(coordinateSpace: .local) { location in
-                guard controller.selection != nil,
-                      let bounds = controller.selectionBounds,
-                      !bounds.contains(location) else { return }
-                controller.clearSelection()
-            }
+        SelectionCaptureSurface(controller: controller, selectionMode: selectionMode)
+            .allowsHitTesting(false)
             .accessibilityLabel("Canvas selection area")
-    }
-
-    private var captureGesture: some Gesture {
-        DragGesture(minimumDistance: 2, coordinateSpace: .local)
-            .onChanged { value in
-                if dragKind == nil {
-                    let startsInsideSelection = controller.selection != nil
-                        && controller.selectionBounds?.contains(value.startLocation) == true
-                    if startsInsideSelection {
-                        dragKind = .move
-                        controller.beginMoveDrag()
-                    } else {
-                        dragKind = .capture
-                        controller.beginCapture(at: value.startLocation, mode: selectionMode)
-                    }
-                }
-
-                switch dragKind {
-                case .move:
-                    controller.setDragTranslation(value.translation)
-                case .capture:
-                    controller.extendCapture(to: value.location)
-                case nil:
-                    break
-                }
-            }
-            .onEnded { _ in
-                switch dragKind {
-                case .move:
-                    controller.endMoveDrag()
-                case .capture:
-                    controller.endCapture()
-                case nil:
-                    break
-                }
-                dragKind = nil
-            }
     }
 
     @ViewBuilder
@@ -321,149 +266,6 @@ struct SelectionOverlayView: View {
             x: center.x + scaledX * cosine - scaledY * sine,
             y: center.y + scaledX * sine + scaledY * cosine
         )
-    }
-
-    private var actionStrip: some View {
-        HStack(spacing: 4) {
-            Button {
-                controller.cutSelection()
-            } label: {
-                actionLabel("Cut", systemImage: "scissors")
-            }
-            .accessibilityLabel("Cut selection")
-
-            Button {
-                controller.copySelection()
-            } label: {
-                actionLabel("Copy", systemImage: "doc.on.doc")
-            }
-            .accessibilityLabel("Copy selection")
-
-            Button {
-                Task {
-                    await controller.pasteFromPasteboard()
-                }
-            } label: {
-                actionLabel("Paste", systemImage: "doc.on.clipboard")
-            }
-            .disabled(!controller.canPaste)
-            .accessibilityLabel("Paste selection")
-
-            Button {
-                isShowingStylePopover.toggle()
-            } label: {
-                actionLabel("Style", systemImage: "paintpalette")
-            }
-            .accessibilityLabel("Style selection")
-            .popover(isPresented: $isShowingStylePopover) {
-                stylePopover
-            }
-
-            Button {
-                controller.duplicateSelection()
-            } label: {
-                actionLabel("Duplicate", systemImage: "plus.square.on.square")
-            }
-            .accessibilityLabel("Duplicate selection")
-
-            Button(role: .destructive) {
-                controller.deleteSelection()
-            } label: {
-                actionLabel("Delete", systemImage: "trash")
-            }
-            .foregroundStyle(.red)
-            .accessibilityLabel("Delete selection")
-        }
-        .buttonStyle(.plain)
-        .font(.system(size: 12.5, weight: .medium))
-        .foregroundStyle(VellumTheme.mutedDark)
-        .frame(width: actionStripSize.width, height: actionStripSize.height)
-        .background(VellumTheme.popover, in: Capsule())
-        .overlay {
-            Capsule().stroke(VellumTheme.ink(0.12), lineWidth: 1)
-        }
-        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
-    }
-
-    private func actionLabel(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-    }
-
-    private var stylePopover: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Selection Style")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(VellumTheme.ink)
-
-            ColorSwatchGrid(
-                favorites: ToolPreferences.defaultFavorites,
-                selectedColor: styleColor,
-                onSelect: { color in
-                    styleColor = color
-                    controller.restyleSelection(color: color, strokeWidth: nil)
-                }
-            )
-
-            Text("STROKE WIDTH")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(VellumTheme.mutedDark)
-
-            HStack(spacing: 12) {
-                Slider(value: $styleWidth, in: 1...30) { editing in
-                    if !editing {
-                        controller.restyleSelection(
-                            color: nil,
-                            strokeWidth: styleWidth
-                        )
-                    }
-                }
-                .accessibilityLabel("Selection stroke width")
-                .accessibilityValue("\(Int(styleWidth.rounded())) points")
-
-                Text("\(Int(styleWidth.rounded()))")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(VellumTheme.mutedDark)
-                    .frame(width: 24, alignment: .trailing)
-                    .accessibilityHidden(true)
-            }
-        }
-        .padding(18)
-        .frame(width: 300, alignment: .leading)
-        .background(VellumTheme.popover)
-    }
-
-    private func actionStripPosition(for bounds: CGRect, in overlaySize: CGSize) -> CGPoint {
-        let margin: CGFloat = 8
-
-        let x: CGFloat
-        if overlaySize.width < actionStripSize.width + margin * 2 {
-            x = overlaySize.width / 2
-        } else {
-            x = min(
-                max(bounds.midX, actionStripSize.width / 2 + margin),
-                overlaySize.width - actionStripSize.width / 2 - margin
-            )
-        }
-
-        let desiredY = bounds.minY - 12 - actionStripSize.height / 2
-        let y: CGFloat
-        if overlaySize.height < actionStripSize.height + margin * 2 {
-            y = overlaySize.height / 2
-        } else {
-            y = min(
-                max(desiredY, actionStripSize.height / 2 + margin),
-                overlaySize.height - actionStripSize.height / 2 - margin
-            )
-        }
-
-        return CGPoint(x: x, y: y)
-    }
-
-    private enum DragKind {
-        case capture
-        case move
     }
 
     private enum SelectionHandle: CaseIterable, Hashable, Identifiable {

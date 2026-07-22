@@ -98,6 +98,8 @@ private struct TextBoxElementView: View {
     @State private var text: String
     @State private var dragOffset: CGSize = .zero
     @State private var sessionBaseline: [CanvasElement]?
+    @State private var renderedHeight: CGFloat
+    @State private var hasMeasuredRenderedHeight = false
 
     init(
         element: CanvasElement,
@@ -115,6 +117,7 @@ private struct TextBoxElementView: View {
         } else {
             _text = State(initialValue: "")
         }
+        _renderedHeight = State(initialValue: CGFloat(element.frame.height))
     }
 
     @ViewBuilder
@@ -126,6 +129,12 @@ private struct TextBoxElementView: View {
                 .focused(focusedID, equals: element.id)
                 .padding(6)
                 .frame(width: CGFloat(element.frame.width), alignment: .topLeading)
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { newHeight in
+                    renderedHeight = newHeight
+                    hasMeasuredRenderedHeight = true
+                }
                 .background(Color.clear)
                 .overlay {
                     RoundedRectangle(cornerRadius: 4)
@@ -134,7 +143,9 @@ private struct TextBoxElementView: View {
                 }
                 .position(
                     x: CGFloat(element.frame.x + element.frame.width / 2) + dragOffset.width,
-                    y: CGFloat(element.frame.y + element.frame.height / 2) + dragOffset.height
+                    y: CGFloat(element.frame.y)
+                        + max(renderedHeight, CGFloat(element.frame.height)) / 2
+                        + dragOffset.height
                 )
                 .rotationEffect(.radians(element.rotation))
                 .disabled(!isActive)
@@ -165,6 +176,13 @@ private struct TextBoxElementView: View {
                 }
                 .onChange(of: text) { _, newValue in
                     updateLiveText(newValue, content: content)
+                }
+                .onChange(of: element.frame.height) { _, newHeight in
+                    // Before the first geometry pass, keep the fallback current. Once measured,
+                    // the intrinsic height remains valid because persisted height does not size
+                    // this view; position combines both values above.
+                    guard !hasMeasuredRenderedHeight else { return }
+                    renderedHeight = CGFloat(newHeight)
                 }
                 .onChange(of: content.text) { _, newValue in
                     // Undo/redo can replace the model text under the same element
@@ -206,9 +224,22 @@ private struct TextBoxElementView: View {
             return
         }
 
-        if trimmed != text {
-            updateLiveText(trimmed, content: content)
-        }
+        let finalContent = TextBoxContent(
+            text: trimmed,
+            fontSize: content.fontSize,
+            color: content.color
+        )
+        var updated = element
+        updated.content = .text(finalContent)
+        updated.frame.height = max(
+            44,
+            NotePageRenderer.growTextFrame(
+                updated.frame,
+                textContent: finalContent
+            ).height
+        )
+        store.updateElementLive(updated)
+
         if let sessionBaseline {
             store.registerEditingSessionUndo(
                 from: sessionBaseline,

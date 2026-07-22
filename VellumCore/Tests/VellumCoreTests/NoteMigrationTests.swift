@@ -22,6 +22,66 @@ func v1ManifestDefaults() throws {
     #expect(!decoded.isTrashed)
 }
 
+@Test("A manifest without a layout version defaults to legacy layout v1")
+func manifestWithoutLayoutVersionDefaultsToV1() throws {
+    let original = migrationNote(schemaVersion: 4)
+    let encoded = try FilePersistence.encoder().encode(original)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "layoutVersion")
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
+    #expect(decoded.layoutVersion == 1)
+}
+
+@Test("A note round trips an explicit layout version")
+func layoutVersionRoundTrip() throws {
+    let pageID = UUID()
+    let note = Note(
+        id: UUID(),
+        schemaVersion: 4,
+        revision: 1,
+        layoutVersion: 7,
+        title: "Layout version",
+        tags: [],
+        createdAt: Date(timeIntervalSince1970: 1),
+        updatedAt: Date(timeIntervalSince1970: 2),
+        pages: [
+            NotePage(
+                id: pageID,
+                order: 0,
+                plainText: "",
+                drawingAssetPath: "pages/\(pageID.uuidString)/drawing.data",
+                background: .blank
+            )
+        ]
+    )
+
+    let decoded = try FilePersistence.decoder().decode(
+        Note.self,
+        from: FilePersistence.encoder().encode(note)
+    )
+    #expect(decoded.layoutVersion == 7)
+}
+
+@Test("A newly constructed note uses the current layout version")
+func newNoteUsesCurrentLayoutVersion() {
+    let note = migrationNote(schemaVersion: Note.currentSchemaVersion)
+
+    #expect(note.layoutVersion == Note.currentLayoutVersion)
+}
+
+@Test("A newly constructed current note preserves its layout version through encoding")
+func currentNoteLayoutVersionRoundTrip() throws {
+    let note = migrationNote(schemaVersion: Note.currentSchemaVersion)
+
+    let decoded = try FilePersistence.decoder().decode(
+        Note.self,
+        from: FilePersistence.encoder().encode(note)
+    )
+    #expect(decoded.layoutVersion == Note.currentLayoutVersion)
+}
+
 @Test("A v2 manifest decodes with soft-delete defaults")
 func v2ManifestDefaults() throws {
     let original = migrationNote(schemaVersion: 2)
@@ -56,7 +116,7 @@ func v2NoteRoundTrip() throws {
     #expect(decoded.links == [link])
 }
 
-@Test("Saving a v1 note normalizes its schema version to v4")
+@Test("Saving a v1 note normalizes its schema version to the current version")
 func saveNormalizesSchemaVersion() async throws {
     let root = try migrationTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -66,7 +126,7 @@ func saveNormalizesSchemaVersion() async throws {
 
     try await repository.saveNote(note)
 
-    #expect(try await repository.loadNote(id: note.id).schemaVersion == 4)
+    #expect(try await repository.loadNote(id: note.id).schemaVersion == Note.currentSchemaVersion)
 }
 
 @Test("A future inserted manifest is rejected")
@@ -74,10 +134,15 @@ func insertedFutureSchemaIsRejected() async throws {
     let root = try migrationTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
-    let note = migrationNote(schemaVersion: 5)
+    let note = migrationNote(schemaVersion: Note.currentSchemaVersion + 1)
     try await repository.insertNote(note)
 
-    await #expect(throws: VellumError.unsupportedSchemaVersion(found: 5, supported: 4)) {
+    await #expect(
+        throws: VellumError.unsupportedSchemaVersion(
+            found: Note.currentSchemaVersion + 1,
+            supported: Note.currentSchemaVersion
+        )
+    ) {
         try await repository.loadNote(id: note.id)
     }
 }

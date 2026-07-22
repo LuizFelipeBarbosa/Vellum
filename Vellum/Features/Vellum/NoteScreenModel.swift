@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PencilKit
 import UIKit
 import VellumCore
 
@@ -158,6 +159,35 @@ final class NoteScreenModel {
                 noteID: loadedNote.id,
                 referencedPaths: referencedPaths
             )
+
+            let loadedPKDrawing: PKDrawing
+            if let drawing {
+                guard let decodedDrawing = try? PKDrawing(data: drawing) else {
+                    errorMessage = "The note's ink could not be read, so it is shown empty."
+                    return
+                }
+                loadedPKDrawing = decodedDrawing
+            } else {
+                loadedPKDrawing = PKDrawing()
+            }
+
+            if loadedNote.layoutVersion < Note.currentLayoutVersion {
+                let migration = LegacyContentMigrator.migrateIfNeeded(
+                    drawing: loadedPKDrawing,
+                    elements: elements,
+                    layoutVersion: loadedNote.layoutVersion
+                )
+                if migration.didMigrate {
+                    drawingChanged(migration.drawing.dataRepresentation())
+                    canvasElements.hydrate(migration.elements)
+                    elementsChanged(migration.elements)
+                }
+
+                guard var currentNote = note else { return }
+                currentNote.layoutVersion = Note.currentLayoutVersion
+                note = currentNote
+                noteWasEdited()
+            }
         } catch {
             handle(error)
         }
@@ -266,11 +296,13 @@ final class NoteScreenModel {
         return assetPath
     }
 
-    func flushPendingSave() async {
+    @discardableResult
+    func flushPendingSave() async -> Bool {
         pendingSaveTask?.cancel()
         pendingSaveTask = nil
         pendingSaveToken = nil
         await saveUntilCurrent()
+        return savedGeneration == editGeneration
     }
 
     func organize() async {
@@ -355,6 +387,7 @@ final class NoteScreenModel {
                 currentNote.revision = updated.revision
                 currentNote.updatedAt = updated.updatedAt
                 currentNote.schemaVersion = updated.schemaVersion
+                currentNote.layoutVersion = updated.layoutVersion
                 note = currentNote
                 merged = currentNote
             } else {
@@ -407,6 +440,7 @@ final class NoteScreenModel {
         }
         guard !autosaveDisabled else { return }
         while savedGeneration < editGeneration && !autosaveDisabled {
+            let generationBefore = savedGeneration
             let task = Task { [weak self] in
                 guard let self else { return }
                 await self.performSaveLoop()
@@ -414,6 +448,9 @@ final class NoteScreenModel {
             inFlightSave = task
             await task.value
             inFlightSave = nil
+            if savedGeneration == generationBefore {
+                return   // save attempt made no progress (error path already set saveState/.unsaved and surfaced the error) — stop retrying; the next edit or flush re-triggers
+            }
         }
     }
 
@@ -482,6 +519,7 @@ final class NoteScreenModel {
             note = savedNote
         } else if var currentNote = note {
             currentNote.schemaVersion = savedNote.schemaVersion
+            currentNote.layoutVersion = savedNote.layoutVersion
             currentNote.revision = savedNote.revision
             currentNote.updatedAt = savedNote.updatedAt
             if let newAssetPath, !currentNote.pages.isEmpty {

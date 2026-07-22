@@ -19,9 +19,14 @@ struct NoteScreenView: View {
     @State private var selectionController = CanvasSelectionController()
     @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
     @State private var canvasSize: CGSize = .zero
+    @State private var pageState = NotePageState()
+    @State private var isShowingThumbnails = false
+    @State private var thumbnailStore = PageThumbnailStore()
     @State private var photosPickerItem: PhotosPickerItem?
     @State private var isShowingPhotosPicker = false
     @State private var isShowingFileImporter = false
+    @State private var exportOutput: NoteExporter.Output?
+    @State private var exportDirectoryToCleanUp: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -90,6 +95,53 @@ struct NoteScreenView: View {
                 model.isShowingSuggestions = false
             }
         }
+        .onChange(of: isShowingThumbnails) { _, isShowing in
+            if isShowing {
+                thumbnailStore.markDirty()
+                Task {
+                    await thumbnailStore.regenerate(
+                        content: currentPageRendererContent()
+                    )
+                }
+            }
+        }
+        .onChange(of: model.drawingData) { _, _ in
+            let drawingBounds = canvasReference.canvasView?.drawing.bounds
+                ?? (try? PKDrawing(data: model.drawingData ?? Data()))?.bounds
+                ?? .null
+            pageState.updateContent(
+                drawingBounds: drawingBounds,
+                elements: model.canvasElements.elements
+            )
+            thumbnailStore.markDirty()
+            if isShowingThumbnails {
+                Task {
+                    await thumbnailStore.regenerate(
+                        content: currentPageRendererContent()
+                    )
+                }
+            }
+        }
+        .onChange(of: model.canvasElements.elements) { _, _ in
+            pageState.updateContent(
+                drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                elements: model.canvasElements.elements
+            )
+            thumbnailStore.markDirty()
+            if isShowingThumbnails {
+                Task {
+                    await thumbnailStore.regenerate(
+                        content: currentPageRendererContent()
+                    )
+                }
+            }
+        }
+        .onChange(of: canvasViewport) { _, _ in
+            pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
+        }
+        .onChange(of: canvasSize) { _, _ in
+            pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
+        }
         .sheet(isPresented: $isShowingActivity) {
             NavigationStack {
                 ActivityView(
@@ -97,6 +149,9 @@ struct NoteScreenView: View {
                     noteID: model.noteID
                 )
             }
+        }
+        .sheet(item: $exportOutput, onDismiss: cleanUpExportDirectory) { output in
+            ShareSheetView(items: output.urls)
         }
         .confirmationDialog(
             "Move to Trash?",
@@ -172,6 +227,7 @@ struct NoteScreenView: View {
         }
         .animation(.easeOut(duration: 0.18), value: model.selectedEntity?.id)
         .animation(.easeOut(duration: 0.2), value: model.isShowingSuggestions)
+        .animation(.easeOut(duration: 0.2), value: isShowingThumbnails)
     }
 
     private var header: some View {
@@ -255,10 +311,17 @@ struct NoteScreenView: View {
             .buttonStyle(.plain)
             .disabled(model.isAnalyzing || model.note == nil)
 
-            Button("Share") {
-                app.showToast("Share — exports the page or its Open Knowledge Format")
+            Menu {
+                ForEach(NoteExporter.Format.allCases, id: \.rawValue) { format in
+                    Button("Export as \(format.displayName)") {
+                        exportNote(format)
+                    }
+                }
+            } label: {
+                Text("Share")
             }
             .buttonStyle(.plain)
+            .disabled(model.isLoading || model.note == nil)
 
             Menu {
                 Button {
@@ -360,28 +423,42 @@ struct NoteScreenView: View {
     private var canvasArea: some View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
-                VellumDotGrid(
-                    spacing: 24,
-                    dotColor: VellumTheme.ink(0.12),
-                    background: VellumTheme.card
+                PageGuideLayer(
+                    viewport: canvasViewport,
+                    viewportSize: canvasSize,
+                    pageCount: pageState.pageCount
                 )
+                .frame(width: geometry.size.width, height: geometry.size.height)
 
                 ImageElementsLayer(
                     store: model.canvasElements,
                     viewport: canvasViewport
+                )
+                .frame(
+                    width: PageLayout.contentWidth,
+                    height: pageState.contentHeight,
+                    alignment: .topLeading
                 )
                 .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
                 .offset(
                     x: -canvasViewport.contentOffset.x,
                     y: -canvasViewport.contentOffset.y
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    alignment: .topLeading
+                )
                 .clipped()
 
                 PencilCanvasView(
                     drawingData: model.drawingData,
                     onDrawingChanged: { data in
                         model.drawingChanged(data)
+                        pageState.updateContent(
+                            drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                            elements: model.canvasElements.elements
+                        )
                     },
                     isTransparent: true,
                     tool: activeTool,
@@ -390,9 +467,14 @@ struct NoteScreenView: View {
                         canvasReference.canvasView = canvasView
                     },
                     isDrawingEnabled: selectedTool.usesDrawingGesture,
+                    contentHeight: pageState.contentHeight,
                     onViewportChanged: { canvasViewport = $0 },
                     onExternalDrawingChange: {
                         selectionController.externalDrawingDidChange()
+                        pageState.updateContent(
+                            drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                            elements: model.canvasElements.elements
+                        )
                     },
                     onPencilSqueeze: { phase in
                         switch phase {
@@ -417,7 +499,7 @@ struct NoteScreenView: View {
                         }
                     }
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(width: geometry.size.width, height: geometry.size.height)
 
                 TextElementsLayer(
                     store: model.canvasElements,
@@ -425,12 +507,21 @@ struct NoteScreenView: View {
                     viewport: canvasViewport,
                     isActive: selectedTool == .text
                 )
+                .frame(
+                    width: PageLayout.contentWidth,
+                    height: pageState.contentHeight,
+                    alignment: .topLeading
+                )
                 .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
                 .offset(
                     x: -canvasViewport.contentOffset.x,
                     y: -canvasViewport.contentOffset.y
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    alignment: .topLeading
+                )
                 .clipped()
 
                 SelectionOverlayView(
@@ -438,13 +529,35 @@ struct NoteScreenView: View {
                     selectionMode: app.toolPreferences.preferences.selection.mode,
                     isActive: selectedTool == .select
                 )
+                .frame(
+                    width: PageLayout.contentWidth,
+                    height: pageState.contentHeight,
+                    alignment: .topLeading
+                )
                 .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
                 .offset(
                     x: -canvasViewport.contentOffset.x,
                     y: -canvasViewport.contentOffset.y
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    alignment: .topLeading
+                )
                 .clipped()
+
+                if selectedTool == .select,
+                   selectionController.selection != nil,
+                   selectionController.strokesSnapshot == nil,
+                   selectionController.dragTranslation == .zero,
+                   let bounds = selectionController.selectionBounds {
+                    SelectionActionStripView(controller: selectionController)
+                        .position(SelectionActionStripView.position(
+                            for: canvasViewport.viewRect(fromContent: bounds),
+                            in: canvasSize
+                        ))
+                        .zIndex(4.5)
+                }
 
                 backlinksRail
                     .frame(width: 184)
@@ -463,11 +576,42 @@ struct NoteScreenView: View {
 
                 if !model.pendingProposals.isEmpty {
                     agentLine
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .frame(
+                            width: geometry.size.width,
+                            height: geometry.size.height,
+                            alignment: .bottomLeading
+                        )
                         .padding(.leading, 80)
                         .padding(.bottom, 92)
                         .zIndex(3)
                 }
+
+                HStack(spacing: 8) {
+                    PageTrackerBadge(
+                        currentPage: pageState.currentPageIndex + 1,
+                        pageCount: pageState.pageCount
+                    ) {
+                        isShowingThumbnails.toggle()
+                    }
+
+                    if !isZoomAtFit {
+                        ZoomResetPill(
+                            zoomPercentOfFit: Int((canvasViewport.zoomScale
+                                / fitZoomScale * 100).rounded()),
+                            onTap: resetZoomToFit
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    }
+                }
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    alignment: .bottomLeading
+                )
+                .padding(.leading, 20)
+                .padding(.bottom, 20)
+                .zIndex(4)
+                .animation(.easeOut(duration: 0.18), value: isZoomAtFit)
 
                 NoteToolbarView(
                     store: app.toolPreferences,
@@ -484,6 +628,12 @@ struct NoteScreenView: View {
                         - (app.toolPreferences.preferences.isToolbarCollapsed ? 43 : 87)
                 )
                 .zIndex(4)
+
+                if isShowingThumbnails {
+                    thumbnailOverlay
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .zIndex(9)
+                }
 
                 if model.isShowingSuggestions {
                     suggestionsOverlay
@@ -582,6 +732,32 @@ struct NoteScreenView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var thumbnailOverlay: some View {
+        ZStack(alignment: .trailing) {
+            Color.black.opacity(0.001)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    isShowingThumbnails = false
+                }
+
+            ThumbnailPanelView(
+                store: thumbnailStore,
+                pageCount: pageState.pageCount,
+                currentPageIndex: pageState.currentPageIndex,
+                onSelect: { index in
+                    scrollCanvas(toPageIndex: index)
+                    isShowingThumbnails = false
+                },
+                onDismiss: {
+                    isShowingThumbnails = false
+                }
+            )
+            .frame(width: 220)
+            .padding(18)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var suggestionsPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -676,16 +852,15 @@ struct NoteScreenView: View {
     }
 
     private var currentVisibleContentRect: CGRect {
-        CGRect(
-            origin: CGPoint(
-                x: canvasViewport.contentOffset.x / canvasViewport.zoomScale,
-                y: canvasViewport.contentOffset.y / canvasViewport.zoomScale
-            ),
-            size: CGSize(
-                width: canvasSize.width / canvasViewport.zoomScale,
-                height: canvasSize.height / canvasViewport.zoomScale
-            )
-        )
+        canvasViewport.visibleContentRect(viewportSize: canvasSize)
+    }
+
+    private var fitZoomScale: CGFloat {
+        PageLayout.minZoom(forViewportWidth: canvasSize.width)
+    }
+
+    private var isZoomAtFit: Bool {
+        canvasSize.width <= 0 || abs(canvasViewport.zoomScale / fitZoomScale - 1) < 0.01
     }
 
     private func cacheCurrentTool() {
@@ -739,6 +914,64 @@ struct NoteScreenView: View {
                 model.errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func scrollCanvas(toPageIndex index: Int) {
+        guard let canvas = canvasReference.canvasView else { return }
+        let y = PageLayout.pageRect(index: index).minY * canvas.zoomScale
+        let maxY = max(0, canvas.contentSize.height - canvas.bounds.height)
+        canvas.setContentOffset(
+            CGPoint(x: canvas.contentOffset.x, y: min(y, maxY)),
+            animated: true
+        )
+    }
+
+    private func resetZoomToFit() {
+        (canvasReference.canvasView as? PagedCanvasView)?.snapZoomToFit()
+    }
+
+    private func currentPageRendererContent() -> NotePageRenderer.Content {
+        let persistedDrawing = model.drawingData.flatMap { data in
+            try? PKDrawing(data: data)
+        }
+        return NotePageRenderer.Content(
+            drawing: canvasReference.canvasView?.drawing
+                ?? persistedDrawing
+                ?? PKDrawing(),
+            elements: model.canvasElements.elements,
+            imagesByAssetPath: model.canvasElements.imageCache,
+            pageCount: pageState.pageCount
+        )
+    }
+
+    private func exportNote(_ format: NoteExporter.Format) {
+        guard !model.isLoading, model.note != nil else {
+            model.errorMessage = "The note must finish loading before it can be exported."
+            return
+        }
+
+        Task {
+            await model.flushPendingSave()
+            let content = currentPageRendererContent()
+
+            do {
+                let output = try NoteExporter.export(
+                    content: content,
+                    title: model.title,
+                    format: format
+                )
+                exportDirectoryToCleanUp = output.directory
+                exportOutput = output
+            } catch {
+                model.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func cleanUpExportDirectory() {
+        guard let directory = exportDirectoryToCleanUp else { return }
+        try? FileManager.default.removeItem(at: directory)
+        exportDirectoryToCleanUp = nil
     }
 }
 
