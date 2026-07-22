@@ -30,6 +30,7 @@ struct InkToolOptionsView: View {
         let config = tool.inkConfigKeyPath.map { store.preferences[keyPath: $0] }
             ?? store.preferences.pen
         let widthRange = NoteToolFactory.widthRange(for: config.style)
+        let currentLevel = ToolWidthLevels.level(forWidth: config.width, in: widthRange)
         let presetWidths = [
             widthRange.lowerBound,
             (widthRange.lowerBound + widthRange.upperBound) / 2,
@@ -57,12 +58,18 @@ struct InkToolOptionsView: View {
 
             OptionsDivider()
 
-            OptionsSectionCaption("Width")
+            HStack(spacing: 6) {
+                OptionsSectionCaption("Width")
+
+                Text("Level \(currentLevel)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(VellumTheme.mutedDark)
+            }
 
             HStack(spacing: 12) {
-                Slider(value: widthBinding, in: widthRange)
+                Slider(value: levelBinding, in: 1...10, step: 1)
                     .accessibilityLabel("Stroke width")
-                    .accessibilityValue("\(Int(config.width.rounded())) points")
+                    .accessibilityValue("Level \(currentLevel)")
 
                 Capsule()
                     .fill(config.color.swiftUIColor)
@@ -74,7 +81,16 @@ struct InkToolOptionsView: View {
             HStack(spacing: 20) {
                 ForEach(Array(presetWidths.enumerated()), id: \.offset) { index, width in
                     Button {
-                        store.setWidth(width, for: tool)
+                        store.setWidth(
+                            ToolWidthLevels.width(
+                                forLevel: ToolWidthLevels.level(
+                                    forWidth: width,
+                                    in: widthRange
+                                ),
+                                in: widthRange
+                            ),
+                            for: tool
+                        )
                     } label: {
                         Circle()
                             .fill(VellumTheme.mutedDark)
@@ -151,16 +167,27 @@ struct InkToolOptionsView: View {
         )
     }
 
-    private var widthBinding: Binding<Double> {
+    private var levelBinding: Binding<Double> {
         Binding(
             get: {
-                guard let keyPath = tool.inkConfigKeyPath else {
-                    return store.preferences.pen.width
-                }
-                return store.preferences[keyPath: keyPath].width
+                let config = tool.inkConfigKeyPath.map { store.preferences[keyPath: $0] }
+                    ?? store.preferences.pen
+                let widthRange = NoteToolFactory.widthRange(for: config.style)
+                return Double(
+                    ToolWidthLevels.level(forWidth: config.width, in: widthRange)
+                )
             },
-            set: { width in
-                store.setWidth(width, for: tool)
+            set: { newValue in
+                let config = tool.inkConfigKeyPath.map { store.preferences[keyPath: $0] }
+                    ?? store.preferences.pen
+                let widthRange = NoteToolFactory.widthRange(for: config.style)
+                store.setWidth(
+                    ToolWidthLevels.width(
+                        forLevel: Int(newValue.rounded()),
+                        in: widthRange
+                    ),
+                    for: tool
+                )
             }
         )
     }
@@ -192,7 +219,14 @@ struct InkToolOptionsView: View {
 struct EraserOptionsView: View {
     let store: ToolPreferencesStore
 
+    private let widthRange: ClosedRange<Double> = 8...60
+
     var body: some View {
+        let currentLevel = ToolWidthLevels.level(
+            forWidth: store.preferences.eraser.width,
+            in: widthRange
+        )
+
         VStack(alignment: .leading, spacing: 14) {
             Text("Eraser Options")
                 .font(.system(size: 17, weight: .semibold))
@@ -216,14 +250,18 @@ struct EraserOptionsView: View {
             if store.preferences.eraser.mode == .partial {
                 OptionsDivider()
 
-                OptionsSectionCaption("Width")
+                HStack(spacing: 6) {
+                    OptionsSectionCaption("Width")
+
+                    Text("Level \(currentLevel)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(VellumTheme.mutedDark)
+                }
 
                 HStack(spacing: 16) {
-                    Slider(value: widthBinding, in: 8...60)
+                    Slider(value: levelBinding, in: 1...10, step: 1)
                         .accessibilityLabel("Eraser width")
-                        .accessibilityValue(
-                            "\(Int(store.preferences.eraser.width.rounded())) points"
-                        )
+                        .accessibilityValue("Level \(currentLevel)")
 
                     Circle()
                         .stroke(VellumTheme.mutedDark, lineWidth: 2)
@@ -249,19 +287,30 @@ struct EraserOptionsView: View {
         )
     }
 
-    private var widthBinding: Binding<Double> {
+    private var levelBinding: Binding<Double> {
         Binding(
-            get: { store.preferences.eraser.width },
-            set: { width in
+            get: {
+                Double(
+                    ToolWidthLevels.level(
+                        forWidth: store.preferences.eraser.width,
+                        in: widthRange
+                    )
+                )
+            },
+            set: { newValue in
                 store.update { preferences in
-                    preferences.eraser.width = width
+                    preferences.eraser.width = ToolWidthLevels.width(
+                        forLevel: Int(newValue.rounded()),
+                        in: widthRange
+                    )
                 }
             }
         )
     }
 
     private var eraserPreviewSize: CGFloat {
-        let normalizedWidth = (store.preferences.eraser.width - 8) / 52
+        let span = widthRange.upperBound - widthRange.lowerBound
+        let normalizedWidth = (store.preferences.eraser.width - widthRange.lowerBound) / span
         let clampedWidth = min(max(normalizedWidth, 0), 1)
         return CGFloat(12 + (clampedWidth * 28))
     }
