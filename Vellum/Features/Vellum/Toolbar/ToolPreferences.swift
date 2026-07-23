@@ -146,6 +146,7 @@ struct ToolPreferences: Codable, Equatable, Sendable {
     var favorites: [CodableColor]
     var lastSelectedTool: ToolID
     var isToolbarCollapsed: Bool
+    var toolbarDock: ToolbarDockPlacement
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
@@ -158,6 +159,7 @@ struct ToolPreferences: Codable, Equatable, Sendable {
         case favorites
         case lastSelectedTool
         case isToolbarCollapsed
+        case toolbarDock
     }
 
     init(
@@ -170,7 +172,8 @@ struct ToolPreferences: Codable, Equatable, Sendable {
         text: TextConfig,
         favorites: [CodableColor],
         lastSelectedTool: ToolID,
-        isToolbarCollapsed: Bool
+        isToolbarCollapsed: Bool,
+        toolbarDock: ToolbarDockPlacement
     ) {
         self.schemaVersion = schemaVersion
         self.pen = pen
@@ -182,6 +185,7 @@ struct ToolPreferences: Codable, Equatable, Sendable {
         self.favorites = favorites
         self.lastSelectedTool = lastSelectedTool
         self.isToolbarCollapsed = isToolbarCollapsed
+        self.toolbarDock = toolbarDock
     }
 
     init(from decoder: Decoder) throws {
@@ -224,6 +228,11 @@ struct ToolPreferences: Codable, Equatable, Sendable {
             Bool.self,
             forKey: .isToolbarCollapsed
         ) ?? defaults.isToolbarCollapsed
+        toolbarDock = try Self.decodeToolbarDock(
+            from: container,
+            forKey: .toolbarDock,
+            default: defaults.toolbarDock
+        )
     }
 
     static let `default` = ToolPreferences(
@@ -244,7 +253,8 @@ struct ToolPreferences: Codable, Equatable, Sendable {
         text: TextConfig(fontSize: 17, color: CodableColor(hex: "#26221B")),
         favorites: defaultFavorites,
         lastSelectedTool: .pen,
-        isToolbarCollapsed: false
+        isToolbarCollapsed: false,
+        toolbarDock: .default
     )
 
     static let defaultFavorites = [
@@ -312,6 +322,24 @@ struct ToolPreferences: Codable, Equatable, Sendable {
             color: payload?.color ?? defaultConfig.color
         )
     }
+
+    private static func decodeToolbarDock(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys,
+        default defaultConfig: ToolbarDockPlacement
+    ) throws -> ToolbarDockPlacement {
+        guard let payload = try container.decodeIfPresent(
+            ToolbarDockPayload.self,
+            forKey: key
+        ) else {
+            return defaultConfig
+        }
+        return ToolbarDockPlacement(
+            edge: payload.edge.flatMap(ToolbarDockEdge.init(rawValue:)) ?? .bottom,
+            fraction: payload.fraction.map { CGFloat(min(max($0, 0), 1)) }
+                ?? defaultConfig.fraction
+        )
+    }
 }
 
 private struct InkToolConfigPayload: Decodable {
@@ -332,6 +360,11 @@ private struct SelectionConfigPayload: Decodable {
 private struct TextConfigPayload: Decodable {
     let fontSize: Double?
     let color: CodableColor?
+}
+
+private struct ToolbarDockPayload: Decodable {
+    let edge: String?
+    let fraction: Double?
 }
 
 extension CodableColor {

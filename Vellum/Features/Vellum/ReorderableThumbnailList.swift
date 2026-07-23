@@ -1,0 +1,514 @@
+import SwiftUI
+import UIKit
+import VellumCore
+
+private struct ThumbnailRequestID: Hashable {
+    let pageIndex: Int
+    let generation: Int
+}
+
+private enum ThumbnailScrollTarget: Hashable, Sendable {
+    case page(UUID)
+    case virtual(Int)
+}
+
+private struct ThumbnailScrollMetrics: Equatable {
+    var contentOffsetY: CGFloat = 0
+    var viewportHeight: CGFloat = 0
+    var contentHeight: CGFloat = 0
+}
+
+private struct ThumbnailDragState {
+    var draggedIndex: Int
+    var grabOffsetY: CGFloat
+    var fingerPanelY: CGFloat
+    var proposedIndex: Int
+    var isLifted: Bool
+}
+
+struct ReorderableThumbnailList: View {
+    let store: PageThumbnailStore
+    let pages: [NotePage]
+    let pageCount: Int
+    let currentPageIndex: Int
+    let geometry: PageGeometry
+    let contentProvider: () -> NotePageRenderer.Content
+    let onSelect: (Int) -> Void
+    let onMovePages: (IndexSet, Int) -> Void
+    let onDeletePage: (Int) -> Void
+
+    @State private var scrollPosition = ScrollPosition(
+        idType: ThumbnailScrollTarget.self
+    )
+    @State private var scrollMetrics = ThumbnailScrollMetrics()
+    @State private var rowHeight: CGFloat = 0
+    @State private var dragState: ThumbnailDragState?
+    @State private var autoScrollTask: Task<Void, Never>?
+    @State private var hasAppliedInitialScroll = false
+
+    private let thumbnailWidth: CGFloat = 156
+    private let edgeScrollZone: CGFloat = 60
+    private let maximumScrollPerTick: CGFloat = 12
+
+    private var estimatedRowHeight: CGFloat {
+        thumbnailWidth * CGFloat(geometry.aspectRatio) + 36
+    }
+
+    private var effectiveRowHeight: CGFloat {
+        rowHeight > 0 ? rowHeight : estimatedRowHeight
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(pages.enumerated()), id: \.element.id) { index, page in
+                    row(pageIndex: index, isRealPage: true)
+                        .id(ThumbnailScrollTarget.page(page.id))
+                        .offset(y: displacement(for: index))
+                        .opacity(dragState?.draggedIndex == index ? 0 : 1)
+                }
+
+                if pageCount > pages.count {
+                    row(pageIndex: pages.count, isRealPage: false)
+                        .id(ThumbnailScrollTarget.virtual(pages.count))
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollIndicators(.hidden)
+        .scrollPosition($scrollPosition)
+        .coordinateSpace(name: "panel")
+        .onScrollGeometryChange(
+            for: ThumbnailScrollMetrics.self,
+            of: {
+                ThumbnailScrollMetrics(
+                    contentOffsetY: $0.contentOffset.y,
+                    viewportHeight: $0.containerSize.height,
+                    contentHeight: $0.contentSize.height
+                )
+            },
+            action: { _, metrics in
+                scrollMetrics = metrics
+                updateProposedIndex()
+            }
+        )
+        .gesture(
+            ReorderLongPressGesture(
+                onLift: beginDrag,
+                onMove: moveDrag,
+                onEnd: endDrag,
+                onCancel: cancelDrag
+            )
+        )
+        .overlay(alignment: .topLeading) {
+            floatingRow
+        }
+        .onAppear {
+            guard !hasAppliedInitialScroll else { return }
+            hasAppliedInitialScroll = true
+            scrollPosition.scrollTo(id: initialScrollTarget, anchor: .center)
+        }
+        .onDisappear {
+            stopAutoScroll()
+            dragState = nil
+        }
+    }
+
+    private var initialScrollTarget: ThumbnailScrollTarget {
+        if pages.indices.contains(currentPageIndex) {
+            return .page(pages[currentPageIndex].id)
+        }
+        return .virtual(currentPageIndex)
+    }
+
+    @ViewBuilder
+    private var floatingRow: some View {
+        if let dragState,
+           pages.indices.contains(dragState.draggedIndex) {
+            ThumbnailRowView(
+                store: store,
+                pageIndex: dragState.draggedIndex,
+                currentPageIndex: currentPageIndex,
+                geometry: geometry,
+                contentProvider: contentProvider,
+                isRealPage: true,
+                canDelete: pages.count > 1,
+                onSelect: onSelect,
+                onDelete: onDeletePage
+            )
+            .frame(height: effectiveRowHeight, alignment: .top)
+            .offset(
+                y: dragState.fingerPanelY - dragState.grabOffsetY
+            )
+            .scaleEffect(dragState.isLifted ? 1.05 : 1)
+            .shadow(
+                color: VellumTheme.ink(dragState.isLifted ? 0.2 : 0),
+                radius: dragState.isLifted ? 10 : 0,
+                y: dragState.isLifted ? 6 : 0
+            )
+            .animation(
+                .spring(response: 0.25, dampingFraction: 0.7),
+                value: dragState.isLifted
+            )
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func row(pageIndex: Int, isRealPage: Bool) -> some View {
+        ThumbnailRowView(
+            store: store,
+            pageIndex: pageIndex,
+            currentPageIndex: currentPageIndex,
+            geometry: geometry,
+            contentProvider: contentProvider,
+            isRealPage: isRealPage,
+            canDelete: isRealPage && pages.count > 1,
+            onSelect: onSelect,
+            onDelete: onDeletePage
+        )
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { measuredHeight in
+            if rowHeight == 0, measuredHeight > 0 {
+                rowHeight = measuredHeight
+            }
+        }
+        .frame(height: effectiveRowHeight, alignment: .top)
+    }
+
+    private func displacement(for index: Int) -> CGFloat {
+        guard let dragState else { return 0 }
+        return ThumbnailDragMath.displacement(
+            forRow: index,
+            draggedIndex: dragState.draggedIndex,
+            proposedIndex: dragState.proposedIndex,
+            rowHeight: effectiveRowHeight
+        )
+    }
+
+    private func beginDrag(_ fingerPanelY: CGFloat) {
+        let height = effectiveRowHeight
+        let fingerContentY = fingerPanelY + scrollMetrics.contentOffsetY
+        guard let draggedIndex = ThumbnailDragMath.liftedIndex(
+            fingerContentY: fingerContentY,
+            rowHeight: height,
+            pageCount: pages.count
+        ) else {
+            return
+        }
+
+        dragState = ThumbnailDragState(
+            draggedIndex: draggedIndex,
+            grabOffsetY: ThumbnailDragMath.grabOffsetY(
+                fingerPanelY: fingerPanelY,
+                contentOffsetY: scrollMetrics.contentOffsetY,
+                draggedIndex: draggedIndex,
+                rowHeight: height
+            ),
+            fingerPanelY: fingerPanelY,
+            proposedIndex: draggedIndex,
+            isLifted: false
+        )
+
+        Task { @MainActor in
+            guard dragState?.draggedIndex == draggedIndex else { return }
+            dragState?.isLifted = true
+        }
+        updateAutoScroll()
+    }
+
+    private func moveDrag(_ fingerPanelY: CGFloat) {
+        guard dragState != nil else { return }
+
+        dragState?.fingerPanelY = fingerPanelY
+        updateProposedIndex()
+        updateAutoScroll()
+    }
+
+    private func updateProposedIndex() {
+        guard let dragState else { return }
+
+        let proposedIndex = ThumbnailDragMath.proposedIndex(
+            fingerPanelY: dragState.fingerPanelY,
+            contentOffsetY: scrollMetrics.contentOffsetY,
+            grabOffsetY: dragState.grabOffsetY,
+            rowHeight: effectiveRowHeight,
+            pageCount: pages.count
+        )
+        guard proposedIndex != dragState.proposedIndex else { return }
+
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+            self.dragState?.proposedIndex = proposedIndex
+        }
+    }
+
+    private func endDrag() {
+        stopAutoScroll()
+        guard let dragState else { return }
+
+        let targetFingerPanelY = CGFloat(dragState.proposedIndex) * effectiveRowHeight
+            - scrollMetrics.contentOffsetY
+            + dragState.grabOffsetY
+        let animation = Animation.spring(response: 0.3, dampingFraction: 0.75)
+
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            self.dragState?.fingerPanelY = targetFingerPanelY
+        } completion: {
+            guard self.dragState?.draggedIndex == dragState.draggedIndex else {
+                return
+            }
+            onMovePages(
+                IndexSet(integer: dragState.draggedIndex),
+                ThumbnailDragMath.dropDestination(
+                    draggedIndex: dragState.draggedIndex,
+                    proposedIndex: dragState.proposedIndex
+                )
+            )
+            self.dragState = nil
+        }
+    }
+
+    private func cancelDrag() {
+        stopAutoScroll()
+        guard let dragState else { return }
+
+        let originFingerPanelY = CGFloat(dragState.draggedIndex) * effectiveRowHeight
+            - scrollMetrics.contentOffsetY
+            + dragState.grabOffsetY
+        let animation = Animation.spring(response: 0.3, dampingFraction: 0.75)
+
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            self.dragState?.fingerPanelY = originFingerPanelY
+        } completion: {
+            guard self.dragState?.draggedIndex == dragState.draggedIndex else {
+                return
+            }
+            self.dragState = nil
+        }
+    }
+
+    private func updateAutoScroll() {
+        let speed = autoScrollSpeed()
+        let maximumOffset = max(scrollMetrics.contentHeight - scrollMetrics.viewportHeight, 0)
+        let canScroll = (speed < 0 && scrollMetrics.contentOffsetY > 0)
+            || (speed > 0 && scrollMetrics.contentOffsetY < maximumOffset)
+
+        guard speed != 0, canScroll else {
+            stopAutoScroll()
+            return
+        }
+        guard autoScrollTask == nil else { return }
+
+        autoScrollTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .nanoseconds(16_666_667))
+                guard !Task.isCancelled else { return }
+                autoScrollTick()
+            }
+        }
+    }
+
+    private func autoScrollTick() {
+        guard dragState != nil else {
+            stopAutoScroll()
+            return
+        }
+
+        let speed = autoScrollSpeed()
+        let maximumOffset = max(scrollMetrics.contentHeight - scrollMetrics.viewportHeight, 0)
+        let newOffset = min(
+            max(scrollMetrics.contentOffsetY + speed, 0),
+            maximumOffset
+        )
+        guard speed != 0, newOffset != scrollMetrics.contentOffsetY else {
+            stopAutoScroll()
+            return
+        }
+
+        scrollPosition.scrollTo(y: newOffset)
+        scrollMetrics.contentOffsetY = newOffset
+        updateProposedIndex()
+    }
+
+    private func autoScrollSpeed() -> CGFloat {
+        guard let fingerY = dragState?.fingerPanelY,
+              scrollMetrics.viewportHeight > 0 else {
+            return 0
+        }
+
+        if fingerY < edgeScrollZone {
+            let edgeDistance = max(fingerY, 0)
+            return -maximumScrollPerTick * (1 - edgeDistance / edgeScrollZone)
+        }
+
+        let bottomZoneStart = scrollMetrics.viewportHeight - edgeScrollZone
+        if fingerY > bottomZoneStart {
+            let edgeDistance = max(scrollMetrics.viewportHeight - fingerY, 0)
+            return maximumScrollPerTick * (1 - edgeDistance / edgeScrollZone)
+        }
+
+        return 0
+    }
+
+    private func stopAutoScroll() {
+        autoScrollTask?.cancel()
+        autoScrollTask = nil
+    }
+}
+
+private struct ThumbnailRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let store: PageThumbnailStore
+    let pageIndex: Int
+    let currentPageIndex: Int
+    let geometry: PageGeometry
+    let contentProvider: () -> NotePageRenderer.Content
+    let isRealPage: Bool
+    let canDelete: Bool
+    let onSelect: (Int) -> Void
+    let onDelete: (Int) -> Void
+
+    private let thumbnailWidth: CGFloat = 156
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                onSelect(pageIndex)
+            } label: {
+                VStack(spacing: 7) {
+                    thumbnail
+
+                    Text("\(pageIndex + 1)")
+                        .font(.vellumMono(10.5))
+                        .foregroundStyle(
+                            pageIndex == currentPageIndex
+                                ? VellumTheme.accentDark
+                                : VellumTheme.mutedCount
+                        )
+                }
+                .frame(width: thumbnailWidth)
+            }
+            .buttonStyle(.plain)
+
+            VStack {
+                if isRealPage, canDelete {
+                    Button {
+                        onDelete(pageIndex)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(VellumTheme.mutedDark)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Delete page \(pageIndex + 1)")
+                }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: thumbnailWidth * CGFloat(geometry.aspectRatio))
+        }
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(
+            id: ThumbnailRequestID(
+                pageIndex: pageIndex,
+                generation: store.generation
+            )
+        ) {
+            var content = contentProvider()
+            content.interfaceStyle = colorScheme == .dark ? .dark : .light
+            await store.requestImage(for: pageIndex, content: content)
+        }
+    }
+
+    @ViewBuilder
+    private var thumbnail: some View {
+        Group {
+            if let image = store.images[pageIndex] {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(VellumTheme.paper)
+                    ProgressView()
+                }
+            }
+        }
+        .frame(
+            width: thumbnailWidth,
+            height: thumbnailWidth * CGFloat(geometry.aspectRatio)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay {
+            if pageIndex == currentPageIndex {
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(VellumTheme.accent, lineWidth: 2)
+            }
+        }
+    }
+}
+
+struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
+    let onLift: (CGFloat) -> Void
+    let onMove: (CGFloat) -> Void
+    let onEnd: () -> Void
+    let onCancel: () -> Void
+
+    func makeUIGestureRecognizer(
+        context: Context
+    ) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        configure(recognizer)
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(
+        _ recognizer: UILongPressGestureRecognizer,
+        context: Context
+    ) {
+        configure(recognizer)
+    }
+
+    func handleUIGestureRecognizerAction(
+        _ recognizer: UILongPressGestureRecognizer,
+        context: Context
+    ) {
+        switch recognizer.state {
+        case .began:
+            onLift(convertedPanelY(for: recognizer, context: context))
+        case .changed:
+            onMove(convertedPanelY(for: recognizer, context: context))
+        case .ended:
+            onEnd()
+        case .cancelled, .failed:
+            onCancel()
+        case .possible:
+            break
+        @unknown default:
+            onCancel()
+        }
+    }
+
+    private func configure(_ recognizer: UILongPressGestureRecognizer) {
+        recognizer.minimumPressDuration = 0.2
+        recognizer.numberOfTouchesRequired = 1
+        recognizer.cancelsTouchesInView = true
+    }
+
+    private func convertedPanelY(
+        for recognizer: UILongPressGestureRecognizer,
+        context: Context
+    ) -> CGFloat {
+        let globalPoint = recognizer.location(in: nil)
+        return context.converter.convert(
+            globalPoint: globalPoint,
+            to: .named("panel")
+        ).y
+    }
+}

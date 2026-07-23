@@ -21,6 +21,18 @@ struct NoteToolbarView: View {
     var backgroundStyle: Binding<PageBackgroundStyle>? = nil
     var onInsertPhoto: (() -> Void)? = nil
     var onInsertFile: (() -> Void)? = nil
+    var dockEdge: ToolbarDockEdge = .bottom
+
+    private var isVertical: Bool { dockEdge.axis == .vertical }
+
+    private var arrowEdge: Edge {
+        switch dockEdge {
+        case .top: .top
+        case .bottom: .bottom
+        case .left: .leading
+        case .right: .trailing
+        }
+    }
 
     var body: some View {
         Group {
@@ -42,13 +54,13 @@ struct NoteToolbarView: View {
                 .stroke(VellumTheme.ink(0.12), lineWidth: 1)
         }
         .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
-        .popover(item: $activeOptionsTool, arrowEdge: .bottom) { tool in
+        .popover(item: $activeOptionsTool, arrowEdge: arrowEdge) { tool in
             ToolOptionsPopover(tool: tool, store: store)
         }
-        .popover(isPresented: $isShowingFavoritesEditor, arrowEdge: .bottom) {
+        .popover(isPresented: $isShowingFavoritesEditor, arrowEdge: arrowEdge) {
             FavoritesEditView(store: store)
         }
-        .popover(isPresented: $isShowingBackgroundOptions, arrowEdge: .bottom) {
+        .popover(isPresented: $isShowingBackgroundOptions, arrowEdge: arrowEdge) {
             if let backgroundStyle {
                 PageBackgroundOptionsView(style: backgroundStyle)
             }
@@ -56,30 +68,66 @@ struct NoteToolbarView: View {
     }
 
     private var expandedToolbar: some View {
-        VStack(spacing: 0) {
-            toolbarRow
-
-            if selectedTool.isInkTool {
-                Rectangle()
-                    .fill(VellumTheme.ink(0.12))
-                    .frame(height: 1)
-
-                FavoriteColorRow(
-                    store: store,
-                    activeInkTool: selectedTool,
-                    onRequestOptions: {
-                        activeOptionsTool = selectedTool
-                    },
-                    onRequestFavoritesEditor: {
-                        isShowingFavoritesEditor = true
-                    }
-                )
+        let sectionStack = isVertical
+            ? AnyLayout(HStackLayout(spacing: 0))
+            : AnyLayout(VStackLayout(spacing: 0))
+        return sectionStack {
+            if dockEdge.secondarySectionLeads {
+                secondarySection
+                if hasSecondarySection {
+                    sectionDivider
+                }
+                toolsSection
+            } else {
+                toolsSection
+                if hasSecondarySection {
+                    sectionDivider
+                }
+                secondarySection
             }
         }
     }
 
-    private var toolbarRow: some View {
-        HStack(spacing: 14) {
+    private var hasSecondarySection: Bool { selectedTool != .text }
+
+    @ViewBuilder
+    private var secondarySection: some View {
+        switch selectedTool {
+        case .pen, .pencil, .highlighter:
+            FavoriteColorRow(
+                store: store,
+                activeInkTool: selectedTool,
+                axis: dockEdge.axis,
+                onRequestOptions: {
+                    activeOptionsTool = selectedTool
+                },
+                onRequestFavoritesEditor: {
+                    isShowingFavoritesEditor = true
+                }
+            )
+        case .eraser:
+            EraserModeRow(store: store, axis: dockEdge.axis)
+        case .select:
+            SelectionModeRow(store: store, axis: dockEdge.axis)
+        case .text:
+            EmptyView()
+        }
+    }
+
+    private var sectionDivider: some View {
+        Rectangle()
+            .fill(VellumTheme.ink(0.12))
+            .frame(
+                width: isVertical ? 1 : nil,
+                height: isVertical ? nil : 1
+            )
+    }
+
+    private var toolsSection: some View {
+        let stack = isVertical
+            ? AnyLayout(VStackLayout(spacing: 14))
+            : AnyLayout(HStackLayout(spacing: 14))
+        return stack {
             Button {
                 canvasReference.canvasView?.undoManager?.undo()
             } label: {
@@ -94,7 +142,7 @@ struct NoteToolbarView: View {
             }
             .accessibilityLabel("Redo")
 
-            divider
+            itemDivider
 
             toolButton(.pen, systemImage: "pencil.tip")
             toolButton(.pencil, systemImage: "pencil")
@@ -103,7 +151,7 @@ struct NoteToolbarView: View {
             toolButton(.select, systemImage: "lasso")
             toolButton(.text, systemImage: "character.cursor.ibeam")
 
-            divider
+            itemDivider
 
             Menu {
                 Button {
@@ -137,12 +185,15 @@ struct NoteToolbarView: View {
 
             collapseButton
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 10)
+        .padding(.horizontal, isVertical ? 10 : 22)
+        .padding(.vertical, isVertical ? 22 : 10)
     }
 
     private var collapsedToolbar: some View {
-        HStack(spacing: 10) {
+        let stack = isVertical
+            ? AnyLayout(VStackLayout(spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+        return stack {
             Image(systemName: systemImage(for: selectedTool))
                 .frame(width: 24, height: 24)
                 .foregroundStyle(VellumTheme.accentDark)
@@ -150,14 +201,17 @@ struct NoteToolbarView: View {
 
             collapseButton
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, isVertical ? 10 : 14)
+        .padding(.vertical, isVertical ? 14 : 10)
     }
 
-    private var divider: some View {
+    private var itemDivider: some View {
         Rectangle()
             .fill(VellumTheme.ink(0.12))
-            .frame(width: 1, height: 20)
+            .frame(
+                width: isVertical ? 20 : 1,
+                height: isVertical ? 1 : 20
+            )
     }
 
     private func toolButton(
@@ -166,7 +220,9 @@ struct NoteToolbarView: View {
     ) -> some View {
         Button {
             if selectedTool == tool {
-                activeOptionsTool = tool
+                if tool != .select {
+                    activeOptionsTool = tool
+                }
             } else {
                 selectedTool = tool
             }
@@ -196,16 +252,25 @@ struct NoteToolbarView: View {
                 }
             }
         } label: {
-            Image(
-                systemName: store.preferences.isToolbarCollapsed
-                    ? "chevron.up"
-                    : "chevron.down"
-            )
-            .frame(width: 24, height: 24)
+            Image(systemName: collapseSystemImage)
+                .frame(width: 24, height: 24)
         }
         .accessibilityLabel(
             store.preferences.isToolbarCollapsed ? "Expand toolbar" : "Collapse toolbar"
         )
+    }
+
+    private var collapseSystemImage: String {
+        switch dockEdge {
+        case .bottom:
+            store.preferences.isToolbarCollapsed ? "chevron.up" : "chevron.down"
+        case .top:
+            store.preferences.isToolbarCollapsed ? "chevron.down" : "chevron.up"
+        case .left:
+            store.preferences.isToolbarCollapsed ? "chevron.right" : "chevron.left"
+        case .right:
+            store.preferences.isToolbarCollapsed ? "chevron.left" : "chevron.right"
+        }
     }
 
     private func systemImage(for tool: ToolID) -> String {

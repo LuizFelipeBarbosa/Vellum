@@ -265,6 +265,7 @@ struct PencilCanvasView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PKCanvasView {
         let canvasView: PKCanvasView = PagedCanvasView()
+        canvasView.contentInsetAdjustmentBehavior = .never
         (canvasView as? PagedCanvasView)?.contentHeightInContentSpace = contentHeight
         canvasView.delegate = context.coordinator
 #if targetEnvironment(simulator)

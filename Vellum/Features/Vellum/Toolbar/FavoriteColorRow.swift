@@ -4,24 +4,44 @@ import VellumCore
 struct FavoriteColorRow: View {
     let store: ToolPreferencesStore
     let activeInkTool: ToolID?
+    var axis: ToolbarDockEdge.Axis = .horizontal
     var onRequestOptions: () -> Void
     var onRequestFavoritesEditor: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 12) {
-                    ForEach(
-                        Array(store.preferences.favorites.enumerated()),
-                        id: \.offset
-                    ) { _, color in
-                        colorDot(color)
+        let stack = axis == .vertical
+            ? AnyLayout(VStackLayout(spacing: 14))
+            : AnyLayout(HStackLayout(spacing: 14))
+        stack {
+            if axis == .vertical {
+                ScrollView(.vertical) {
+                    VStack(spacing: 12) {
+                        ForEach(
+                            Array(store.preferences.favorites.enumerated()),
+                            id: \.offset
+                        ) { _, color in
+                            colorDot(color)
+                        }
                     }
+                    .padding(4)
                 }
-                .padding(4)
+                .scrollIndicators(.hidden)
+                .frame(height: 292)
+            } else {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 12) {
+                        ForEach(
+                            Array(store.preferences.favorites.enumerated()),
+                            id: \.offset
+                        ) { _, color in
+                            colorDot(color)
+                        }
+                    }
+                    .padding(4)
+                }
+                .scrollIndicators(.hidden)
+                .frame(width: 292)
             }
-            .scrollIndicators(.hidden)
-            .frame(width: 292)
 
             Button {
                 onRequestFavoritesEditor()
@@ -38,7 +58,10 @@ struct FavoriteColorRow: View {
 
             Rectangle()
                 .fill(VellumTheme.ink(0.12))
-                .frame(width: 1, height: 22)
+                .frame(
+                    width: axis == .vertical ? 22 : 1,
+                    height: axis == .vertical ? 1 : 22
+                )
 
             Button {
                 onRequestOptions()
@@ -54,8 +77,8 @@ struct FavoriteColorRow: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(VellumTheme.mutedDark)
-        .padding(.horizontal, 22)
-        .padding(.vertical, 10)
+        .padding(.horizontal, axis == .vertical ? 10 : 22)
+        .padding(.vertical, axis == .vertical ? 22 : 10)
     }
 
     private var resolvedInkTool: ToolID {

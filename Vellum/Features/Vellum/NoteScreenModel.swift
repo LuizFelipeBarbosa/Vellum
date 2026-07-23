@@ -366,6 +366,40 @@ final class NoteScreenModel {
         }
     }
 
+    func deletePage(at index: Int) {
+        guard let canvasView = canvasElements.canvasReference?.canvasView,
+              !canvasView.isZooming,
+              (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else {
+            return
+        }
+
+        materializePagesForFilledBands()
+        guard let currentNote = note else { return }
+        guard currentNote.pages.indices.contains(index),
+              currentNote.pages.count > 1 else {
+            return
+        }
+
+        pendingPageMutationSave = true
+        defer { pendingPageMutationSave = false }
+
+        let result = PageDeleter.deletePage(
+            at: index,
+            drawing: canvasView.drawing,
+            elements: canvasElements.elements,
+            pages: currentNote.pages,
+            geometry: currentNote.pageGeometry
+        )
+
+        canvasElements.performTransaction("Delete Page") {
+            canvasElements.mutateDrawing { $0 = result.drawing }
+            canvasElements.replaceAllElements(result.elements)
+            note?.pages = result.pages
+        }
+
+        onScrollToPage?(min(index, (note?.pages.count ?? 1) - 1))
+    }
+
     func addPageAtEnd() {
         guard let canvasView = canvasElements.canvasReference?.canvasView,
               !canvasView.isZooming,
