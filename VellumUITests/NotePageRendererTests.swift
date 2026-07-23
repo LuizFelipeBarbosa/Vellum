@@ -1,4 +1,5 @@
 import Foundation
+import PDFKit
 import PencilKit
 import UIKit
 @testable import Vellum
@@ -8,8 +9,8 @@ import XCTest
 @MainActor
 final class NotePageRendererTests: XCTestCase {
     func testInkIsCroppedToItsPage() throws {
-        let relativeY = PageLayout.pageHeight / 2
-        let absoluteY = PageLayout.pageHeight + relativeY
+        let relativeY = PageGeometry.a4.pageHeight / 2
+        let absoluteY = PageGeometry.a4.pageHeight + relativeY
         let stroke = makeStroke(
             locations: [
                 CGPoint(x: 300, y: absoluteY - 24),
@@ -44,7 +45,7 @@ final class NotePageRendererTests: XCTestCase {
     func testTextElementDrawsInsideItsFrame() throws {
         let frame = CanvasRect(
             x: 140,
-            y: Double(PageLayout.pageHeight / 2 - 60),
+            y: Double(PageGeometry.a4.pageHeight / 2 - 60),
             width: 400,
             height: 120
         )
@@ -147,7 +148,7 @@ final class NotePageRendererTests: XCTestCase {
         let image = solidImage(color: .red, size: CGSize(width: 8, height: 4))
         let frame = CanvasRect(
             x: 250,
-            y: Double(PageLayout.pageHeight / 2 - 100),
+            y: Double(PageGeometry.a4.pageHeight / 2 - 100),
             width: 200,
             height: 200
         )
@@ -176,7 +177,7 @@ final class NotePageRendererTests: XCTestCase {
 
     func testRotatedImageCrossingPageBoundaryDrawsOnSecondPage() throws {
         let assetPath = "assets/rotated-red.png"
-        let centerY = PageLayout.pageHeight - 30
+        let centerY = PageGeometry.a4.pageHeight - 30
         let element = CanvasElement(
             content: .image(
                 ImageContent(
@@ -203,9 +204,9 @@ final class NotePageRendererTests: XCTestCase {
             for: render(pageIndex: 1, content: makeContent(pageCount: 2))
         )
         let overlap = element.rotatedBoundingBox.intersection(
-            PageLayout.pageRect(index: 1)
+            PageGeometry.a4.pageRect(index: 1)
         )
-        let pageLocalOverlap = overlap.offsetBy(dx: 0, dy: -PageLayout.pageHeight)
+        let pageLocalOverlap = overlap.offsetBy(dx: 0, dy: -PageGeometry.a4.pageHeight)
 
         XCTAssertGreaterThan(
             differingPixelCount(rendered, reference, in: pageLocalOverlap),
@@ -243,22 +244,594 @@ final class NotePageRendererTests: XCTestCase {
         XCTAssertEqual(cgImage.height, Int(pointSize.height * scale))
     }
 
+    func testRuledStyleRendersHorizontalLinesAtSpacingIntervals() throws {
+        let spacing: Double = 32
+        let rendered = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: PageBackgroundStyle(kind: .ruled, spacing: spacing)
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let reference = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: PageBackgroundStyle(kind: .blank, spacing: spacing)
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let lineRect = CGRect(x: 96, y: 30, width: 576, height: 4)
+        let betweenLinesRect = CGRect(x: 96, y: 46, width: 576, height: 4)
+
+        XCTAssertGreaterThan(
+            differingPixelCount(rendered, reference, in: lineRect),
+            0
+        )
+        XCTAssertEqual(
+            differingPixelCount(rendered, reference, in: betweenLinesRect),
+            0
+        )
+    }
+
+    func testGridStyleRendersHorizontalAndVerticalLines() throws {
+        let spacing: Double = 32
+        let rendered = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: PageBackgroundStyle(kind: .grid, spacing: spacing)
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let reference = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: PageBackgroundStyle(kind: .blank, spacing: spacing)
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let horizontalLineRect = CGRect(x: 78, y: 30, width: 4, height: 4)
+        let verticalLineRect = CGRect(x: 30, y: 78, width: 4, height: 4)
+
+        XCTAssertGreaterThan(
+            differingPixelCount(rendered, reference, in: horizontalLineRect),
+            0
+        )
+        XCTAssertGreaterThan(
+            differingPixelCount(rendered, reference, in: verticalLineRect),
+            0
+        )
+    }
+
+    func testBlankStyleRendersNoPattern() throws {
+        let blank = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(style: .blank),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let dots = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let traits = UITraitCollection(userInterfaceStyle: .light)
+        let paperColor = UIColor(VellumTheme.card).resolvedColor(with: traits)
+        let plainPaper = try pixelBuffer(
+            for: solidImage(color: paperColor, size: fullRenderPointSize)
+        )
+        let dotRect = CGRect(x: 22, y: 22, width: 4, height: 4)
+
+        XCTAssertGreaterThan(
+            differingPixelCount(dots, plainPaper, in: dotRect),
+            0
+        )
+        XCTAssertEqual(
+            differingPixelCount(blank, plainPaper, in: dotRect),
+            0
+        )
+    }
+
+    func testCustomPaperTintFillsTheSheetWithThatColor() throws {
+        let tint = CodableColor(red: 0.2, green: 0.4, blue: 0.8)
+        let pixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: PageBackgroundStyle(kind: .blank, paperTint: tint)
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let pixel = pixels.pixel(
+            atContentPoint: CGPoint(
+                x: PageLayout.contentWidth / 2,
+                y: PageGeometry.a4.pageHeight / 2
+            )
+        )
+
+        XCTAssertEqual(CGFloat(pixel.red), CGFloat(tint.red * 255), accuracy: 4)
+        XCTAssertEqual(CGFloat(pixel.green), CGFloat(tint.green * 255), accuracy: 4)
+        XCTAssertEqual(CGFloat(pixel.blue), CGFloat(tint.blue * 255), accuracy: 4)
+        XCTAssertEqual(pixel.alpha, 255)
+    }
+
+    func testDarkPaperTintUsesLightPatternInk() throws {
+        let tint = CodableColor(hex: "#23201A")
+        let dots = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: PageBackgroundStyle(kind: .dots, paperTint: tint)
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let blank = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: PageBackgroundStyle(kind: .blank, paperTint: tint)
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let dotPoint = CGPoint(x: 24, y: 24)
+        let dotPixel = dots.pixel(atContentPoint: dotPoint)
+        let backgroundPixel = blank.pixel(atContentPoint: dotPoint)
+
+        XCTAssertGreaterThan(dotPixel.red, backgroundPixel.red)
+        XCTAssertGreaterThan(dotPixel.green, backgroundPixel.green)
+        XCTAssertGreaterThan(dotPixel.blue, backgroundPixel.blue)
+        XCTAssertGreaterThan(
+            differingPixelCount(
+                dots,
+                blank,
+                in: CGRect(x: 22, y: 22, width: 4, height: 4)
+            ),
+            0
+        )
+    }
+
+    func testSecondPageDotsAlignToThePageOrigin() throws {
+        let pageRect = PageGeometry.a4.pageRect(index: 1)
+        let spacing = CGFloat(PageBackgroundStyle.legacyDefault.spacing)
+        let absoluteDotY = pageRect.minY + spacing
+        let pageLocalDotY = absoluteDotY - pageRect.minY
+        let rendered = try pixelBuffer(
+            for: render(
+                pageIndex: 1,
+                content: makeContent(pageCount: 2),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let reference = try pixelBuffer(
+            for: render(
+                pageIndex: 1,
+                content: makeContent(
+                    pageCount: 2,
+                    style: .blank
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let dotRect = CGRect(
+            x: spacing - 2,
+            y: pageLocalDotY - 2,
+            width: 4,
+            height: 4
+        )
+
+        XCTAssertEqual(pageRect.minY, PageGeometry.a4.pageHeight, accuracy: 0.001)
+        XCTAssertEqual(pageLocalDotY, spacing, accuracy: 0.001)
+        XCTAssertGreaterThan(
+            differingPixelCount(rendered, reference, in: dotRect),
+            0
+        )
+    }
+
+    func testPDFPageRendersAspectFitWithPaperLetterboxingAndLeavesOtherBandsUnchanged()
+        throws {
+        let sourceSize = CGSize(width: 320, height: 320)
+        let pdfDocument = try makeSolidPDFDocument(color: .blue, size: sourceSize)
+        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
+        let content = makeContent(
+            pageCount: 2,
+            style: .blank,
+            pdfPagesByBand: [0: pdfPage]
+        )
+        let renderedPDFBand = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: content,
+                pointSize: fullRenderPointSize
+            )
+        )
+        let blankContent = makeContent(pageCount: 2, style: .blank)
+        let blankFirstBand = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: blankContent,
+                pointSize: fullRenderPointSize
+            )
+        )
+        let fittedRect = PageGeometry.a4.fittedRect(
+            forSourcePageSize: sourceSize,
+            pageIndex: 0
+        )
+        let pdfPixel = renderedPDFBand.pixel(atContentPoint: CGPoint(
+            x: fittedRect.midX,
+            y: fittedRect.midY
+        ))
+        let marginPoint = CGPoint(
+            x: PageLayout.contentWidth / 2,
+            y: fittedRect.minY / 2
+        )
+        let marginPixel = renderedPDFBand.pixel(atContentPoint: marginPoint)
+        let paperPixel = blankFirstBand.pixel(atContentPoint: marginPoint)
+
+        XCTAssertLessThanOrEqual(pdfPixel.red, 8)
+        XCTAssertLessThanOrEqual(pdfPixel.green, 8)
+        XCTAssertGreaterThanOrEqual(pdfPixel.blue, 230)
+        XCTAssertFalse(marginPixel.differs(from: paperPixel))
+        XCTAssertTrue(marginPixel.differs(from: pdfPixel))
+
+        let renderedNonPDFBand = try pixelBuffer(
+            for: render(
+                pageIndex: 1,
+                content: content,
+                pointSize: fullRenderPointSize
+            )
+        )
+        let referenceNonPDFBand = try pixelBuffer(
+            for: render(
+                pageIndex: 1,
+                content: blankContent,
+                pointSize: fullRenderPointSize
+            )
+        )
+        XCTAssertEqual(
+            differingPixelCount(
+                renderedNonPDFBand,
+                referenceNonPDFBand,
+                in: CGRect(origin: .zero, size: fullRenderPointSize)
+            ),
+            0
+        )
+    }
+
+    func testLetterGeometryFillsTheFormerA4LetterboxMarginWithPDFContent() throws {
+        let geometry = PageGeometry(aspectRatio: 792.0 / 612.0)
+        let sourceSize = CGSize(width: 612, height: 792)
+        let pdfDocument = try makeSolidPDFDocument(color: .white, size: sourceSize)
+        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
+        let tintedPaper = PageBackgroundStyle(
+            kind: .blank,
+            paperTint: CodableColor(red: 0.55, green: 0.35, blue: 0.2)
+        )
+        let pointSize = CGSize(
+            width: geometry.contentWidth,
+            height: geometry.pageHeight
+        )
+        let rendered = try pixelBuffer(
+            for: renderVector(
+                pageIndex: 0,
+                content: makeContent(
+                    geometry: geometry,
+                    style: tintedPaper,
+                    pdfPagesByBand: [0: pdfPage]
+                ),
+                pointSize: pointSize
+            )
+        )
+        let reference = try pixelBuffer(
+            for: renderVector(
+                pageIndex: 0,
+                content: makeContent(
+                    geometry: geometry,
+                    style: tintedPaper
+                ),
+                pointSize: pointSize
+            )
+        )
+        let oldA4FittedRect = PageGeometry.a4.fittedRect(
+            forSourcePageSize: sourceSize,
+            pageIndex: 0
+        )
+        let probePoint = CGPoint(x: geometry.contentWidth / 2, y: 20)
+        let x = Int(probePoint.x)
+        let y = Int(probePoint.y)
+        let pdfPixel = rendered.pixel(x: x, y: y)
+        let paperPixel = reference.pixel(x: x, y: y)
+
+        XCTAssertLessThan(probePoint.y, oldA4FittedRect.minY)
+        XCTAssertTrue(pdfPixel.differs(from: paperPixel))
+        XCTAssertGreaterThanOrEqual(pdfPixel.red, 245)
+        XCTAssertGreaterThanOrEqual(pdfPixel.green, 245)
+        XCTAssertGreaterThanOrEqual(pdfPixel.blue, 245)
+    }
+
+    func testWhitePDFOverBlankPaperInLightModeIsPixelIdenticalToPaper() throws {
+        let sourceSize = CGSize(width: 320, height: 320)
+        let pdfDocument = try makeSolidPDFDocument(color: .white, size: sourceSize)
+        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
+        let rendered = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: .blank,
+                    pdfPagesByBand: [0: pdfPage]
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let reference = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(style: .blank),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let fittedRect = PageGeometry.a4.fittedRect(
+            forSourcePageSize: sourceSize,
+            pageIndex: 0
+        ).insetBy(dx: 16, dy: 16)
+
+        XCTAssertEqual(
+            differingPixelCount(rendered, reference, in: fittedRect),
+            0
+        )
+    }
+
+    func testDarkInterfaceStyleRendersDarkCardPaperAndLightInk() throws {
+        let center = CGPoint(
+            x: PageLayout.contentWidth / 2,
+            y: PageGeometry.a4.pageHeight / 2
+        )
+        let paperContent = makeContent(style: .blank, interfaceStyle: .dark)
+        let paperPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: paperContent,
+                pointSize: fullRenderPointSize
+            )
+        )
+        let paperPixel = paperPixels.pixel(atContentPoint: center)
+
+        XCTAssertEqual(CGFloat(paperPixel.red), 0x24, accuracy: 10)
+        XCTAssertEqual(CGFloat(paperPixel.green), 0x20, accuracy: 10)
+        XCTAssertEqual(CGFloat(paperPixel.blue), 0x19, accuracy: 10)
+
+        let stroke = makeStroke(
+            locations: [
+                CGPoint(x: center.x - 40, y: center.y),
+                center,
+                CGPoint(x: center.x + 40, y: center.y),
+            ],
+            size: CGSize(width: 28, height: 28)
+        )
+        let inkPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    drawing: PKDrawing(strokes: [stroke]),
+                    style: .blank,
+                    interfaceStyle: .dark
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let inkPixel = inkPixels.pixel(atContentPoint: center)
+
+        XCTAssertGreaterThan(inkPixel.red, paperPixel.red)
+    }
+
+    func testWhitePDFInDarkModeApproximatesDarkCardPaper() throws {
+        let sourceSize = CGSize(width: 320, height: 320)
+        let pdfDocument = try makeSolidPDFDocument(color: .white, size: sourceSize)
+        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
+        let rendered = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: .blank,
+                    interfaceStyle: .dark,
+                    pdfPagesByBand: [0: pdfPage]
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let reference = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: .blank,
+                    interfaceStyle: .dark
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let fittedRect = PageGeometry.a4.fittedRect(
+            forSourcePageSize: sourceSize,
+            pageIndex: 0
+        )
+        let sampleRect = CGRect(
+            x: fittedRect.midX - 8,
+            y: fittedRect.midY - 8,
+            width: 16,
+            height: 16
+        )
+
+        XCTAssertEqual(
+            differingPixelCount(rendered, reference, in: sampleRect),
+            0
+        )
+    }
+
+    func testBluePDFInDarkModeKeepsBlueChannelDominant() throws {
+        let sourceSize = CGSize(width: 320, height: 320)
+        let pdfDocument = try makeSolidPDFDocument(color: .blue, size: sourceSize)
+        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
+        let rendered = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: .blank,
+                    interfaceStyle: .dark,
+                    pdfPagesByBand: [0: pdfPage]
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let fittedRect = PageGeometry.a4.fittedRect(
+            forSourcePageSize: sourceSize,
+            pageIndex: 0
+        )
+        let pixel = rendered.pixel(atContentPoint: CGPoint(
+            x: fittedRect.midX,
+            y: fittedRect.midY
+        ))
+
+        XCTAssertGreaterThan(pixel.blue, pixel.red)
+        XCTAssertGreaterThan(pixel.blue, pixel.green)
+    }
+
+    func testVectorTreatmentStillYieldsFullBlueForExport() throws {
+        let sourceSize = CGSize(width: 320, height: 320)
+        let pdfDocument = try makeSolidPDFDocument(color: .blue, size: sourceSize)
+        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
+        let rendered = try pixelBuffer(
+            for: renderVector(
+                pageIndex: 0,
+                content: makeContent(
+                    style: .blank,
+                    pdfPagesByBand: [0: pdfPage]
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let fittedRect = PageGeometry.a4.fittedRect(
+            forSourcePageSize: sourceSize,
+            pageIndex: 0
+        )
+        let pixel = rendered.pixel(atContentPoint: CGPoint(
+            x: fittedRect.midX,
+            y: fittedRect.midY
+        ))
+
+        XCTAssertLessThanOrEqual(pixel.red, 8)
+        XCTAssertLessThanOrEqual(pixel.green, 8)
+        XCTAssertGreaterThanOrEqual(pixel.blue, 247)
+    }
+
+    func testInkCompositesAbovePDFPage() throws {
+        let pdfDocument = try makeSolidPDFDocument(
+            color: .blue,
+            size: CGSize(width: 320, height: 320)
+        )
+        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
+        let center = CGPoint(
+            x: PageLayout.contentWidth / 2,
+            y: PageGeometry.a4.pageHeight / 2
+        )
+        let stroke = makeStroke(
+            locations: [
+                CGPoint(x: center.x - 40, y: center.y),
+                center,
+                CGPoint(x: center.x + 40, y: center.y),
+            ],
+            size: CGSize(width: 28, height: 28)
+        )
+        let pdfOnly = makeContent(
+            style: .blank,
+            pdfPagesByBand: [0: pdfPage]
+        )
+        let withInk = makeContent(
+            drawing: PKDrawing(strokes: [stroke]),
+            style: .blank,
+            pdfPagesByBand: [0: pdfPage]
+        )
+        let pdfOnlyPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: pdfOnly,
+                pointSize: fullRenderPointSize
+            )
+        )
+        let withInkPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: withInk,
+                pointSize: fullRenderPointSize
+            )
+        )
+
+        XCTAssertTrue(
+            withInkPixels.pixel(atContentPoint: center).differs(
+                from: pdfOnlyPixels.pixel(atContentPoint: center)
+            )
+        )
+        XCTAssertGreaterThan(
+            differingPixelCount(
+                withInkPixels,
+                pdfOnlyPixels,
+                in: CGRect(x: center.x - 48, y: center.y - 20, width: 96, height: 40)
+            ),
+            0
+        )
+    }
+
+    private func renderVector(
+        pageIndex: Int,
+        content: NotePageRenderer.Content,
+        pointSize: CGSize
+    ) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: pointSize, format: format).image { context in
+            let pointScale = pointSize.width / PageLayout.contentWidth
+            context.cgContext.scaleBy(x: pointScale, y: pointScale)
+            NotePageRenderer.draw(
+                pageIndex: pageIndex,
+                content: content,
+                pdfBandTreatment: .vector,
+                in: context.cgContext
+            )
+        }
+    }
+
     private var renderPointSize: CGSize {
         let width: CGFloat = 192
         return CGSize(
             width: width,
-            height: width * PageLayout.pageHeight / PageLayout.contentWidth
+            height: width * PageGeometry.a4.pageHeight / PageLayout.contentWidth
         )
+    }
+
+    private var fullRenderPointSize: CGSize {
+        CGSize(width: PageLayout.contentWidth, height: PageGeometry.a4.pageHeight)
     }
 
     private func render(
         pageIndex: Int,
-        content: NotePageRenderer.Content
+        content: NotePageRenderer.Content,
+        pointSize: CGSize? = nil
     ) -> UIImage {
         NotePageRenderer.image(
             pageIndex: pageIndex,
             content: content,
-            pointSize: renderPointSize,
+            pointSize: pointSize ?? renderPointSize,
             scale: 1
         )
     }
@@ -267,14 +840,35 @@ final class NotePageRendererTests: XCTestCase {
         drawing: PKDrawing = PKDrawing(),
         elements: [CanvasElement] = [],
         imagesByAssetPath: [String: UIImage] = [:],
-        pageCount: Int = 1
+        pageCount: Int = 1,
+        geometry: PageGeometry = .a4,
+        style: PageBackgroundStyle = .legacyDefault,
+        interfaceStyle: UIUserInterfaceStyle = .light,
+        pdfPagesByBand: [Int: PDFPage] = [:]
     ) -> NotePageRenderer.Content {
         NotePageRenderer.Content(
             drawing: drawing,
             elements: elements,
             imagesByAssetPath: imagesByAssetPath,
-            pageCount: pageCount
+            pageCount: pageCount,
+            geometry: geometry,
+            style: style,
+            interfaceStyle: interfaceStyle,
+            pdfPagesByBand: pdfPagesByBand
         )
+    }
+
+    private func makeSolidPDFDocument(
+        color: UIColor,
+        size: CGSize
+    ) throws -> PDFDocument {
+        let bounds = CGRect(origin: .zero, size: size)
+        let data = UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
+            context.beginPage()
+            context.cgContext.setFillColor(color.cgColor)
+            context.cgContext.fill(bounds)
+        }
+        return try XCTUnwrap(PDFDocument(data: data))
     }
 
     private func makeStroke(
@@ -349,11 +943,11 @@ final class NotePageRendererTests: XCTestCase {
         )
         let minY = max(
             0,
-            Int(floor(contentRect.minY / PageLayout.pageHeight * CGFloat(lhs.height)))
+            Int(floor(contentRect.minY / PageGeometry.a4.pageHeight * CGFloat(lhs.height)))
         )
         let maxY = min(
             lhs.height,
-            Int(ceil(contentRect.maxY / PageLayout.pageHeight * CGFloat(lhs.height)))
+            Int(ceil(contentRect.maxY / PageGeometry.a4.pageHeight * CGFloat(lhs.height)))
         )
 
         var count = 0
@@ -388,7 +982,7 @@ final class NotePageRendererTests: XCTestCase {
             )
             let y = min(
                 height - 1,
-                max(0, Int(point.y / PageLayout.pageHeight * CGFloat(height)))
+                max(0, Int(point.y / PageGeometry.a4.pageHeight * CGFloat(height)))
             )
             return pixel(x: x, y: y)
         }

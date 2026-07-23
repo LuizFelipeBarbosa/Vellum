@@ -147,6 +147,49 @@ final class LibraryScreenModel {
         }
     }
 
+    func createNoteFromPDF(data: Data, suggestedTitle: String) async -> UUID? {
+        let importResult: (note: Note, assetRelativePath: String)
+        do {
+            importResult = try PDFImportService.buildNote(
+                fromPDFData: data,
+                title: suggestedTitle
+            )
+        } catch let error as PDFImportError {
+            switch error {
+            case .unreadable:
+                errorMessage = "The selected file could not be read as a PDF."
+            case .encrypted:
+                errorMessage = "Encrypted PDFs are not supported."
+            case .empty:
+                errorMessage = "The selected PDF has no pages."
+            case .tooManyPages:
+                errorMessage = "PDFs can contain at most \(PDFImportService.maxPageCount) pages."
+            }
+            return nil
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+
+        do {
+            try await workspace.importNote(
+                importResult.note,
+                assets: [
+                    (
+                        relativePath: importResult.assetRelativePath,
+                        data: data
+                    )
+                ]
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+
+        await refresh()
+        return importResult.note.id
+    }
+
     func beginSelecting() {
         isSelecting = true
     }

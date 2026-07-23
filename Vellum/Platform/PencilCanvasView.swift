@@ -60,7 +60,8 @@ final class PagedCanvasView: PKCanvasView {
     /// SwiftUI update is dropped, leaving the overlays stuck on a stale viewport.
     private(set) var isInLayoutDrivenChange = false
 
-    var contentHeightInContentSpace: CGFloat = PageLayout.pageHeight {
+    // Placeholder until PencilCanvasView supplies the note-specific content height.
+    var contentHeightInContentSpace: CGFloat = PageGeometry.a4.pageHeight {
         didSet {
             guard oldValue != contentHeightInContentSpace else { return }
             isInLayoutDrivenChange = true
@@ -242,7 +243,8 @@ struct PencilCanvasView: UIViewRepresentable {
     var showsSystemToolPicker: Bool = true
     var onCanvasReady: ((PKCanvasView) -> Void)? = nil
     var isDrawingEnabled: Bool = true
-    var contentHeight: CGFloat = PageLayout.pageHeight
+    // Placeholder overridden by NoteScreenView from NotePageState.
+    var contentHeight: CGFloat = PageGeometry.a4.pageHeight
     var onViewportChanged: ((CanvasViewport) -> Void)? = nil
     var onExternalDrawingChange: (() -> Void)? = nil
     var onPencilSqueeze: ((PencilSqueezePhase) -> Void)? = nil

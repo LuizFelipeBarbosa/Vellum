@@ -1,4 +1,5 @@
 import Observation
+import PDFKit
 import PencilKit
 import PhotosUI
 import SwiftUI
@@ -60,174 +61,79 @@ struct NoteScreenView: View {
             }
         }
         .background(VellumTheme.paper)
-        .task {
-            cacheCurrentTool()
-            selectedTool = app.toolPreferences.preferences.lastSelectedTool
-            model.canvasElements.canvasReference = canvasReference
-            selectionController.canvasReference = canvasReference
-            selectionController.elementsStore = model.canvasElements
-            model.canvasElements.onSnapshotApplied = { [weak selectionController] in
-                selectionController?.externalDrawingDidChange()
-            }
-            selectionController.persistImageData = { [weak model] data in
-                await model?.persistPastedImageData(data)
-            }
-            selectionController.onOperationFailed = { [weak model] message in
-                model?.errorMessage = message
-            }
-            cacheCurrentTool()
-            if model.note == nil {
-                await model.load()
-            }
-        }
-        .onChange(of: selectedTool) { _, newTool in
-            selectionController.clearSelection()
-            app.toolPreferences.update { preferences in
-                preferences.lastSelectedTool = newTool
-            }
-            cacheCurrentTool()
-        }
-        .onChange(of: app.toolPreferences.preferences) {
-            cacheCurrentTool()
-        }
-        .onChange(of: model.pendingProposals.count) { _, count in
-            if count == 0 {
-                model.isShowingSuggestions = false
-            }
-        }
-        .onChange(of: isShowingThumbnails) { _, isShowing in
-            if isShowing {
-                thumbnailStore.markDirty()
-                Task {
-                    await thumbnailStore.regenerate(
-                        content: currentPageRendererContent()
-                    )
-                }
-            }
-        }
-        .onChange(of: model.drawingData) { _, _ in
-            let drawingBounds = canvasReference.canvasView?.drawing.bounds
-                ?? (try? PKDrawing(data: model.drawingData ?? Data()))?.bounds
-                ?? .null
-            pageState.updateContent(
-                drawingBounds: drawingBounds,
-                elements: model.canvasElements.elements
+        .modifier(
+            NoteScreenLifecycleModifiers(
+                model: model,
+                app: app,
+                canvasReference: canvasReference,
+                selectionController: selectionController,
+                pageState: pageState,
+                selectedTool: $selectedTool,
+                cacheCurrentTool: cacheCurrentTool,
+                scrollCanvas: scrollCanvas
             )
-            thumbnailStore.markDirty()
-            if isShowingThumbnails {
-                Task {
-                    await thumbnailStore.regenerate(
-                        content: currentPageRendererContent()
-                    )
-                }
-            }
-        }
-        .onChange(of: model.canvasElements.elements) { _, _ in
-            pageState.updateContent(
-                drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
-                elements: model.canvasElements.elements
-            )
-            thumbnailStore.markDirty()
-            if isShowingThumbnails {
-                Task {
-                    await thumbnailStore.regenerate(
-                        content: currentPageRendererContent()
-                    )
-                }
-            }
-        }
-        .onChange(of: canvasViewport) { _, _ in
-            pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
-        }
-        .onChange(of: canvasSize) { _, _ in
-            pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
-        }
-        .sheet(isPresented: $isShowingActivity) {
-            NavigationStack {
-                ActivityView(
-                    workspace: app.container.workspace,
-                    noteID: model.noteID
-                )
-            }
-        }
-        .sheet(item: $exportOutput, onDismiss: cleanUpExportDirectory) { output in
-            ShareSheetView(items: output.urls)
-        }
-        .confirmationDialog(
-            "Move to Trash?",
-            isPresented: $isConfirmingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("Move to Trash", role: .destructive) {
-                deleteNote()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The note moves to the Trash. You can restore it there later.")
-        }
-        .photosPicker(
-            isPresented: $isShowingPhotosPicker,
-            selection: $photosPickerItem,
-            matching: .images
         )
-        .onChange(of: photosPickerItem) {
-            Task {
-                if let item = photosPickerItem,
-                   let data = try? await item.loadTransferable(type: Data.self) {
-                    await model.importImage(
-                        data,
-                        visibleContentRect: currentVisibleContentRect
-                    )
-                }
-                photosPickerItem = nil
-            }
-        }
-        .fileImporter(
-            isPresented: $isShowingFileImporter,
-            allowedContentTypes: [.image]
-        ) { result in
-            switch result {
-            case .success(let url):
-                let isAccessing = url.startAccessingSecurityScopedResource()
-                defer {
-                    if isAccessing {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
-
-                do {
-                    let data = try Data(contentsOf: url)
-                    Task {
-                        await model.importImage(
-                            data,
-                            visibleContentRect: currentVisibleContentRect
-                        )
-                    }
-                } catch {
-                    model.errorMessage = error.localizedDescription
-                }
-            case .failure(let error):
-                model.errorMessage = error.localizedDescription
-            }
-        }
-        .alert(
-            "Vellum",
-            isPresented: Binding(
-                get: { model.errorMessage != nil },
-                set: { isPresented in
-                    if !isPresented { model.errorMessage = nil }
-                }
+        .modifier(
+            NoteScreenPrimaryChangeObservers(
+                model: model,
+                app: app,
+                selectionController: selectionController,
+                selectedTool: selectedTool,
+                cacheCurrentTool: cacheCurrentTool
             )
-        ) {
-            Button("OK", role: .cancel) {
-                model.errorMessage = nil
-            }
-        } message: {
-            Text(model.errorMessage ?? "An unknown error occurred.")
-        }
-        .animation(.easeOut(duration: 0.18), value: model.selectedEntity?.id)
-        .animation(.easeOut(duration: 0.2), value: model.isShowingSuggestions)
-        .animation(.easeOut(duration: 0.2), value: isShowingThumbnails)
+        )
+        .modifier(
+            NoteScreenCanvasContentChangeObservers(
+                model: model,
+                canvasReference: canvasReference,
+                pageState: pageState,
+                thumbnailStore: thumbnailStore,
+                isShowingThumbnails: isShowingThumbnails,
+                currentPageRendererContent: currentPageRendererContent
+            )
+        )
+        .modifier(
+            NoteScreenPageViewportChangeObservers(
+                model: model,
+                canvasReference: canvasReference,
+                pageState: pageState,
+                thumbnailStore: thumbnailStore,
+                canvasViewport: canvasViewport,
+                canvasSize: canvasSize
+            )
+        )
+        .modifier(
+            NoteScreenActivityPresentationModifiers(
+                model: model,
+                app: app,
+                isShowingActivity: $isShowingActivity,
+                exportOutput: $exportOutput,
+                cleanUpExportDirectory: cleanUpExportDirectory,
+                isConfirmingDelete: $isConfirmingDelete,
+                deleteNote: deleteNote
+            )
+        )
+        .modifier(
+            NoteScreenPhotoImportModifiers(
+                model: model,
+                isShowingPhotosPicker: $isShowingPhotosPicker,
+                photosPickerItem: $photosPickerItem,
+                currentVisibleContentRect: { currentVisibleContentRect }
+            )
+        )
+        .modifier(
+            NoteScreenFileImportAndAlertModifiers(
+                model: model,
+                isShowingFileImporter: $isShowingFileImporter,
+                currentVisibleContentRect: { currentVisibleContentRect }
+            )
+        )
+        .modifier(
+            NoteScreenAnimationModifiers(
+                model: model,
+                isShowingThumbnails: isShowingThumbnails
+            )
+        )
     }
 
     private var header: some View {
@@ -426,9 +332,48 @@ struct NoteScreenView: View {
                 PageGuideLayer(
                     viewport: canvasViewport,
                     viewportSize: canvasSize,
-                    pageCount: pageState.pageCount
+                    pageCount: pageState.pageCount,
+                    geometry: model.note?.pageGeometry ?? .a4,
+                    style: model.note?.backgroundStyle ?? .legacyDefault,
+                    pdfBands: model.pdfBands
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
+
+                PdfPagesLayer(
+                    cache: model.pdfCache,
+                    pdfBands: model.pdfBands,
+                    viewport: canvasViewport,
+                    pageCount: pageState.pageCount,
+                    geometry: model.note?.pageGeometry ?? .a4
+                )
+                .frame(
+                    width: PageLayout.contentWidth,
+                    height: pageState.contentHeight,
+                    alignment: .topLeading
+                )
+                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
+                .offset(
+                    x: -canvasViewport.contentOffset.x,
+                    y: -canvasViewport.contentOffset.y
+                )
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    alignment: .topLeading
+                )
+                .clipped()
+
+                PageGuideLayer(
+                    viewport: canvasViewport,
+                    viewportSize: canvasSize,
+                    pageCount: pageState.pageCount,
+                    geometry: model.note?.pageGeometry ?? .a4,
+                    style: model.note?.backgroundStyle ?? .legacyDefault,
+                    pdfBands: model.pdfBands,
+                    mode: .pdfAdornments
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .allowsHitTesting(false)
 
                 ImageElementsLayer(
                     store: model.canvasElements,
@@ -457,7 +402,8 @@ struct NoteScreenView: View {
                         model.drawingChanged(data)
                         pageState.updateContent(
                             drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
-                            elements: model.canvasElements.elements
+                            elements: model.canvasElements.elements,
+                            minimumFilledPages: model.note?.pages.count ?? 0
                         )
                     },
                     isTransparent: true,
@@ -473,7 +419,8 @@ struct NoteScreenView: View {
                         selectionController.externalDrawingDidChange()
                         pageState.updateContent(
                             drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
-                            elements: model.canvasElements.elements
+                            elements: model.canvasElements.elements,
+                            minimumFilledPages: model.note?.pages.count ?? 0
                         )
                     },
                     onPencilSqueeze: { phase in
@@ -618,6 +565,10 @@ struct NoteScreenView: View {
                     selectedTool: $selectedTool,
                     activeOptionsTool: $activeOptionsTool,
                     canvasReference: canvasReference,
+                    backgroundStyle: Binding(
+                        get: { model.backgroundStyle },
+                        set: { model.backgroundStyle = $0 }
+                    ),
                     onInsertPhoto: { isShowingPhotosPicker = true },
                     onInsertFile: { isShowingFileImporter = true }
                 )
@@ -639,6 +590,20 @@ struct NoteScreenView: View {
                     suggestionsOverlay
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                         .zIndex(10)
+                }
+
+                if model.isShowingBackgroundChooser {
+                    PageBackgroundChooserOverlay(
+                        onChoose: { kind in
+                            model.backgroundStyle = PageBackgroundStyle(kind: kind)
+                            model.isShowingBackgroundChooser = false
+                        },
+                        onDismiss: {
+                            model.isShowingBackgroundChooser = false
+                        }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(11)
                 }
             }
             .clipped()
@@ -742,17 +707,26 @@ struct NoteScreenView: View {
 
             ThumbnailPanelView(
                 store: thumbnailStore,
+                pages: model.note?.pages ?? [],
                 pageCount: pageState.pageCount,
                 currentPageIndex: pageState.currentPageIndex,
+                geometry: model.note?.pageGeometry ?? .a4,
+                contentProvider: currentPageRendererContent,
                 onSelect: { index in
                     scrollCanvas(toPageIndex: index)
                     isShowingThumbnails = false
+                },
+                onMovePages: { source, destination in
+                    model.movePages(source: source, to: destination)
+                },
+                onAddPage: {
+                    model.addPageAtEnd()
                 },
                 onDismiss: {
                     isShowingThumbnails = false
                 }
             )
-            .frame(width: 220)
+            .frame(width: 250)
             .padding(18)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -918,7 +892,8 @@ struct NoteScreenView: View {
 
     private func scrollCanvas(toPageIndex index: Int) {
         guard let canvas = canvasReference.canvasView else { return }
-        let y = PageLayout.pageRect(index: index).minY * canvas.zoomScale
+        let geometry = model.note?.pageGeometry ?? .a4
+        let y = geometry.pageRect(index: index).minY * canvas.zoomScale
         let maxY = max(0, canvas.contentSize.height - canvas.bounds.height)
         canvas.setContentOffset(
             CGPoint(x: canvas.contentOffset.x, y: min(y, maxY)),
@@ -934,14 +909,25 @@ struct NoteScreenView: View {
         let persistedDrawing = model.drawingData.flatMap { data in
             try? PKDrawing(data: data)
         }
-        return NotePageRenderer.Content(
+        let pdfExpectedBands = model.pdfBands
+        var pdfPagesByBand: [Int: PDFPage] = [:]
+        for band in pdfExpectedBands where band < pageState.pageCount {
+            pdfPagesByBand[band] = model.pdfCache.page(forBand: band)
+        }
+        let content = NotePageRenderer.Content(
             drawing: canvasReference.canvasView?.drawing
                 ?? persistedDrawing
                 ?? PKDrawing(),
             elements: model.canvasElements.elements,
             imagesByAssetPath: model.canvasElements.imageCache,
-            pageCount: pageState.pageCount
+            pageCount: pageState.pageCount,
+            geometry: model.note?.pageGeometry ?? .a4,
+            style: model.note?.backgroundStyle ?? .legacyDefault,
+            pdfPagesByBand: pdfPagesByBand,
+            pdfExpectedBands: pdfExpectedBands
         )
+        assert(content.geometry.pageHeight == pageState.pageGeometry.pageHeight)
+        return content
     }
 
     private func exportNote(_ format: NoteExporter.Format) {
@@ -958,7 +944,8 @@ struct NoteScreenView: View {
                 let output = try NoteExporter.export(
                     content: content,
                     title: model.title,
-                    format: format
+                    format: format,
+                    minimumFilledPages: model.note?.pages.count ?? 0
                 )
                 exportDirectoryToCleanUp = output.directory
                 exportOutput = output
@@ -972,6 +959,347 @@ struct NoteScreenView: View {
         guard let directory = exportDirectoryToCleanUp else { return }
         try? FileManager.default.removeItem(at: directory)
         exportDirectoryToCleanUp = nil
+    }
+}
+
+private struct NoteScreenLifecycleModifiers: ViewModifier {
+    let model: NoteScreenModel
+    let app: VellumAppModel
+    let canvasReference: NoteCanvasReference
+    let selectionController: CanvasSelectionController
+    let pageState: NotePageState
+    @Binding var selectedTool: ToolID
+    let cacheCurrentTool: () -> Void
+    let scrollCanvas: (Int) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .task {
+                cacheCurrentTool()
+                selectedTool = app.toolPreferences.preferences.lastSelectedTool
+                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+                model.canvasElements.canvasReference = canvasReference
+                selectionController.canvasReference = canvasReference
+                selectionController.elementsStore = model.canvasElements
+                model.canvasElements.onSnapshotApplied = { [weak selectionController] in
+                    selectionController?.externalDrawingDidChange()
+                }
+                model.onScrollToPage = { index in
+                    pageState.updateContent(
+                        drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                        elements: model.canvasElements.elements,
+                        minimumFilledPages: model.note?.pages.count ?? 0
+                    )
+                    Task { @MainActor in
+                        await Task.yield()
+                        scrollCanvas(index)
+                    }
+                }
+                selectionController.persistImageData = { [weak model] data in
+                    await model?.persistPastedImageData(data)
+                }
+                selectionController.onOperationFailed = { [weak model] message in
+                    model?.errorMessage = message
+                }
+                cacheCurrentTool()
+                if model.note == nil {
+                    await model.load()
+                    if let message = model.pdfLoadFailureMessage {
+                        app.showToast(message, actionLabel: "Retry") { [weak model] in
+                            Task { await model?.retryPDFLoad() }
+                        }
+                    }
+                }
+                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+                pageState.updateContent(
+                    drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                    elements: model.canvasElements.elements,
+                    minimumFilledPages: model.note?.pages.count ?? 0
+                )
+            }
+            .onDisappear {
+                model.onScrollToPage = nil
+            }
+    }
+}
+
+private struct NoteScreenPrimaryChangeObservers: ViewModifier {
+    let model: NoteScreenModel
+    let app: VellumAppModel
+    let selectionController: CanvasSelectionController
+    let selectedTool: ToolID
+    let cacheCurrentTool: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: selectedTool) { _, newTool in
+                selectionController.clearSelection()
+                app.toolPreferences.update { preferences in
+                    preferences.lastSelectedTool = newTool
+                }
+                cacheCurrentTool()
+            }
+            .onChange(of: app.toolPreferences.preferences) {
+                cacheCurrentTool()
+            }
+            .onChange(of: model.pendingProposals.count) { _, count in
+                if count == 0 {
+                    model.isShowingSuggestions = false
+                }
+            }
+    }
+}
+
+private struct NoteScreenCanvasContentChangeObservers: ViewModifier {
+    let model: NoteScreenModel
+    let canvasReference: NoteCanvasReference
+    let pageState: NotePageState
+    let thumbnailStore: PageThumbnailStore
+    let isShowingThumbnails: Bool
+    let currentPageRendererContent: () -> NotePageRenderer.Content
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: model.drawingData) { _, _ in
+                let drawingBounds = canvasReference.canvasView?.drawing.bounds
+                    ?? (try? PKDrawing(data: model.drawingData ?? Data()))?.bounds
+                    ?? .null
+                pageState.updateContent(
+                    drawingBounds: drawingBounds,
+                    elements: model.canvasElements.elements,
+                    minimumFilledPages: model.note?.pages.count ?? 0
+                )
+                thumbnailStore.markDirty()
+            }
+            .onChange(of: model.canvasElements.elements) { _, _ in
+                pageState.updateContent(
+                    drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                    elements: model.canvasElements.elements,
+                    minimumFilledPages: model.note?.pages.count ?? 0
+                )
+                thumbnailStore.markDirty()
+            }
+            .onChange(of: model.note?.backgroundStyle) { _, _ in
+                thumbnailStore.markDirty()
+            }
+    }
+}
+
+private struct NoteScreenPageViewportChangeObservers: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
+    @State private var pdfWindowUpdateTask: Task<Void, Never>?
+
+    let model: NoteScreenModel
+    let canvasReference: NoteCanvasReference
+    let pageState: NotePageState
+    let thumbnailStore: PageThumbnailStore
+    let canvasViewport: CanvasViewport
+    let canvasSize: CGSize
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: model.note?.pages.map(\.id)) { _, _ in
+                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+                pageState.updateContent(
+                    drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                    elements: model.canvasElements.elements,
+                    minimumFilledPages: model.note?.pages.count ?? 0
+                )
+                thumbnailStore.markDirty()
+                schedulePDFWindowUpdate()
+            }
+            .onChange(of: model.note?.pageAspectRatio) { _, _ in
+                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+                pageState.updateContent(
+                    drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                    elements: model.canvasElements.elements,
+                    minimumFilledPages: model.note?.pages.count ?? 0
+                )
+                schedulePDFWindowUpdate()
+            }
+            .onChange(of: canvasViewport) { _, _ in
+                pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
+                schedulePDFWindowUpdate()
+            }
+            .onChange(of: canvasSize) { _, _ in
+                pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
+                schedulePDFWindowUpdate()
+            }
+            .onChange(of: colorScheme, initial: true) { _, newValue in
+                model.pdfCache.setAppearance(isDark: newValue == .dark)
+            }
+    }
+
+    private func schedulePDFWindowUpdate() {
+        pdfWindowUpdateTask?.cancel()
+        guard !model.pdfBands.isEmpty,
+              canvasSize.width > 0,
+              canvasSize.height > 0,
+              pageState.pageCount > 0 else {
+            return
+        }
+
+        let cache = model.pdfCache
+        let viewport = canvasViewport
+        let viewportSize = canvasSize
+        let pageCount = pageState.pageCount
+        let geometry = pageState.pageGeometry
+        let scale = displayScale
+        pdfWindowUpdateTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(100))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            let visibleRect = viewport.visibleContentRect(viewportSize: viewportSize)
+            let firstBand = geometry.pageIndex(
+                forContentY: visibleRect.minY,
+                pageCount: pageCount
+            )
+            let lastBand = geometry.pageIndex(
+                forContentY: visibleRect.maxY,
+                pageCount: pageCount
+            )
+            cache.updateVisibleWindow(
+                bands: firstBand...lastBand,
+                bucket: viewport.zoomScale > 1.5 ? .zoomed : .fit,
+                displayScale: scale
+            )
+        }
+    }
+}
+
+private struct NoteScreenActivityPresentationModifiers: ViewModifier {
+    let model: NoteScreenModel
+    let app: VellumAppModel
+    @Binding var isShowingActivity: Bool
+    @Binding var exportOutput: NoteExporter.Output?
+    let cleanUpExportDirectory: () -> Void
+    @Binding var isConfirmingDelete: Bool
+    let deleteNote: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $isShowingActivity) {
+                NavigationStack {
+                    ActivityView(
+                        workspace: app.container.workspace,
+                        noteID: model.noteID
+                    )
+                }
+            }
+            .sheet(item: $exportOutput, onDismiss: cleanUpExportDirectory) { output in
+                ShareSheetView(items: output.urls)
+            }
+            .confirmationDialog(
+                "Move to Trash?",
+                isPresented: $isConfirmingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Move to Trash", role: .destructive) {
+                    deleteNote()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The note moves to the Trash. You can restore it there later.")
+            }
+    }
+}
+
+private struct NoteScreenPhotoImportModifiers: ViewModifier {
+    let model: NoteScreenModel
+    @Binding var isShowingPhotosPicker: Bool
+    @Binding var photosPickerItem: PhotosPickerItem?
+    let currentVisibleContentRect: () -> CGRect
+
+    func body(content: Content) -> some View {
+        content
+            .photosPicker(
+                isPresented: $isShowingPhotosPicker,
+                selection: $photosPickerItem,
+                matching: .images
+            )
+            .onChange(of: photosPickerItem) {
+                Task {
+                    if let item = photosPickerItem,
+                       let data = try? await item.loadTransferable(type: Data.self) {
+                        await model.importImage(
+                            data,
+                            visibleContentRect: currentVisibleContentRect()
+                        )
+                    }
+                    photosPickerItem = nil
+                }
+            }
+    }
+}
+
+private struct NoteScreenFileImportAndAlertModifiers: ViewModifier {
+    let model: NoteScreenModel
+    @Binding var isShowingFileImporter: Bool
+    let currentVisibleContentRect: () -> CGRect
+
+    func body(content: Content) -> some View {
+        content
+            .fileImporter(
+                isPresented: $isShowingFileImporter,
+                allowedContentTypes: [.image]
+            ) { result in
+                switch result {
+                case .success(let url):
+                    let isAccessing = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if isAccessing {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+
+                    do {
+                        let data = try Data(contentsOf: url)
+                        Task {
+                            await model.importImage(
+                                data,
+                                visibleContentRect: currentVisibleContentRect()
+                            )
+                        }
+                    } catch {
+                        model.errorMessage = error.localizedDescription
+                    }
+                case .failure(let error):
+                    model.errorMessage = error.localizedDescription
+                }
+            }
+            .alert(
+                "Vellum",
+                isPresented: Binding(
+                    get: { model.errorMessage != nil },
+                    set: { isPresented in
+                        if !isPresented { model.errorMessage = nil }
+                    }
+                )
+            ) {
+                Button("OK", role: .cancel) {
+                    model.errorMessage = nil
+                }
+            } message: {
+                Text(model.errorMessage ?? "An unknown error occurred.")
+            }
+    }
+}
+
+private struct NoteScreenAnimationModifiers: ViewModifier {
+    let model: NoteScreenModel
+    let isShowingThumbnails: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .animation(.easeOut(duration: 0.18), value: model.selectedEntity?.id)
+            .animation(.easeOut(duration: 0.2), value: model.isShowingSuggestions)
+            .animation(.easeOut(duration: 0.2), value: isShowingThumbnails)
+            .animation(.easeOut(duration: 0.2), value: model.isShowingBackgroundChooser)
     }
 }
 

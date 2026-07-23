@@ -68,6 +68,16 @@ enum FilePersistence {
         noteID: UUID,
         relativePath: String
     ) throws -> URL {
+        try validatedAssetURL(
+            package: packageURL(rootDirectory: rootDirectory, noteID: noteID),
+            relativePath: relativePath
+        )
+    }
+
+    static func validatedAssetURL(
+        package: URL,
+        relativePath: String
+    ) throws -> URL {
         let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
         guard !relativePath.isEmpty,
               !relativePath.hasPrefix("/"),
@@ -76,9 +86,9 @@ enum FilePersistence {
             throw VellumError.invalidAssetPath(relativePath)
         }
 
-        let package = packageURL(rootDirectory: rootDirectory, noteID: noteID).standardizedFileURL
-        let candidate = package.appendingPathComponent(relativePath).standardizedFileURL
-        guard candidate.path.hasPrefix(package.path + "/") else {
+        let standardizedPackage = package.standardizedFileURL
+        let candidate = standardizedPackage.appendingPathComponent(relativePath).standardizedFileURL
+        guard candidate.path.hasPrefix(standardizedPackage.path + "/") else {
             throw VellumError.invalidAssetPath(relativePath)
         }
         return candidate
@@ -205,7 +215,8 @@ public actor FileNoteRepository: NoteRepository {
                     drawingAssetPath: "pages/\(pageID.uuidString)/drawing.data",
                     background: .blank
                 )
-            ]
+            ],
+            backgroundStyle: .blank
         )
 
         try await insertNote(note)
@@ -215,29 +226,51 @@ public actor FileNoteRepository: NoteRepository {
     public func insertNote(_ note: Note) async throws {
         let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: note.id)
         do {
-            try FileManager.default.createDirectory(
-                at: package.appendingPathComponent("pages", isDirectory: true),
-                withIntermediateDirectories: true
-            )
-            for page in note.pages {
-                try FileManager.default.createDirectory(
-                    at: package.appendingPathComponent("pages/\(page.id.uuidString)", isDirectory: true),
-                    withIntermediateDirectories: true
-                )
-            }
-            for directory in ["assets", "derived", "proposals", "operations"] {
-                try FileManager.default.createDirectory(
-                    at: package.appendingPathComponent(directory, isDirectory: true),
-                    withIntermediateDirectories: true
-                )
-            }
-            try FilePersistence.write(note, to: package.appendingPathComponent("manifest.json"))
+            try createPackage(for: note, at: package)
         } catch let error as VellumError {
             try? FileManager.default.removeItem(at: package)
             throw error
         } catch {
             try? FileManager.default.removeItem(at: package)
             throw VellumError.persistenceFailure("Could not create note: \(error.localizedDescription)")
+        }
+    }
+
+    public func importNote(
+        _ note: Note,
+        assets: [(relativePath: String, data: Data)]
+    ) async throws {
+        let fileManager = FileManager.default
+        let finalPackage = FilePersistence.packageURL(
+            rootDirectory: rootDirectory,
+            noteID: note.id
+        )
+        let stagingPackage = rootDirectory.appendingPathComponent(
+            ".staging-\(UUID().uuidString)",
+            isDirectory: true
+        )
+
+        do {
+            try fileManager.createDirectory(
+                at: rootDirectory,
+                withIntermediateDirectories: true
+            )
+            try createPackage(for: note, at: stagingPackage)
+            for asset in assets {
+                let url = try FilePersistence.validatedAssetURL(
+                    package: stagingPackage,
+                    relativePath: asset.relativePath
+                )
+                try fileManager.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try asset.data.write(to: url, options: .atomic)
+            }
+            try fileManager.moveItem(at: stagingPackage, to: finalPackage)
+        } catch {
+            try? fileManager.removeItem(at: stagingPackage)
+            throw error
         }
     }
 
@@ -447,5 +480,28 @@ public actor FileNoteRepository: NoteRepository {
                 try? fileManager.removeItem(at: asset)
             }
         }
+    }
+
+    private func createPackage(for note: Note, at package: URL) throws {
+        try FileManager.default.createDirectory(
+            at: package.appendingPathComponent("pages", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        for page in note.pages {
+            try FileManager.default.createDirectory(
+                at: package.appendingPathComponent(
+                    "pages/\(page.id.uuidString)",
+                    isDirectory: true
+                ),
+                withIntermediateDirectories: true
+            )
+        }
+        for directory in ["assets", "derived", "proposals", "operations"] {
+            try FileManager.default.createDirectory(
+                at: package.appendingPathComponent(directory, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+        try FilePersistence.write(note, to: package.appendingPathComponent("manifest.json"))
     }
 }

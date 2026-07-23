@@ -192,7 +192,7 @@ final class VellumAppModel {
         }
     }
 
-    func openNote(_ id: UUID) async {
+    func openNote(_ id: UUID, isNewlyCreated: Bool = false) async {
         do {
             let note = try await container.workspace.loadNote(id: id)
             if note.isTrashed {
@@ -210,6 +210,7 @@ final class VellumAppModel {
         let noteModel = NoteScreenModel(
             noteID: id,
             container: container,
+            offersBackgroundChooser: isNewlyCreated,
             onNoteChanged: { [weak self] _ in
                 Task { [weak self] in
                     guard let self else { return }

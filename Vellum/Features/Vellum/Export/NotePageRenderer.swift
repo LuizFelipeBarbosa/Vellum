@@ -1,33 +1,82 @@
+import PDFKit
 import PencilKit
 import SwiftUI
 import UIKit
 import VellumCore
 
-@MainActor
 enum NotePageRenderer {
-    struct Content {
+    /// A render snapshot crosses to a serial background actor. Its UIKit,
+    /// PencilKit, and PDFKit references are treated as immutable while rendering.
+    struct Content: @unchecked Sendable {
         var drawing: PKDrawing
         var elements: [CanvasElement]
         var imagesByAssetPath: [String: UIImage]
         var pageCount: Int
+        var geometry: PageGeometry = .a4
+        var style: PageBackgroundStyle = .legacyDefault
+        var interfaceStyle: UIUserInterfaceStyle = .light
+        var pdfPagesByBand: [Int: PDFPage] = [:]
+        var pdfExpectedBands: Set<Int> = []
+    }
+
+    enum PDFBandTreatment {
+        case vector
+        case blendedRaster
     }
 
     /// Draws page `pageIndex` into `ctx`, whose coordinate space is content points
     /// with the origin at the page's top-left.
-    static func draw(pageIndex: Int, content: Content, in ctx: CGContext) {
-        let pageRect = PageLayout.pageRect(index: pageIndex)
+    static func draw(
+        pageIndex: Int,
+        content: Content,
+        pdfBandTreatment: PDFBandTreatment = .vector,
+        in ctx: CGContext
+    ) {
+        let pageRect = content.geometry.pageRect(index: pageIndex)
         let pageBounds = CGRect(
             origin: .zero,
             size: CGSize(
-                width: PageLayout.contentWidth,
-                height: PageLayout.pageHeight
+                width: content.geometry.contentWidth,
+                height: content.geometry.pageHeight
             )
         )
 
         ctx.saveGState()
         defer { ctx.restoreGState() }
 
-        drawPaper(pageRect: pageRect, pageBounds: pageBounds, in: ctx)
+        let pdfPage = content.pdfPagesByBand[pageIndex]
+        drawPaper(
+            pageRect: pageRect,
+            pageBounds: pageBounds,
+            style: content.style,
+            interfaceStyle: content.interfaceStyle,
+            drawsPattern: pdfPage == nil,
+            in: ctx
+        )
+
+        if let pdfPage {
+            switch pdfBandTreatment {
+            case .vector:
+                drawPDFPage(
+                    pdfPage,
+                    pageIndex: pageIndex,
+                    pageRect: pageRect,
+                    pageBounds: pageBounds,
+                    geometry: content.geometry,
+                    in: ctx
+                )
+            case .blendedRaster:
+                drawBlendedRasterPDFPage(
+                    pdfPage,
+                    pageIndex: pageIndex,
+                    pageRect: pageRect,
+                    pageBounds: pageBounds,
+                    geometry: content.geometry,
+                    interfaceStyle: content.interfaceStyle,
+                    in: ctx
+                )
+            }
+        }
 
         for element in content.elements {
             guard case .image(let imageContent) = element.content else { continue }
@@ -41,7 +90,13 @@ enum NotePageRenderer {
             )
         }
 
-        drawInk(content.drawing, pageRect: pageRect, pageBounds: pageBounds, in: ctx)
+        drawInk(
+            content.drawing,
+            pageRect: pageRect,
+            pageBounds: pageBounds,
+            interfaceStyle: content.interfaceStyle,
+            in: ctx
+        )
 
         for element in content.elements {
             guard case .text(let textContent) = element.content else { continue }
@@ -55,7 +110,7 @@ enum NotePageRenderer {
         }
     }
 
-    /// Convenience rendering for one page at an A4-aspect point size and scale.
+    /// Convenience rendering for one page at the provided point size and scale.
     static func image(
         pageIndex: Int,
         content: Content,
@@ -68,60 +123,251 @@ enum NotePageRenderer {
         let renderer = UIGraphicsImageRenderer(size: pointSize, format: format)
 
         return renderer.image { rendererContext in
-            let pointScale = pointSize.width / PageLayout.contentWidth
+            let pointScale = pointSize.width / content.geometry.contentWidth
             rendererContext.cgContext.scaleBy(x: pointScale, y: pointScale)
-            draw(pageIndex: pageIndex, content: content, in: rendererContext.cgContext)
+            draw(
+                pageIndex: pageIndex,
+                content: content,
+                pdfBandTreatment: .blendedRaster,
+                in: rendererContext.cgContext
+            )
         }
     }
 
     private static func drawPaper(
         pageRect: CGRect,
         pageBounds: CGRect,
+        style: PageBackgroundStyle,
+        interfaceStyle: UIUserInterfaceStyle,
+        drawsPattern: Bool,
         in ctx: CGContext
     ) {
-        let traits = UITraitCollection(userInterfaceStyle: .light)
-        let paperColor = UIColor(VellumTheme.card).resolvedColor(with: traits)
-        let dotColor = UIColor(VellumTheme.ink)
-            .resolvedColor(with: traits)
-            .withAlphaComponent(0.12)
+        let paperColor: UIColor
+        let patternColor: UIColor
+        if let tint = style.paperTint {
+            paperColor = UIColor(
+                red: CGFloat(tint.red),
+                green: CGFloat(tint.green),
+                blue: CGFloat(tint.blue),
+                alpha: CGFloat(tint.alpha)
+            )
+            let ink = PageBackgroundStyle.patternInk(forTint: tint, opacity: 0.12)
+            patternColor = UIColor(
+                red: CGFloat(ink.red),
+                green: CGFloat(ink.green),
+                blue: CGFloat(ink.blue),
+                alpha: CGFloat(ink.alpha)
+            )
+        } else {
+            let traits = UITraitCollection(userInterfaceStyle: interfaceStyle)
+            paperColor = UIColor(VellumTheme.card).resolvedColor(with: traits)
+            patternColor = UIColor(VellumTheme.ink)
+                .resolvedColor(with: traits)
+                .withAlphaComponent(0.12)
+        }
 
         ctx.setFillColor(paperColor.cgColor)
         ctx.fill(pageBounds)
 
-        let spacing: CGFloat = 24
-        let radius: CGFloat = 1
-        let firstAbsoluteY = ceil(pageRect.minY / spacing) * spacing
-        let path = CGMutablePath()
-        var x: CGFloat = 0
-        while x <= pageBounds.maxX {
-            var y = firstAbsoluteY - pageRect.minY
-            while y <= pageBounds.maxY {
-                path.addEllipse(
-                    in: CGRect(
-                        x: x - radius,
-                        y: y - radius,
-                        width: radius * 2,
-                        height: radius * 2
-                    )
-                )
-                y += spacing
-            }
-            x += spacing
-        }
+        guard drawsPattern else { return }
 
-        ctx.setFillColor(dotColor.cgColor)
-        ctx.addPath(path)
-        ctx.fillPath()
+        switch style.kind {
+        case .blank:
+            break
+        case .dots:
+            let xs = PageBackgroundPattern.dotXs(
+                style: style,
+                pageRect: pageRect,
+                clippedTo: pageRect
+            )
+            let ys = PageBackgroundPattern.dotYs(
+                style: style,
+                pageRect: pageRect,
+                clippedTo: pageRect
+            )
+            let radius: CGFloat = 1
+            let path = CGMutablePath()
+
+            for x in xs.values {
+                for y in ys.values {
+                    path.addEllipse(
+                        in: CGRect(
+                            x: x - radius,
+                            y: y - pageRect.minY - radius,
+                            width: radius * 2,
+                            height: radius * 2
+                        )
+                    )
+                }
+            }
+
+            ctx.setFillColor(patternColor.cgColor)
+            ctx.addPath(path)
+            ctx.fillPath()
+        case .ruled, .grid:
+            let ys = PageBackgroundPattern.ruleYs(
+                style: style,
+                pageRect: pageRect,
+                clippedTo: pageRect
+            )
+            let path = CGMutablePath()
+
+            for y in ys.values {
+                let localY = y - pageRect.minY
+                path.move(to: CGPoint(x: 0, y: localY))
+                path.addLine(to: CGPoint(x: pageBounds.width, y: localY))
+            }
+
+            if style.kind == .grid {
+                let xs = PageBackgroundPattern.gridXs(
+                    style: style,
+                    pageRect: pageRect,
+                    clippedTo: pageRect
+                )
+                for x in xs.values {
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: pageBounds.height))
+                }
+            }
+
+            ctx.setStrokeColor(patternColor.cgColor)
+            ctx.setLineWidth(1)
+            ctx.addPath(path)
+            ctx.strokePath()
+        }
+    }
+
+    private static func drawPDFPage(
+        _ page: PDFPage,
+        pageIndex: Int,
+        pageRect: CGRect,
+        pageBounds: CGRect,
+        geometry: PageGeometry,
+        in ctx: CGContext
+    ) {
+        guard let pageRef = page.pageRef else { return }
+
+        let displayedSize = displayedMediaBoxSize(for: page)
+        // This flip is symmetric only because geometry.fittedRect centers the
+        // PDF vertically. A top-anchored fit would not match PdfPagesLayer.
+        let fittedRect = geometry.fittedRect(
+            forSourcePageSize: displayedSize,
+            pageIndex: pageIndex
+        ).offsetBy(dx: 0, dy: -pageRect.minY)
+
+        ctx.saveGState()
+        ctx.clip(to: pageBounds)
+        ctx.translateBy(x: 0, y: pageBounds.height)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.concatenate(
+            pdfDrawingTransform(
+                for: pageRef,
+                displayedMediaBoxSize: displayedSize,
+                fittingInto: fittedRect
+            )
+        )
+        ctx.drawPDFPage(pageRef)
+        ctx.restoreGState()
+    }
+
+    private static func drawBlendedRasterPDFPage(
+        _ page: PDFPage,
+        pageIndex: Int,
+        pageRect: CGRect,
+        pageBounds: CGRect,
+        geometry: PageGeometry,
+        interfaceStyle: UIUserInterfaceStyle,
+        in ctx: CGContext
+    ) {
+        guard let pageRef = page.pageRef else { return }
+
+        let displayedSize = displayedMediaBoxSize(for: page)
+        let fittedRect = geometry.fittedRect(
+            forSourcePageSize: displayedSize,
+            pageIndex: pageIndex
+        ).offsetBy(dx: 0, dy: -pageRect.minY)
+        let localFittedRect = CGRect(origin: .zero, size: fittedRect.size)
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = true
+        format.scale = min(3, max(1, abs(ctx.ctm.a)))
+        let renderer = UIGraphicsImageRenderer(size: fittedRect.size, format: format)
+        let raster = renderer.image { rendererContext in
+            UIColor.white.setFill()
+            rendererContext.fill(localFittedRect)
+
+            let rasterContext = rendererContext.cgContext
+            rasterContext.translateBy(x: 0, y: fittedRect.height)
+            rasterContext.scaleBy(x: 1, y: -1)
+            rasterContext.concatenate(
+                pdfDrawingTransform(
+                    for: pageRef,
+                    displayedMediaBoxSize: displayedSize,
+                    fittingInto: localFittedRect
+                )
+            )
+            rasterContext.drawPDFPage(pageRef)
+        }
+        let renderedImage = interfaceStyle == .dark
+            ? PdfRasterAppearance.invertedPreservingHue(raster)
+            : raster
+
+        ctx.saveGState()
+        ctx.clip(to: pageBounds)
+        UIGraphicsPushContext(ctx)
+        renderedImage.draw(
+            in: fittedRect,
+            blendMode: interfaceStyle == .dark ? .screen : .multiply,
+            alpha: 1
+        )
+        UIGraphicsPopContext()
+        ctx.restoreGState()
+    }
+
+    private static func pdfDrawingTransform(
+        for pageRef: CGPDFPage,
+        displayedMediaBoxSize: CGSize,
+        fittingInto fittedRect: CGRect
+    ) -> CGAffineTransform {
+        let referenceRect = CGRect(origin: .zero, size: displayedMediaBoxSize)
+        // Keep Core Graphics' media-box and rotation handling at native size,
+        // then apply the magnification that getDrawingTransform omits.
+        let nativeTransform = pageRef.getDrawingTransform(
+            .mediaBox,
+            rect: referenceRect,
+            rotate: 0,
+            preserveAspectRatio: true
+        )
+        let scale = min(
+            fittedRect.width / referenceRect.width,
+            fittedRect.height / referenceRect.height
+        )
+        let fittingTransform = CGAffineTransform(
+            a: scale,
+            b: 0,
+            c: 0,
+            d: scale,
+            tx: fittedRect.midX - referenceRect.midX * scale,
+            ty: fittedRect.midY - referenceRect.midY * scale
+        )
+        return nativeTransform.concatenating(fittingTransform)
+    }
+
+    private static func displayedMediaBoxSize(for page: PDFPage) -> CGSize {
+        let size = page.bounds(for: .mediaBox).size
+        let rotation = ((page.rotation % 360) + 360) % 360
+        guard rotation == 90 || rotation == 270 else { return size }
+        return CGSize(width: size.height, height: size.width)
     }
 
     private static func drawInk(
         _ drawing: PKDrawing,
         pageRect: CGRect,
         pageBounds: CGRect,
+        interfaceStyle: UIUserInterfaceStyle,
         in ctx: CGContext
     ) {
         var inkImage = UIImage()
-        UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+        UITraitCollection(userInterfaceStyle: interfaceStyle).performAsCurrent {
             inkImage = drawing.image(from: pageRect, scale: 2)
         }
 
@@ -266,7 +512,6 @@ extension CanvasElement {
     /// Rotated AABB of the element's effective frame: for text elements, the frame grown
     /// to the measured text height using top-anchored growth; otherwise the persisted frame.
     /// Non-text elements take a fast path without text measurement.
-    @MainActor
     var effectiveBoundingBox: CGRect {
         guard case .text(let textContent) = content else {
             return rotatedBoundingBox

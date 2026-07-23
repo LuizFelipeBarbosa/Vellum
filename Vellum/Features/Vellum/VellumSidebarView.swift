@@ -1,11 +1,13 @@
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 import VellumCore
 
 struct VellumSidebarView: View {
     @Bindable var model: VellumAppModel
     @State private var showingActivity = false
     @State private var showingSettings = false
+    @State private var isImportingPDF = false
     @State private var pendingSpaceDeletion: Space?
     @State private var spaceEditor: SpaceEditorContext?
 
@@ -31,7 +33,12 @@ struct VellumSidebarView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Settings")
-                Button(action: createNote) {
+                Menu {
+                    Button("New Note", action: createNote)
+                    Button("New from PDF") {
+                        isImportingPDF = true
+                    }
+                } label: {
                     VellumPencilGlyph(size: 15)
                         .frame(width: 30, height: 30)
                         .background(VellumTheme.ink, in: RoundedRectangle(cornerRadius: 9))
@@ -163,6 +170,37 @@ struct VellumSidebarView: View {
             }
             .preferredColorScheme(model.appearanceMode.colorScheme)
         }
+        .fileImporter(
+            isPresented: $isImportingPDF,
+            allowedContentTypes: [.pdf]
+        ) { result in
+            switch result {
+            case .success(let url):
+                let isAccessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if isAccessing {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                do {
+                    let data = try Data(contentsOf: url)
+                    let suggestedTitle = url.deletingPathExtension().lastPathComponent
+                    Task {
+                        guard let noteID = await model.library.createNoteFromPDF(
+                            data: data,
+                            suggestedTitle: suggestedTitle
+                        ) else { return }
+                        await model.refreshStats()
+                        await model.openNote(noteID)
+                    }
+                } catch {
+                    model.library.errorMessage = error.localizedDescription
+                }
+            case .failure(let error):
+                model.library.errorMessage = error.localizedDescription
+            }
+        }
         .confirmationDialog(
             "Delete '\(pendingSpaceDeletion?.name ?? "")'?",
             isPresented: Binding(
@@ -230,7 +268,7 @@ struct VellumSidebarView: View {
         Task {
             guard let noteID = await model.library.createNote() else { return }
             await model.refreshStats()
-            await model.navigate(to: .note(noteID))
+            await model.openNote(noteID, isNewlyCreated: true)
         }
     }
 }

@@ -459,7 +459,7 @@ struct ColorSwatchGrid: View {
     }
 }
 
-private struct OptionsSectionCaption: View {
+struct OptionsSectionCaption: View {
     let title: String
 
     init(_ title: String) {
@@ -473,7 +473,7 @@ private struct OptionsSectionCaption: View {
     }
 }
 
-private struct OptionsDivider: View {
+struct OptionsDivider: View {
     var body: some View {
         Rectangle()
             .fill(VellumTheme.ink(0.12))

@@ -16,7 +16,9 @@ struct NoteToolbarView: View {
     @Binding var selectedTool: ToolID
     @Binding var activeOptionsTool: ToolID?
     @State private var isShowingFavoritesEditor = false
+    @State private var isShowingBackgroundOptions = false
     let canvasReference: NoteCanvasReference
+    var backgroundStyle: Binding<PageBackgroundStyle>? = nil
     var onInsertPhoto: (() -> Void)? = nil
     var onInsertFile: (() -> Void)? = nil
 
@@ -45,6 +47,11 @@ struct NoteToolbarView: View {
         }
         .popover(isPresented: $isShowingFavoritesEditor, arrowEdge: .bottom) {
             FavoritesEditView(store: store)
+        }
+        .popover(isPresented: $isShowingBackgroundOptions, arrowEdge: .bottom) {
+            if let backgroundStyle {
+                PageBackgroundOptionsView(style: backgroundStyle)
+            }
         }
     }
 
@@ -117,6 +124,16 @@ struct NoteToolbarView: View {
                     .frame(width: 24, height: 24)
             }
             .accessibilityLabel("Insert")
+
+            if backgroundStyle != nil {
+                Button {
+                    isShowingBackgroundOptions.toggle()
+                } label: {
+                    Image(systemName: "doc.text.image")
+                        .frame(width: 24, height: 24)
+                }
+                .accessibilityLabel("Paper options")
+            }
 
             collapseButton
         }

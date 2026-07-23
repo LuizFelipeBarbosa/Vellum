@@ -49,6 +49,17 @@ public actor WorkspaceService {
         return note
     }
 
+    public func importNote(
+        _ note: Note,
+        assets: [(relativePath: String, data: Data)]
+    ) async throws {
+        try await notes.importNote(note, assets: assets)
+    }
+
+    public func saveAsset(_ data: Data, noteID: UUID, relativePath: String) async throws {
+        try await notes.saveAsset(data, noteID: noteID, relativePath: relativePath)
+    }
+
     @discardableResult
     public func saveNote(_ note: Note) async throws -> Note {
         let persisted = try await notes.loadNote(id: note.id)

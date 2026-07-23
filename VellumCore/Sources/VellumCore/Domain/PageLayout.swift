@@ -6,55 +6,7 @@ public enum PageLayout {
     public static let contentWidth: CGFloat = 768
 
     /// A4 aspect: 841.8 / 595.2 (PDF points for 210×297mm at 72dpi).
-    public static let a4AspectRatio: CGFloat = 841.8 / 595.2
-
-    /// The logical height of each A4 page in content points.
-    public static let pageHeight: CGFloat = contentWidth * a4AspectRatio
-
-    /// A4 in PDF points.
-    public static let pdfPageSize = CGSize(width: 595.2, height: 841.8)
-
-    /// Raster export size per page in pixels (768×2 wide, A4 aspect).
-    public static let rasterPageSizePixels = CGSize(width: 1536, height: 2172)
-
-    /// Returns the content-space rectangle of the zero-based page at `index`.
-    public static func pageRect(index: Int) -> CGRect {
-        CGRect(
-            x: 0,
-            y: CGFloat(index) * pageHeight,
-            width: contentWidth,
-            height: pageHeight
-        )
-    }
-
-    /// Returns the total scrollable height for `pageCount` pages.
-    public static func contentHeight(pageCount: Int) -> CGFloat {
-        CGFloat(pageCount) * pageHeight
-    }
-
-    /// Returns the number of pages to display: the filled pages plus one always-blank page ahead.
-    public static func pageCount(forContentBottom bottom: CGFloat) -> Int {
-        guard bottom > 0 else { return 2 }
-
-        let filled = max(1, Int((bottom / pageHeight).rounded(.up)))
-        return filled + 1
-    }
-
-    /// Returns the number of non-blank pages to export for content extending to `bottom`.
-    public static func exportPageCount(forContentBottom bottom: CGFloat) -> Int {
-        guard bottom > 0 else { return 1 }
-
-        return max(1, Int((bottom / pageHeight).rounded(.up)))
-    }
-
-    /// Returns the page containing content-space `y`, clamped to the available pages.
-    public static func pageIndex(forContentY y: CGFloat, pageCount: Int) -> Int {
-        let clampedPageCount = max(1, pageCount)
-        guard y > 0 else { return 0 }
-
-        let index = Int((y / pageHeight).rounded(.down))
-        return min(index, clampedPageCount - 1)
-    }
+    public static let a4AspectRatio: Double = 841.8 / 595.2
 
     /// Returns the fit-to-width zoom for a viewport of `width`.
     public static func minZoom(forViewportWidth width: CGFloat) -> CGFloat {

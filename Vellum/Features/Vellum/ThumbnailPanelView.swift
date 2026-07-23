@@ -1,11 +1,23 @@
 import SwiftUI
 import VellumCore
 
+private struct ThumbnailRequestID: Hashable {
+    let pageIndex: Int
+    let generation: Int
+}
+
 struct ThumbnailPanelView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let store: PageThumbnailStore
+    let pages: [NotePage]
     let pageCount: Int
     let currentPageIndex: Int
+    let geometry: PageGeometry
+    let contentProvider: () -> NotePageRenderer.Content
     let onSelect: (Int) -> Void
+    let onMovePages: (IndexSet, Int) -> Void
+    let onAddPage: () -> Void
     let onDismiss: () -> Void
 
     private let thumbnailWidth: CGFloat = 156
@@ -28,15 +40,30 @@ struct ThumbnailPanelView: View {
             }
 
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 16) {
-                        ForEach(0..<pageCount, id: \.self) { index in
-                            thumbnailCell(pageIndex: index)
-                                .id(index)
-                        }
+                List {
+                    ForEach(Array(pages.enumerated()), id: \.element.id) { index, _ in
+                        thumbnailCell(pageIndex: index)
+                            .id(index)
+                            .padding(.bottom, 16)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
                     }
-                    .frame(maxWidth: .infinity)
+                    .onMove { source, destination in
+                        onMovePages(source, min(destination, pages.count))
+                    }
+
+                    if pageCount > pages.count {
+                        thumbnailCell(pageIndex: pages.count)
+                            .id(pages.count)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.editMode, .constant(.active))
                 .scrollIndicators(.hidden)
                 .onAppear {
                     withAnimation {
@@ -44,6 +71,15 @@ struct ThumbnailPanelView: View {
                     }
                 }
             }
+
+            Button {
+                onAddPage()
+            } label: {
+                Label("Add page", systemImage: "plus")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(VellumTheme.accentDark)
+            }
+            .buttonStyle(.plain)
         }
         .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -53,6 +89,9 @@ struct ThumbnailPanelView: View {
                 .stroke(VellumTheme.ink(0.14), lineWidth: 1)
         }
         .shadow(color: VellumTheme.ink(0.18), radius: 18, x: -4, y: 12)
+        .onChange(of: colorScheme) { _, _ in
+            store.markDirty()
+        }
     }
 
     private func thumbnailCell(pageIndex: Int) -> some View {
@@ -75,7 +114,7 @@ struct ThumbnailPanelView: View {
                 }
                 .frame(
                     width: thumbnailWidth,
-                    height: thumbnailWidth * PageLayout.a4AspectRatio
+                    height: thumbnailWidth * CGFloat(geometry.aspectRatio)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 5))
                 .overlay {
@@ -93,7 +132,18 @@ struct ThumbnailPanelView: View {
                             : VellumTheme.mutedCount
                     )
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .task(
+            id: ThumbnailRequestID(
+                pageIndex: pageIndex,
+                generation: store.generation
+            )
+        ) {
+            var content = contentProvider()
+            content.interfaceStyle = colorScheme == .dark ? .dark : .light
+            await store.requestImage(for: pageIndex, content: content)
+        }
     }
 }

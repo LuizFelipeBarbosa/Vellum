@@ -261,6 +261,89 @@ func insertNoteCreatesSuppliedSkeleton() async throws {
     #expect(try await repository.loadNote(id: note.id).pages[0].id == note.pages[0].id)
 }
 
+@Test("A manifest without a background style defaults to legacy dots")
+func manifestWithoutBackgroundStyleDefaultsToLegacyDots() throws {
+    let original = migrationNote(schemaVersion: 5)
+    let encoded = try FilePersistence.encoder().encode(original)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "backgroundStyle")
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    #expect(decoded.backgroundStyle == .legacyDefault)
+}
+
+@Test("A v6 manifest round trips an explicit background style")
+func v6ManifestBackgroundStyleRoundTrip() throws {
+    var note = migrationNote(schemaVersion: 6)
+    note.backgroundStyle = PageBackgroundStyle(
+        kind: .ruled,
+        spacing: 32,
+        paperTint: CodableColor(hex: "#FAF3DC")
+    )
+
+    let decoded = try FilePersistence.decoder().decode(
+        Note.self,
+        from: FilePersistence.encoder().encode(note)
+    )
+
+    #expect(decoded.backgroundStyle == note.backgroundStyle)
+}
+
+@Test("A manifest with an unknown background kind decodes to blank")
+func manifestWithUnknownBackgroundKindDecodesToBlank() throws {
+    let original = migrationNote(schemaVersion: 6)
+    let encoded = try FilePersistence.encoder().encode(original)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    var backgroundStyle = try #require(object["backgroundStyle"] as? [String: Any])
+    backgroundStyle["kind"] = "hexagons"
+    object["backgroundStyle"] = backgroundStyle
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    #expect(decoded.backgroundStyle.kind == .blank)
+}
+
+@Test("A v6 manifest page without a PDF reference decodes with nil")
+func v6ManifestWithoutPDFPageReferenceDefaultsToNil() throws {
+    let original = migrationNote(schemaVersion: 6)
+    let encoded = try FilePersistence.encoder().encode(original)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    var pages = try #require(object["pages"] as? [[String: Any]])
+    pages[0].removeValue(forKey: "pdfPage")
+    object["pages"] = pages
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    #expect(decoded.schemaVersion == 6)
+    #expect(decoded.pages[0].pdfPage == nil)
+}
+
+@Test("A PDF page reference round trips its asset path and page index")
+func pdfPageReferenceRoundTrip() throws {
+    let pageID = UUID()
+    let reference = PDFPageReference(assetPath: "assets/pdf-1234.pdf", pageIndex: 7)
+    let page = NotePage(
+        id: pageID,
+        order: 0,
+        plainText: "",
+        drawingAssetPath: "pages/\(pageID.uuidString)/drawing.data",
+        background: .pdf,
+        pdfPage: reference
+    )
+
+    let decoded = try FilePersistence.decoder().decode(
+        NotePage.self,
+        from: FilePersistence.encoder().encode(page)
+    )
+
+    #expect(decoded.pdfPage?.assetPath == reference.assetPath)
+    #expect(decoded.pdfPage?.pageIndex == reference.pageIndex)
+}
+
 private func migrationNote(schemaVersion: Int) -> Note {
     let pageID = UUID()
     return Note(

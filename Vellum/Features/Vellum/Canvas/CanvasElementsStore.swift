@@ -10,6 +10,36 @@ final class CanvasElementsStore {
     private struct Snapshot: Equatable {
         let drawingData: Data?
         let elements: [CanvasElement]
+        let pages: [NotePage]?
+
+        static func == (lhs: Snapshot, rhs: Snapshot) -> Bool {
+            lhs.drawingData == rhs.drawingData
+                && lhs.elements == rhs.elements
+                && pagesEqual(lhs.pages, rhs.pages)
+        }
+
+        private static func pagesEqual(
+            _ lhs: [NotePage]?,
+            _ rhs: [NotePage]?
+        ) -> Bool {
+            switch (lhs, rhs) {
+            case (nil, nil):
+                return true
+            case (.some(let lhs), .some(let rhs)):
+                guard lhs.count == rhs.count else { return false }
+                return zip(lhs, rhs).allSatisfy { lhsPage, rhsPage in
+                    lhsPage.id == rhsPage.id
+                        && lhsPage.order == rhsPage.order
+                        && lhsPage.plainText == rhsPage.plainText
+                        && lhsPage.drawingAssetPath == rhsPage.drawingAssetPath
+                        && lhsPage.background == rhsPage.background
+                        && lhsPage.pdfPage == rhsPage.pdfPage
+                        && lhsPage.elements == rhsPage.elements
+                }
+            default:
+                return false
+            }
+        }
     }
 
     private(set) var elements: [CanvasElement] = []
@@ -18,6 +48,8 @@ final class CanvasElementsStore {
     var canvasReference: NoteCanvasReference?
     var undoManagerOverride: UndoManager?
     var onElementsChanged: (([CanvasElement]) -> Void)?
+    var pagesProvider: (() -> [NotePage])?
+    var onPagesRestored: (([NotePage]) -> Void)?
     /// Fired after an undo/redo snapshot restore. Selection must be invalidated:
     /// the programmatic drawing write suppresses onExternalDrawingChange, so
     /// stroke indices held by a selection would silently go stale.
@@ -72,7 +104,8 @@ final class CanvasElementsStore {
         let currentSnapshot = snapshot()
         let before = Snapshot(
             drawingData: currentSnapshot.drawingData,
-            elements: previousElements
+            elements: previousElements,
+            pages: currentSnapshot.pages
         )
         guard before != currentSnapshot else { return }
         guard let undoManager = undoManagerOverride ?? canvasReference?.canvasView?.undoManager else {
@@ -102,6 +135,14 @@ final class CanvasElementsStore {
         var drawing = canvasView.drawing
         mutate(&drawing)
         canvasView.drawing = drawing
+    }
+
+    func replaceAllElements(_ elements: [CanvasElement]) {
+        guard isInTransaction else {
+            assertionFailure("replaceAllElements must be called inside performTransaction")
+            return
+        }
+        self.elements = elements
     }
 
     func performTransaction(_ label: String, _ body: () -> Void) {
@@ -139,7 +180,8 @@ final class CanvasElementsStore {
     private func snapshot() -> Snapshot {
         Snapshot(
             drawingData: canvasReference?.canvasView?.drawing.dataRepresentation(),
-            elements: elements
+            elements: elements,
+            pages: pagesProvider?()
         )
     }
 
@@ -155,6 +197,9 @@ final class CanvasElementsStore {
         }
 
         elements = snapshot.elements
+        if let pages = snapshot.pages {
+            onPagesRestored?(pages)
+        }
         onElementsChanged?(elements)
         onSnapshotApplied?()
     }

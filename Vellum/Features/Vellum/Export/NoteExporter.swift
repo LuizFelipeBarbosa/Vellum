@@ -4,6 +4,7 @@ import VellumCore
 
 enum NoteExportError: LocalizedError {
     case missingImageAssets([String])
+    case missingPDFPages([Int])
 
     var errorDescription: String? {
         switch self {
@@ -12,6 +13,12 @@ enum NoteExportError: LocalizedError {
             let missingPaths = paths.joined(separator: ", ")
             return "Export failed: \(paths.count) \(imageLabel) could not be loaded "
                 + "(missing: \(missingPaths))."
+        case .missingPDFPages(let bands):
+            let pageLabel = bands.count == 1 ? "PDF page" : "PDF pages"
+            let missingLabel = bands.count == 1 ? "page" : "pages"
+            let pageNumbers = bands.map { String($0 + 1) }.joined(separator: ", ")
+            return "Export failed: \(bands.count) \(pageLabel) could not be loaded "
+                + "(missing \(missingLabel): \(pageNumbers))."
         }
     }
 }
@@ -43,15 +50,28 @@ enum NoteExporter {
     static func export(
         content: NotePageRenderer.Content,
         title: String,
-        format: Format
+        format: Format,
+        minimumFilledPages: Int = 0
     ) throws -> Output {
-        let pageCount = exportPageCount(for: content)
+        let pageCount = exportPageCount(
+            for: content,
+            minimumFilledPages: minimumFilledPages
+        )
+        let missingPDFBands = content.pdfExpectedBands
+            .filter { (0..<pageCount).contains($0) && content.pdfPagesByBand[$0] == nil }
+            .sorted()
+        if !missingPDFBands.isEmpty {
+            throw NoteExportError.missingPDFPages(missingPDFBands)
+        }
+
         var missingAssetPaths: [String] = []
         var seenMissingAssetPaths = Set<String>()
         for element in content.elements {
             guard case .image(let imageContent) = element.content else { continue }
             let isInExportedRange = (0..<pageCount).contains { pageIndex in
-                element.rotatedBoundingBox.intersects(PageLayout.pageRect(index: pageIndex))
+                element.rotatedBoundingBox.intersects(
+                    content.geometry.pageRect(index: pageIndex)
+                )
             }
             guard isInExportedRange,
                   content.imagesByAssetPath[imageContent.assetPath] == nil,
@@ -91,15 +111,19 @@ enum NoteExporter {
         }
     }
 
-    private static func exportPageCount(for content: NotePageRenderer.Content) -> Int {
+    private static func exportPageCount(
+        for content: NotePageRenderer.Content,
+        minimumFilledPages: Int
+    ) -> Int {
         let drawingBounds = content.drawing.bounds
         let drawingBottom =
             (drawingBounds.isNull || drawingBounds.isEmpty) ? 0 : drawingBounds.maxY
         let elementsBottom = content.elements
             .map { $0.effectiveBoundingBox.maxY }
             .max() ?? 0
-        return PageLayout.exportPageCount(
-            forContentBottom: max(drawingBottom, elementsBottom)
+        return content.geometry.exportPageCount(
+            forContentBottom: max(drawingBottom, elementsBottom),
+            minimumFilledPages: minimumFilledPages
         )
     }
 
@@ -113,13 +137,14 @@ enum NoteExporter {
         switch format {
         case .pdf:
             let url = directory.appendingPathComponent("\(title).pdf")
+            let pdfPageSize = content.geometry.pdfPageSize
             let renderer = UIGraphicsPDFRenderer(
-                bounds: CGRect(origin: .zero, size: PageLayout.pdfPageSize)
+                bounds: CGRect(origin: .zero, size: pdfPageSize)
             )
             try renderer.writePDF(to: url) { context in
                 for pageIndex in 0..<pageCount {
                     context.beginPage()
-                    let scale = PageLayout.pdfPageSize.width / PageLayout.contentWidth
+                    let scale = pdfPageSize.width / content.geometry.contentWidth
                     context.cgContext.saveGState()
                     context.cgContext.scaleBy(x: scale, y: scale)
                     NotePageRenderer.draw(
@@ -139,8 +164,8 @@ enum NoteExporter {
                     pageIndex: pageIndex,
                     content: content,
                     pointSize: CGSize(
-                        width: PageLayout.contentWidth,
-                        height: PageLayout.pageHeight
+                        width: content.geometry.contentWidth,
+                        height: content.geometry.pageHeight
                     ),
                     scale: 2
                 )

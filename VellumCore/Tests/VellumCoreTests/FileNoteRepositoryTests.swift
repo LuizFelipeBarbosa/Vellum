@@ -82,6 +82,98 @@ func binaryAssetRoundTrip() async throws {
     #expect(loaded == bytes)
 }
 
+@Test("Importing a note atomically persists its manifest and assets")
+func atomicNoteImport() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let pageID = UUID()
+    let note = Note(
+        id: UUID(),
+        schemaVersion: Note.currentSchemaVersion,
+        revision: 1,
+        title: "Imported",
+        tags: [],
+        createdAt: Date(timeIntervalSince1970: 1),
+        updatedAt: Date(timeIntervalSince1970: 2),
+        pages: [
+            NotePage(
+                id: pageID,
+                order: 0,
+                plainText: "",
+                drawingAssetPath: "pages/\(pageID.uuidString)/drawing.data",
+                background: .blank
+            )
+        ],
+        backgroundStyle: .blank
+    )
+    let assetPath = "assets/source.pdf"
+    let bytes = Data([0x25, 0x50, 0x44, 0x46])
+
+    try await repository.importNote(
+        note,
+        assets: [(relativePath: assetPath, data: bytes)]
+    )
+
+    #expect(try await repository.listNotes(scope: .all).map(\.id) == [note.id])
+    let loaded = try await repository.loadNote(id: note.id)
+    #expect(
+        try FilePersistence.encoder().encode(loaded)
+            == FilePersistence.encoder().encode(note)
+    )
+    #expect(
+        try await repository.loadAsset(
+            noteID: note.id,
+            relativePath: assetPath
+        ) == bytes
+    )
+}
+
+@Test("A failed atomic import leaves no package or staging directory")
+func failedAtomicNoteImportLeavesNoTrace() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let pageID = UUID()
+    let note = Note(
+        id: UUID(),
+        schemaVersion: Note.currentSchemaVersion,
+        revision: 1,
+        title: "Invalid import",
+        tags: [],
+        createdAt: Date(timeIntervalSince1970: 1),
+        updatedAt: Date(timeIntervalSince1970: 2),
+        pages: [
+            NotePage(
+                id: pageID,
+                order: 0,
+                plainText: "",
+                drawingAssetPath: "pages/\(pageID.uuidString)/drawing.data",
+                background: .blank
+            )
+        ],
+        backgroundStyle: .blank
+    )
+    let invalidPath = "assets/../escape.pdf"
+
+    await #expect(throws: VellumError.invalidAssetPath(invalidPath)) {
+        try await repository.importNote(
+            note,
+            assets: [(relativePath: invalidPath, data: Data([0x01]))]
+        )
+    }
+
+    let listed = try await repository.listNotes(scope: .all)
+    #expect(!listed.contains { $0.id == note.id })
+    let package = FilePersistence.packageURL(rootDirectory: root, noteID: note.id)
+    #expect(!FileManager.default.fileExists(atPath: package.path))
+    let remainingEntries = try FileManager.default.contentsOfDirectory(
+        at: root,
+        includingPropertiesForKeys: nil
+    )
+    #expect(remainingEntries.isEmpty)
+}
+
 @Test("Asset size reports byte count without requiring asset data")
 func assetSize() async throws {
     let root = try makeTemporaryDirectory()
@@ -329,6 +421,60 @@ func tornDrawingSaveIsInvisibleAndPurged() async throws {
     #expect(
         try await repository.loadAsset(noteID: note.id, relativePath: oldAssetPath) == oldData
     )
+}
+
+@Test("A created note persists a blank background style")
+func createdNotePersistsBlankBackgroundStyle() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+
+    let note = try await repository.createNote(title: "Blank paper")
+    #expect(note.backgroundStyle == .blank)
+
+    try await repository.saveNote(note)
+    let loaded = try await repository.loadNote(id: note.id)
+    #expect(loaded.backgroundStyle == .blank)
+}
+
+@Test("Saving a legacy manifest upgrades its schema and preserves legacy dots")
+func savingLegacyManifestUpgradesSchemaAndPreservesDots() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let pageID = UUID()
+    let original = Note(
+        id: UUID(),
+        schemaVersion: 5,
+        revision: 1,
+        title: "Legacy paper",
+        tags: [],
+        createdAt: Date(timeIntervalSince1970: 1),
+        updatedAt: Date(timeIntervalSince1970: 2),
+        pages: [
+            NotePage(
+                id: pageID,
+                order: 0,
+                plainText: "",
+                drawingAssetPath: "pages/\(pageID.uuidString)/drawing.data",
+                background: .blank
+            )
+        ]
+    )
+    let encoded = try FilePersistence.encoder().encode(original)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "backgroundStyle")
+    let data = try JSONSerialization.data(withJSONObject: object)
+    let legacy = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    #expect(legacy.schemaVersion == 5)
+    #expect(legacy.backgroundStyle == .legacyDefault)
+
+    try await repository.insertNote(legacy)
+    try await repository.saveNote(legacy)
+    let loaded = try await repository.loadNote(id: legacy.id)
+    #expect(loaded.schemaVersion == Note.currentSchemaVersion)
+    #expect(loaded.backgroundStyle == .legacyDefault)
 }
 
 private func makeTemporaryDirectory() throws -> URL {

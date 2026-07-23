@@ -9,7 +9,7 @@ public enum NoteType: String, Codable, Sendable, CaseIterable {
 }
 
 public struct Note: Identifiable, Codable, Sendable {
-    public static let currentSchemaVersion = 5
+    public static let currentSchemaVersion = 6
     public static let currentLayoutVersion = 2
 
     public let id: UUID
@@ -20,13 +20,22 @@ public struct Note: Identifiable, Codable, Sendable {
     public var tags: [String]
     public let createdAt: Date
     public var updatedAt: Date
+    /// Page metadata indexed by visual band: `pages[i]` describes band `i`. Any
+    /// mutation of this array rewrites `order` to `0..<pages.count`. The continuous
+    /// drawing, elements, and plain text are always referenced from `pages[0]`.
+    /// Bands beyond `pages.count` are virtual, not-yet-materialized notebook pages.
     public var pages: [NotePage]
     public var noteType: NoteType
     public var spaceID: UUID?
     public var links: [NoteLink]
+    public var backgroundStyle: PageBackgroundStyle
+    public var pageAspectRatio: Double = PageLayout.a4AspectRatio
     public var deletedAt: Date?
 
     public var isTrashed: Bool { deletedAt != nil }
+    public var pageGeometry: PageGeometry {
+        PageGeometry(aspectRatio: pageAspectRatio)
+    }
 
     public init(
         id: UUID,
@@ -41,6 +50,8 @@ public struct Note: Identifiable, Codable, Sendable {
         noteType: NoteType = .note,
         spaceID: UUID? = nil,
         links: [NoteLink] = [],
+        backgroundStyle: PageBackgroundStyle = .legacyDefault,
+        pageAspectRatio: Double = PageLayout.a4AspectRatio,
         deletedAt: Date? = nil
     ) {
         self.id = id
@@ -55,6 +66,8 @@ public struct Note: Identifiable, Codable, Sendable {
         self.noteType = noteType
         self.spaceID = spaceID
         self.links = links
+        self.backgroundStyle = backgroundStyle
+        self.pageAspectRatio = PageGeometry(aspectRatio: pageAspectRatio).aspectRatio
         self.deletedAt = deletedAt
     }
 
@@ -72,7 +85,42 @@ public struct Note: Identifiable, Codable, Sendable {
         noteType = try container.decodeIfPresent(NoteType.self, forKey: .noteType) ?? .note
         spaceID = try container.decodeIfPresent(UUID.self, forKey: .spaceID)
         links = try container.decodeIfPresent([NoteLink].self, forKey: .links) ?? []
+        backgroundStyle = try container.decodeIfPresent(
+            PageBackgroundStyle.self,
+            forKey: .backgroundStyle
+        ) ?? .legacyDefault
+        pageAspectRatio = PageGeometry(
+            aspectRatio: try container.decodeIfPresent(
+                Double.self,
+                forKey: .pageAspectRatio
+            ) ?? PageLayout.a4AspectRatio
+        ).aspectRatio
         deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+    }
+}
+
+extension Note {
+    /// nil when the page renders its own content (background == .pdf or .image); else the notebook style.
+    public func resolvedBackgroundStyle(forPageAt index: Int) -> PageBackgroundStyle? {
+        guard index >= 0 else { return nil }
+        guard pages.indices.contains(index) else { return backgroundStyle }
+
+        switch pages[index].background {
+        case .pdf, .image:
+            return nil
+        case .blank, .ruled, .grid:
+            return backgroundStyle
+        }
+    }
+}
+
+public struct PDFPageReference: Codable, Sendable, Equatable {
+    public var assetPath: String
+    public var pageIndex: Int
+
+    public init(assetPath: String, pageIndex: Int) {
+        self.assetPath = assetPath
+        self.pageIndex = pageIndex
     }
 }
 
@@ -82,6 +130,8 @@ public struct NotePage: Identifiable, Codable, Sendable {
     public var plainText: String
     public var drawingAssetPath: String
     public var background: PageBackground
+    /// The source PDF page when `background == .pdf`; otherwise nil.
+    public var pdfPage: PDFPageReference?
     /// Rendering composites in three bands: image elements (in array order), then the
     /// page's ink drawing, then text elements (in array order). Cross-kind array
     /// interleaving is not visually significant in this schema version. Writers must
@@ -95,6 +145,7 @@ public struct NotePage: Identifiable, Codable, Sendable {
         plainText: String,
         drawingAssetPath: String,
         background: PageBackground,
+        pdfPage: PDFPageReference? = nil,
         elements: [CanvasElement] = []
     ) {
         self.id = id
@@ -102,6 +153,7 @@ public struct NotePage: Identifiable, Codable, Sendable {
         self.plainText = plainText
         self.drawingAssetPath = drawingAssetPath
         self.background = background
+        self.pdfPage = pdfPage
         self.elements = elements
     }
 
@@ -112,6 +164,7 @@ public struct NotePage: Identifiable, Codable, Sendable {
         plainText = try container.decode(String.self, forKey: .plainText)
         drawingAssetPath = try container.decode(String.self, forKey: .drawingAssetPath)
         background = try container.decode(PageBackground.self, forKey: .background)
+        pdfPage = try container.decodeIfPresent(PDFPageReference.self, forKey: .pdfPage)
         elements = try container.decodeIfPresent([CanvasElement].self, forKey: .elements) ?? []
     }
 }

@@ -1,9 +1,11 @@
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 import VellumCore
 
 struct VellumLibraryView: View {
     @Bindable var model: VellumAppModel
+    @State private var isImportingPDF = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 16), count: 3)
 
@@ -42,13 +44,20 @@ struct VellumLibraryView: View {
                             Text("Nothing here yet")
                                 .font(.vellumNewsreader(24, italic: true))
                                 .foregroundStyle(VellumTheme.bodyMuted)
-                            Button("New note", action: createNote)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(VellumTheme.paper)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(VellumTheme.ink, in: Capsule())
-                                .buttonStyle(.plain)
+                            Menu {
+                                Button("New Note", action: createNote)
+                                Button("New from PDF") {
+                                    isImportingPDF = true
+                                }
+                            } label: {
+                                Text("New note")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(VellumTheme.paper)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(VellumTheme.ink, in: Capsule())
+                            .buttonStyle(.plain)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 120)
@@ -71,7 +80,12 @@ struct VellumLibraryView: View {
             .padding(.top, 26)
 
             if !library.isSelecting {
-                Button(action: createNote) {
+                Menu {
+                    Button("New Note", action: createNote)
+                    Button("New from PDF") {
+                        isImportingPDF = true
+                    }
+                } label: {
                     VellumPencilGlyph(size: 24)
                         .frame(width: 58, height: 58)
                         .background(VellumTheme.ink, in: Circle())
@@ -149,6 +163,37 @@ struct VellumLibraryView: View {
             }
         } message: {
             Text("The notes move to the Trash. You can restore them there later.")
+        }
+        .fileImporter(
+            isPresented: $isImportingPDF,
+            allowedContentTypes: [.pdf]
+        ) { result in
+            switch result {
+            case .success(let url):
+                let isAccessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if isAccessing {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                do {
+                    let data = try Data(contentsOf: url)
+                    let suggestedTitle = url.deletingPathExtension().lastPathComponent
+                    Task {
+                        guard let noteID = await model.library.createNoteFromPDF(
+                            data: data,
+                            suggestedTitle: suggestedTitle
+                        ) else { return }
+                        await model.refreshStats()
+                        await model.openNote(noteID)
+                    }
+                } catch {
+                    model.library.errorMessage = error.localizedDescription
+                }
+            case .failure(let error):
+                model.library.errorMessage = error.localizedDescription
+            }
         }
         .alert(
             "Vellum",
@@ -312,7 +357,7 @@ struct VellumLibraryView: View {
         Task {
             guard let noteID = await model.library.createNote() else { return }
             await model.refreshStats()
-            await model.navigate(to: .note(noteID))
+            await model.openNote(noteID, isNewlyCreated: true)
         }
     }
 }

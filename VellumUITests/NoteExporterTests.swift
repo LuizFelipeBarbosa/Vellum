@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import PDFKit
 import PencilKit
 import UIKit
 @testable import Vellum
@@ -62,6 +63,65 @@ final class NoteExporterTests: XCTestCase {
                 XCTAssertNotNil(UIImage(contentsOfFile: output.urls[0].path))
             }
         }
+    }
+
+    func testPDFBackedPageWithoutInkExportsAsOnePDFPage() throws {
+        let pdfDocument = try makeSolidPDFDocument(
+            color: .blue,
+            size: CGSize(width: 320, height: 320)
+        )
+        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
+        let content = NotePageRenderer.Content(
+            drawing: PKDrawing(),
+            elements: [],
+            imagesByAssetPath: [:],
+            pageCount: 1,
+            pdfPagesByBand: [0: pdfPage],
+            pdfExpectedBands: [0]
+        )
+        let output = try NoteExporter.export(
+            content: content,
+            title: "PDF-backed",
+            format: .pdf,
+            minimumFilledPages: 1
+        )
+        defer { removeOutput(output) }
+
+        let document = try XCTUnwrap(CGPDFDocument(output.urls[0] as CFURL))
+        XCTAssertEqual(document.numberOfPages, 1)
+    }
+
+    func testMissingExpectedPDFPageThrowsBeforeCreatingOutputDirectory() throws {
+        let content = NotePageRenderer.Content(
+            drawing: PKDrawing(),
+            elements: [],
+            imagesByAssetPath: [:],
+            pageCount: 1,
+            pdfExpectedBands: [0]
+        )
+        let directoriesBefore = try temporaryExportDirectoryNames()
+
+        do {
+            let output = try NoteExporter.export(
+                content: content,
+                title: "Missing PDF",
+                format: .pdf,
+                minimumFilledPages: 1
+            )
+            defer { removeOutput(output) }
+            XCTFail("Expected missingPDFPages")
+        } catch NoteExportError.missingPDFPages(let missingBands) {
+            XCTAssertEqual(missingBands, [0])
+            XCTAssertEqual(
+                NoteExportError.missingPDFPages(missingBands).localizedDescription,
+                "Export failed: 1 PDF page could not be loaded (missing page: 1)."
+            )
+        } catch {
+            XCTFail("Expected missingPDFPages, got \(error)")
+        }
+
+        let directoriesAfter = try temporaryExportDirectoryNames()
+        XCTAssertEqual(directoriesAfter, directoriesBefore)
     }
 
     func testMissingInRangeImageAssetThrowsBeforeCreatingOutputDirectory() throws {
@@ -194,7 +254,7 @@ final class NoteExporterTests: XCTestCase {
 
     func testRotatedImageCrossingPageBoundaryExportsSecondPage() throws {
         let assetPath = "assets/rotated-red.png"
-        let centerY = PageLayout.pageHeight - 30
+        let centerY = PageGeometry.a4.pageHeight - 30
         let element = CanvasElement(
             content: .image(
                 ImageContent(
@@ -238,7 +298,7 @@ final class NoteExporterTests: XCTestCase {
     func testWrappedTextCrossingPageBoundaryExportsAndDrawsOnSecondPage() throws {
         let frame = CanvasRect(
             x: 304,
-            y: Double(PageLayout.pageHeight - 64),
+            y: Double(PageGeometry.a4.pageHeight - 64),
             width: 160,
             height: 44
         )
@@ -266,8 +326,8 @@ final class NoteExporterTests: XCTestCase {
         defer { removeOutput(output) }
 
         assertOutputDirectory(output)
-        XCTAssertLessThan(cgRect(frame).maxY, PageLayout.pageHeight)
-        XCTAssertGreaterThan(element.effectiveBoundingBox.maxY, PageLayout.pageHeight)
+        XCTAssertLessThan(cgRect(frame).maxY, PageGeometry.a4.pageHeight)
+        XCTAssertGreaterThan(element.effectiveBoundingBox.maxY, PageGeometry.a4.pageHeight)
         XCTAssertEqual(output.urls.count, 2)
 
         let rendered = try pixelBuffer(
@@ -285,14 +345,14 @@ final class NoteExporterTests: XCTestCase {
                 content: referenceContent,
                 pointSize: CGSize(
                     width: PageLayout.contentWidth,
-                    height: PageLayout.pageHeight
+                    height: PageGeometry.a4.pageHeight
                 ),
                 scale: 2
             )
         )
         let pageLocalOverlap = element.effectiveBoundingBox
-            .intersection(PageLayout.pageRect(index: 1))
-            .offsetBy(dx: 0, dy: -PageLayout.pageHeight)
+            .intersection(PageGeometry.a4.pageRect(index: 1))
+            .offsetBy(dx: 0, dy: -PageGeometry.a4.pageHeight)
 
         XCTAssertGreaterThan(
             differingPixelCount(rendered, reference, in: pageLocalOverlap),
@@ -343,12 +403,12 @@ final class NoteExporterTests: XCTestCase {
             let cgImage = try XCTUnwrap(image.cgImage)
             XCTAssertEqual(
                 CGFloat(cgImage.width),
-                PageLayout.rasterPageSizePixels.width,
+                PageGeometry.a4.rasterPageSizePixels.width,
                 accuracy: 1
             )
             XCTAssertEqual(
                 CGFloat(cgImage.height),
-                PageLayout.rasterPageSizePixels.height,
+                PageGeometry.a4.rasterPageSizePixels.height,
                 accuracy: 1
             )
         }
@@ -358,8 +418,8 @@ final class NoteExporterTests: XCTestCase {
         let stroke = makeStroke(
             locations: [
                 CGPoint(x: 180, y: 80),
-                CGPoint(x: 260, y: PageLayout.pageHeight * 1.4),
-                CGPoint(x: 340, y: PageLayout.pageHeight * 2.5),
+                CGPoint(x: 260, y: PageGeometry.a4.pageHeight * 1.4),
+                CGPoint(x: 340, y: PageGeometry.a4.pageHeight * 2.5),
             ],
             size: CGSize(width: 12, height: 12)
         )
@@ -383,7 +443,7 @@ final class NoteExporterTests: XCTestCase {
             ),
             frame: CanvasRect(
                 x: 160,
-                y: Double(PageLayout.pageHeight + 120),
+                y: Double(PageGeometry.a4.pageHeight + 120),
                 width: 240,
                 height: 120
             )
@@ -430,6 +490,19 @@ final class NoteExporterTests: XCTestCase {
         }
     }
 
+    private func makeSolidPDFDocument(
+        color: UIColor,
+        size: CGSize
+    ) throws -> PDFDocument {
+        let bounds = CGRect(origin: .zero, size: size)
+        let data = UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
+            context.beginPage()
+            context.cgContext.setFillColor(color.cgColor)
+            context.cgContext.fill(bounds)
+        }
+        return try XCTUnwrap(PDFDocument(data: data))
+    }
+
     private func pixelBuffer(for image: UIImage) throws -> PixelBuffer {
         let cgImage = try XCTUnwrap(image.cgImage)
         var bytes = [UInt8](repeating: 0, count: cgImage.width * cgImage.height * 4)
@@ -471,11 +544,11 @@ final class NoteExporterTests: XCTestCase {
         )
         let minY = max(
             0,
-            Int(floor(contentRect.minY / PageLayout.pageHeight * CGFloat(lhs.height)))
+            Int(floor(contentRect.minY / PageGeometry.a4.pageHeight * CGFloat(lhs.height)))
         )
         let maxY = min(
             lhs.height,
-            Int(ceil(contentRect.maxY / PageLayout.pageHeight * CGFloat(lhs.height)))
+            Int(ceil(contentRect.maxY / PageGeometry.a4.pageHeight * CGFloat(lhs.height)))
         )
 
         var count = 0

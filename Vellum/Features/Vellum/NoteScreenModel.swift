@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PDFKit
 import PencilKit
 import UIKit
 import VellumCore
@@ -28,8 +29,16 @@ final class NoteScreenModel {
         }
     }
 
+    enum PDFLoadFailureReason: Equatable {
+        case missing
+        case loadError(String)
+        case undecodable
+    }
+
     let noteID: UUID
+    let offersBackgroundChooser: Bool
     let canvasElements = CanvasElementsStore()
+    let pdfCache = PdfPageImageCache()
 
     private let notes: any NoteRepository
     private let workspace: WorkspaceService
@@ -43,6 +52,7 @@ final class NoteScreenModel {
     private var inFlightSave: Task<Void, Never>?
     private var drawingDataPendingSave: Data?
     private var autosaveDisabled = false
+    private var pendingPageMutationSave = false
 
     var note: Note?
     var drawingData: Data?
@@ -52,14 +62,17 @@ final class NoteScreenModel {
     var isLoading = false
     var isAnalyzing = false
     var errorMessage: String?
+    private(set) var pdfLoadFailures: [String: PDFLoadFailureReason] = [:]
 
     var space: Space?
     var spaces: [SpaceListing] = []
     var backlinks: [Backlink] = []
     var noteEntities: [Entity] = []
     var isShowingSuggestions = false
+    var isShowingBackgroundChooser = false
     var selectedEntity: Entity?
     var noteTitles: [UUID: String] = [:]
+    var onScrollToPage: ((Int) -> Void)?
 
     var pendingProposals: [AgentProposal] {
         proposals.filter { $0.status == .pending }
@@ -68,15 +81,26 @@ final class NoteScreenModel {
     init(
         noteID: UUID,
         container: AppContainer,
+        offersBackgroundChooser: Bool = false,
         onNoteChanged: @escaping @MainActor (Note) -> Void
     ) {
         self.noteID = noteID
+        self.offersBackgroundChooser = offersBackgroundChooser
         notes = container.notes
         workspace = container.workspace
         graph = container.graph
         self.onNoteChanged = onNoteChanged
         canvasElements.onElementsChanged = { [weak self] elements in
             self?.elementsChanged(elements)
+        }
+        canvasElements.pagesProvider = { [weak self] in
+            self?.note?.pages ?? []
+        }
+        pdfCache.pagesProvider = { [weak self] in
+            self?.note?.pages ?? []
+        }
+        canvasElements.onPagesRestored = { [weak self] pages in
+            self?.pagesRestored(pages)
         }
     }
 
@@ -85,6 +109,16 @@ final class NoteScreenModel {
         set {
             guard note?.title != newValue else { return }
             note?.title = newValue
+            noteWasEdited()
+        }
+    }
+
+    var backgroundStyle: PageBackgroundStyle {
+        get { note?.backgroundStyle ?? .legacyDefault }
+        set {
+            guard var current = note, current.backgroundStyle != newValue else { return }
+            current.backgroundStyle = newValue
+            note = current
             noteWasEdited()
         }
     }
@@ -105,6 +139,17 @@ final class NoteScreenModel {
 
     var hasEditablePage: Bool {
         note?.pages.isEmpty == false
+    }
+
+    var pdfBands: Set<Int> {
+        guard let pages = note?.pages else { return [] }
+        return Set(pages.indices.filter { pages[$0].pdfPage != nil })
+    }
+
+    var pdfLoadFailureMessage: String? {
+        guard !pdfLoadFailures.isEmpty else { return nil }
+        let count = pdfLoadFailures.count
+        return "Couldn't load the PDF for \(count) page\(count == 1 ? "" : "s") — pull to retry or reopen the note."
     }
 
     func load() async {
@@ -138,6 +183,7 @@ final class NoteScreenModel {
 
             let elements = loadedNote.pages.first?.elements ?? []
             note = loadedNote
+            await cachePDFDocuments(for: loadedNote)
             canvasElements.hydrate(elements)
             await cacheImages(for: elements, noteID: loadedNote.id)
             drawingData = drawing
@@ -153,6 +199,9 @@ final class NoteScreenModel {
             autosaveDisabled = false
             saveState = .saved
             errorMessage = nil
+            if let message = pdfLoadFailureMessage {
+                errorMessage = message
+            }
             onNoteChanged(loadedNote)
             let referencedPaths = Set(loadedNote.pages.map(\.drawingAssetPath))
             try? await notes.purgeUnreferencedDrawingAssets(
@@ -188,8 +237,21 @@ final class NoteScreenModel {
                 note = currentNote
                 noteWasEdited()
             }
+            isShowingBackgroundChooser = offersBackgroundChooser
         } catch {
             handle(error)
+        }
+    }
+
+    func retryPDFLoad() async {
+        guard let currentNote = note else { return }
+        let wasShowingPDFFailureMessage =
+            errorMessage != nil && errorMessage == pdfLoadFailureMessage
+        await cachePDFDocuments(for: currentNote)
+        if let message = pdfLoadFailureMessage {
+            errorMessage = message
+        } else if wasShowingPDFFailureMessage {
+            errorMessage = nil
         }
     }
 
@@ -198,17 +260,130 @@ final class NoteScreenModel {
         drawingData = data
         drawingDataPendingSave = data
         noteWasEdited()
+        materializePagesForFilledBands()
     }
 
     func elementsChanged(_ elements: [CanvasElement]) {
-        guard var currentNote = note,
-              !currentNote.pages.isEmpty,
-              currentNote.pages[0].elements != elements else {
+        let pagesNeedSave = pendingPageMutationSave
+        pendingPageMutationSave = false
+
+        guard var currentNote = note, !currentNote.pages.isEmpty else {
             return
         }
-        currentNote.pages[0].elements = elements
+
+        let elementsDidChange = currentNote.pages[0].elements != elements
+        if elementsDidChange {
+            currentNote.pages[0].elements = elements
+            note = currentNote
+        }
+        if elementsDidChange || pagesNeedSave {
+            noteWasEdited()
+        }
+        materializePagesForFilledBands()
+    }
+
+    func materializePagesForFilledBands() {
+        guard var currentNote = note else { return }
+
+        let drawingBounds: CGRect
+        if let liveDrawing = canvasElements.canvasReference?.canvasView?.drawing {
+            drawingBounds = liveDrawing.bounds
+        } else if let drawingData,
+                  let persistedDrawing = try? PKDrawing(data: drawingData) {
+            drawingBounds = persistedDrawing.bounds
+        } else {
+            drawingBounds = .null
+        }
+
+        let drawingBottom =
+            (drawingBounds.isNull || drawingBounds.isEmpty) ? 0 : drawingBounds.maxY
+        let elementsBottom = canvasElements.elements
+            .map { $0.effectiveBoundingBox.maxY }
+            .max() ?? 0
+        let inkDerivedFilledCount = currentNote.pageGeometry.exportPageCount(
+            forContentBottom: max(drawingBottom, elementsBottom)
+        )
+        let filledCount = max(currentNote.pages.count, inkDerivedFilledCount)
+        guard filledCount > currentNote.pages.count else { return }
+
+        for order in currentNote.pages.count..<filledCount {
+            currentNote.pages.append(Self.blankPage(order: order))
+        }
         note = currentNote
-        noteWasEdited()
+    }
+
+    func movePages(source: IndexSet, to destination: Int) {
+        guard let canvasView = canvasElements.canvasReference?.canvasView,
+              !canvasView.isZooming,
+              (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else {
+            return
+        }
+
+        let pageCountBeforeMaterializing = note?.pages.count ?? 0
+        materializePagesForFilledBands()
+        guard let currentNote = note else { return }
+
+        let validSource = IndexSet(
+            source.filter { currentNote.pages.indices.contains($0) }
+        )
+        guard !validSource.isEmpty else {
+            if currentNote.pages.count > pageCountBeforeMaterializing {
+                noteWasEdited()
+            }
+            return
+        }
+
+        let clampedDestination = min(max(destination, 0), currentNote.pages.count)
+        let permutation = PageBandAssignment.permutation(
+            count: currentNote.pages.count,
+            moving: validSource,
+            to: clampedDestination
+        )
+        let result = PageReorderer.movePages(
+            source: validSource,
+            to: clampedDestination,
+            drawing: canvasView.drawing,
+            elements: canvasElements.elements,
+            pages: currentNote.pages,
+            geometry: currentNote.pageGeometry
+        )
+
+        pendingPageMutationSave =
+            currentNote.pages.count > pageCountBeforeMaterializing
+            || permutation != Array(0..<currentNote.pages.count)
+        defer { pendingPageMutationSave = false }
+
+        canvasElements.performTransaction("Reorder Pages") {
+            canvasElements.mutateDrawing { drawing in
+                drawing = result.drawing
+            }
+            canvasElements.replaceAllElements(result.elements)
+            note?.pages = result.pages
+        }
+
+        if let firstMovedPage = validSource.first {
+            onScrollToPage?(permutation[firstMovedPage])
+        }
+    }
+
+    func addPageAtEnd() {
+        guard let canvasView = canvasElements.canvasReference?.canvasView,
+              !canvasView.isZooming,
+              (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else {
+            return
+        }
+
+        materializePagesForFilledBands()
+        guard let currentNote = note else { return }
+        let newPageIndex = currentNote.pages.count
+
+        pendingPageMutationSave = true
+        defer { pendingPageMutationSave = false }
+        canvasElements.performTransaction("Add Page") {
+            note?.pages.append(Self.blankPage(order: newPageIndex))
+        }
+
+        onScrollToPage?(newPageIndex)
     }
 
     func importImage(_ data: Data, visibleContentRect: CGRect) async {
@@ -408,6 +583,40 @@ final class NoteScreenModel {
         scheduleDebouncedSave()
     }
 
+    private func pagesRestored(_ pages: [NotePage]) {
+        guard var currentNote = note,
+              !Self.pagesEqual(currentNote.pages, pages) else {
+            return
+        }
+        currentNote.pages = pages
+        note = currentNote
+        noteWasEdited()
+    }
+
+    private static func blankPage(order: Int) -> NotePage {
+        let pageID = UUID()
+        return NotePage(
+            id: pageID,
+            order: order,
+            plainText: "",
+            drawingAssetPath: "pages/\(pageID.uuidString)/drawing.data",
+            background: .blank
+        )
+    }
+
+    private static func pagesEqual(_ lhs: [NotePage], _ rhs: [NotePage]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        return zip(lhs, rhs).allSatisfy { lhsPage, rhsPage in
+            lhsPage.id == rhsPage.id
+                && lhsPage.order == rhsPage.order
+                && lhsPage.plainText == rhsPage.plainText
+                && lhsPage.drawingAssetPath == rhsPage.drawingAssetPath
+                && lhsPage.background == rhsPage.background
+                && lhsPage.pdfPage == rhsPage.pdfPage
+                && lhsPage.elements == rhsPage.elements
+        }
+    }
+
     private func scheduleDebouncedSave() {
         if inFlightSave != nil {
             return
@@ -549,6 +758,35 @@ final class NoteScreenModel {
             noteID: note.id,
             relativePath: assetPath
         )
+    }
+
+    private func cachePDFDocuments(for note: Note) async {
+        let assetPaths = Set(note.pages.compactMap { $0.pdfPage?.assetPath }).sorted()
+        var failures: [String: PDFLoadFailureReason] = [:]
+
+        for assetPath in assetPaths {
+            let data: Data
+            do {
+                guard let loadedData = try await notes.loadAsset(
+                    noteID: note.id,
+                    relativePath: assetPath
+                ) else {
+                    failures[assetPath] = .missing
+                    continue
+                }
+                data = loadedData
+            } catch {
+                failures[assetPath] = .loadError(error.localizedDescription)
+                continue
+            }
+            guard let document = PDFDocument(data: data) else {
+                failures[assetPath] = .undecodable
+                continue
+            }
+            pdfCache.setDocument(document, forAssetPath: assetPath)
+        }
+
+        pdfLoadFailures = failures
     }
 
     private func cacheImages(for elements: [CanvasElement], noteID: UUID) async {

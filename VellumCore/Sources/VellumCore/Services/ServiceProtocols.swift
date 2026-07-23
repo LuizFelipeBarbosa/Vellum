@@ -9,6 +9,7 @@ public protocol NoteRepository: Sendable {
     func unsupportedNotes() async throws -> [UnsupportedNotePackage]
     func createNote(title: String) async throws -> Note
     func insertNote(_ note: Note) async throws
+    func importNote(_ note: Note, assets: [(relativePath: String, data: Data)]) async throws
     func loadNote(id: UUID) async throws -> Note
     func saveNote(_ note: Note) async throws
     func deleteNote(id: UUID) async throws
