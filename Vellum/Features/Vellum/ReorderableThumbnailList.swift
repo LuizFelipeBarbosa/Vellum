@@ -372,44 +372,27 @@ private struct ThumbnailRowView: View {
     private let thumbnailWidth: CGFloat = 156
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button {
-                onSelect(pageIndex)
-            } label: {
-                VStack(spacing: 7) {
-                    thumbnail
+        Button {
+            onSelect(pageIndex)
+        } label: {
+            VStack(spacing: 7) {
+                thumbnail
 
-                    Text("\(pageIndex + 1)")
-                        .font(.vellumMono(10.5))
-                        .foregroundStyle(
-                            pageIndex == currentPageIndex
-                                ? VellumTheme.accentDark
-                                : VellumTheme.mutedCount
-                        )
-                }
-                .frame(width: thumbnailWidth)
+                Text("\(pageIndex + 1)")
+                    .font(.vellumMono(10.5))
+                    .foregroundStyle(
+                        pageIndex == currentPageIndex
+                            ? VellumTheme.accentDark
+                            : VellumTheme.mutedCount
+                    )
             }
-            .buttonStyle(.plain)
-
-            VStack {
-                if isRealPage, canDelete {
-                    Button {
-                        onDelete(pageIndex)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(VellumTheme.mutedDark)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Delete page \(pageIndex + 1)")
-                }
-
-                Spacer(minLength: 0)
+            .frame(width: thumbnailWidth)
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .topTrailing) {
+            if isRealPage, canDelete {
+                deleteBadge
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: thumbnailWidth * CGFloat(geometry.aspectRatio))
         }
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -423,6 +406,29 @@ private struct ThumbnailRowView: View {
             content.interfaceStyle = colorScheme == .dark ? .dark : .light
             await store.requestImage(for: pageIndex, content: content)
         }
+    }
+
+    private var deleteBadge: some View {
+        Button {
+            onDelete(pageIndex)
+        } label: {
+            Image(systemName: "trash")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(VellumTheme.mutedDark)
+                .frame(width: 24, height: 24)
+                .background(VellumTheme.popover, in: Circle())
+                .overlay {
+                    Circle().stroke(VellumTheme.ink(0.14), lineWidth: 1)
+                }
+                .shadow(color: VellumTheme.ink(0.1), radius: 3, y: 1)
+                // Padding inside the label + rectangular content shape: a 44pt
+                // hit target that intercepts near-misses instead of letting them
+                // fall through to the page-select button underneath.
+                .padding(10)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Delete page \(pageIndex + 1)")
     }
 
     @ViewBuilder
