@@ -1,4 +1,5 @@
 import Observation
+import SwiftUI
 import UIKit
 import VellumCore
 
@@ -35,16 +36,24 @@ final class PageThumbnailStore {
     private(set) var generation = 0
 
     private var inFlight = Set<Int>()
+    private var imageGeneration: [Int: Int] = [:]
     private var lastRequestSequenceByPageIndex: [Int: Int] = [:]
     private var requestSequence = 0
+    private var remapVersion = 0
     private let renderer = PageThumbnailRenderer()
 
-    /// Invalidates every thumbnail so visible rows re-render on their next request.
+    // UI tests pass this argument to hold the loading placeholder on screen
+    // long enough to assert against; production keeps the 500ms coalescing.
+    private let debounceMilliseconds =
+        ProcessInfo.processInfo.arguments.contains("-thumbnail-slow-render")
+            ? 3000
+            : 500
+
+    /// Marks thumbnails stale while keeping existing images visible instead of
+    /// blanking to a spinner while rows re-render in the background.
     func markDirty() {
         generation += 1
-        images.removeAll()
         inFlight.removeAll()
-        lastRequestSequenceByPageIndex.removeAll()
     }
 
     /// Renders one requested page after coalescing changes for 500 milliseconds.
@@ -55,28 +64,31 @@ final class PageThumbnailStore {
         guard (0..<content.pageCount).contains(pageIndex) else { return }
 
         touch(pageIndex)
-        guard images[pageIndex] == nil, !inFlight.contains(pageIndex) else {
+        guard (images[pageIndex] == nil || imageGeneration[pageIndex] != generation),
+              !inFlight.contains(pageIndex) else {
             return
         }
 
         inFlight.insert(pageIndex)
         let requestedGeneration = generation
+        let requestedRemapVersion = remapVersion
         do {
-            try await Task.sleep(for: .milliseconds(500))
+            try await Task.sleep(for: .milliseconds(debounceMilliseconds))
         } catch {
             if requestedGeneration == generation {
                 inFlight.remove(pageIndex)
             }
             return
         }
-        guard !Task.isCancelled, requestedGeneration == generation else {
+        guard !Task.isCancelled,
+              requestedGeneration == generation,
+              requestedRemapVersion == remapVersion else {
             return
         }
 
-        let width: CGFloat = 156
         let pointSize = CGSize(
-            width: width,
-            height: width * CGFloat(content.geometry.aspectRatio)
+            width: ThumbnailLayout.width,
+            height: ThumbnailLayout.width * CGFloat(content.geometry.aspectRatio)
         )
         let result = await renderer.render(
             PageThumbnailRenderRequest(
@@ -87,13 +99,73 @@ final class PageThumbnailStore {
             )
         )
 
-        guard requestedGeneration == generation else { return }
+        guard requestedGeneration == generation,
+              requestedRemapVersion == remapVersion else {
+            return
+        }
         inFlight.remove(pageIndex)
         guard !Task.isCancelled else { return }
 
         images[pageIndex] = result.image
+        imageGeneration[pageIndex] = requestedGeneration
         touch(pageIndex)
         evictIfNeeded()
+    }
+
+    /// Moves cached thumbnails with their pages so a reorder never blanks rows.
+    func applyMove(fromOffsets source: IndexSet, toOffset destination: Int, pageCount: Int) {
+        var order = Array(0..<pageCount)
+        order.move(fromOffsets: source, toOffset: destination)
+
+        var remappedImages: [Int: UIImage] = [:]
+        var remappedImageGeneration: [Int: Int] = [:]
+        var remappedRequestSequence: [Int: Int] = [:]
+        for (newIndex, oldIndex) in order.enumerated() {
+            if let image = images[oldIndex] {
+                remappedImages[newIndex] = image
+            }
+            if let generation = imageGeneration[oldIndex] {
+                remappedImageGeneration[newIndex] = generation
+            }
+            if let sequence = lastRequestSequenceByPageIndex[oldIndex] {
+                remappedRequestSequence[newIndex] = sequence
+            }
+        }
+
+        images = remappedImages
+        imageGeneration = remappedImageGeneration
+        lastRequestSequenceByPageIndex = remappedRequestSequence
+        remapVersion += 1
+        generation += 1
+        inFlight.removeAll()
+    }
+
+    /// Shifts cached thumbnails down after a deletion so a delete never blanks rows.
+    func applyDeletion(at index: Int, pageCount: Int) {
+        var order = Array(0..<pageCount)
+        order.remove(at: index)
+
+        var remappedImages: [Int: UIImage] = [:]
+        var remappedImageGeneration: [Int: Int] = [:]
+        var remappedRequestSequence: [Int: Int] = [:]
+        for (newIndex, oldIndex) in order.enumerated() {
+            if let image = images[oldIndex] {
+                remappedImages[newIndex] = image
+            }
+            if let generation = imageGeneration[oldIndex] {
+                remappedImageGeneration[newIndex] = generation
+            }
+            if let sequence = lastRequestSequenceByPageIndex[oldIndex] {
+                remappedRequestSequence[newIndex] = sequence
+            }
+        }
+
+        images = remappedImages
+        imageGeneration = remappedImageGeneration
+        lastRequestSequenceByPageIndex = remappedRequestSequence
+        remapVersion += 1
+        generation += 1
+        inFlight.removeAll()
     }
 
     private func touch(_ pageIndex: Int) {
@@ -110,6 +182,7 @@ final class PageThumbnailStore {
                 return
             }
             images[leastRecentPageIndex] = nil
+            imageGeneration[leastRecentPageIndex] = nil
             lastRequestSequenceByPageIndex[leastRecentPageIndex] = nil
         }
     }

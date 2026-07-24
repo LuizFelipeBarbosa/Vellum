@@ -258,10 +258,7 @@ final class ElementAutosaveRoundTripTests: XCTestCase {
         XCTAssertEqual(committedAssetData, newDrawingData)
         XCTAssertEqual(oldAssetDataBeforePurge, oldDrawingData)
 
-        try await freshRepository.purgeUnreferencedDrawingAssets(
-            noteID: note.id,
-            referencedPaths: Set(committedNote.pages.map(\.drawingAssetPath))
-        )
+        try await freshRepository.purgeUnreferencedAssets(noteID: note.id)
 
         let oldAssetDataAfterPurge = try await freshRepository.loadAsset(
             noteID: note.id,

@@ -203,11 +203,7 @@ final class NoteScreenModel {
                 errorMessage = message
             }
             onNoteChanged(loadedNote)
-            let referencedPaths = Set(loadedNote.pages.map(\.drawingAssetPath))
-            try? await notes.purgeUnreferencedDrawingAssets(
-                noteID: loadedNote.id,
-                referencedPaths: referencedPaths
-            )
+            try? await notes.purgeUnreferencedAssets(noteID: loadedNote.id)
 
             let loadedPKDrawing: PKDrawing
             if let drawing {
@@ -312,16 +308,17 @@ final class NoteScreenModel {
         note = currentNote
     }
 
-    func movePages(source: IndexSet, to destination: Int) {
+    @discardableResult
+    func movePages(source: IndexSet, to destination: Int) -> Bool {
         guard let canvasView = canvasElements.canvasReference?.canvasView,
               !canvasView.isZooming,
               (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else {
-            return
+            return false
         }
 
         let pageCountBeforeMaterializing = note?.pages.count ?? 0
         materializePagesForFilledBands()
-        guard let currentNote = note else { return }
+        guard let currentNote = note else { return false }
 
         let validSource = IndexSet(
             source.filter { currentNote.pages.indices.contains($0) }
@@ -330,7 +327,7 @@ final class NoteScreenModel {
             if currentNote.pages.count > pageCountBeforeMaterializing {
                 noteWasEdited()
             }
-            return
+            return false
         }
 
         let clampedDestination = min(max(destination, 0), currentNote.pages.count)
@@ -364,6 +361,43 @@ final class NoteScreenModel {
         if let firstMovedPage = validSource.first {
             onScrollToPage?(permutation[firstMovedPage])
         }
+        return true
+    }
+
+    @discardableResult
+    func deletePage(at index: Int) -> Bool {
+        guard let canvasView = canvasElements.canvasReference?.canvasView,
+              !canvasView.isZooming,
+              (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else {
+            return false
+        }
+
+        materializePagesForFilledBands()
+        guard let currentNote = note else { return false }
+        guard currentNote.pages.indices.contains(index),
+              currentNote.pages.count > 1 else {
+            return false
+        }
+
+        pendingPageMutationSave = true
+        defer { pendingPageMutationSave = false }
+
+        let result = PageDeleter.deletePage(
+            at: index,
+            drawing: canvasView.drawing,
+            elements: canvasElements.elements,
+            pages: currentNote.pages,
+            geometry: currentNote.pageGeometry
+        )
+
+        canvasElements.performTransaction("Delete Page") {
+            canvasElements.mutateDrawing { $0 = result.drawing }
+            canvasElements.replaceAllElements(result.elements)
+            note?.pages = result.pages
+        }
+
+        onScrollToPage?(min(index, (note?.pages.count ?? 1) - 1))
+        return true
     }
 
     func addPageAtEnd() {

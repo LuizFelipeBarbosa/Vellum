@@ -28,15 +28,13 @@ struct NoteScreenView: View {
     @State private var isShowingFileImporter = false
     @State private var exportOutput: NoteExporter.Output?
     @State private var exportDirectoryToCleanUp: URL?
+    @State private var topOverlayHeight: CGFloat = 0
+    @State private var leftClusterFrame: CGRect = .zero
+    @State private var rightClusterFrame: CGRect = .zero
+    @State private var topOverlayGlobalFrame: CGRect = .zero
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-
-            if !model.noteEntities.isEmpty {
-                entityChips
-            }
-
+        ZStack(alignment: .top) {
             Group {
                 if model.isLoading && model.note == nil {
                     ProgressView("Loading note…")
@@ -54,11 +52,37 @@ struct NoteScreenView: View {
                     .background(VellumTheme.card)
                 }
             }
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(VellumTheme.ink(0.08))
-                    .frame(height: 1)
+            .ignoresSafeArea(edges: .top)
+
+            VStack(spacing: 8) {
+                NoteHeaderChips(
+                    model: model,
+                    app: app,
+                    onShowActivity: { isShowingActivity = true },
+                    onConfirmDelete: { isConfirmingDelete = true },
+                    onExport: exportNote,
+                    onClusterFrames: {
+                        leftClusterFrame = $0
+                        rightClusterFrame = $1
+                    }
+                )
+
+                if !model.noteEntities.isEmpty {
+                    entityChips
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+            .onGeometryChange(
+                for: CGRect.self,
+                of: { $0.frame(in: .global) },
+                action: { frame in
+                    topOverlayHeight = frame.height
+                    topOverlayGlobalFrame = frame
+                }
+            )
+
+            modalOverlays
         }
         .background(VellumTheme.paper)
         .modifier(
@@ -136,164 +160,6 @@ struct NoteScreenView: View {
         )
     }
 
-    private var header: some View {
-        HStack(spacing: 14) {
-            Button {
-                Task { await app.navigate(to: .library) }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("Library")
-                }
-                .font(.system(size: 15))
-                .foregroundStyle(VellumTheme.accentDark)
-            }
-            .buttonStyle(.plain)
-
-            TextField("Untitled", text: $model.title)
-                .textFieldStyle(.plain)
-                .font(.vellumNewsreader(18, weight: .medium))
-                .foregroundStyle(VellumTheme.ink)
-                .frame(minWidth: 180, idealWidth: 300, maxWidth: 390)
-                .accessibilityIdentifier("note-screen-title-field")
-
-            Menu {
-                Button {
-                    Task { await model.assignToSpace(nil) }
-                } label: {
-                    spaceMenuItemLabel("Unfiled", isSelected: model.space == nil)
-                }
-
-                ForEach(
-                    model.spaces.filter { $0.space.parentID == nil },
-                    id: \.space.id
-                ) { root in
-                    Button {
-                        Task { await model.assignToSpace(root.space.id) }
-                    } label: {
-                        spaceMenuItemLabel(
-                            root.space.name,
-                            isSelected: model.space?.id == root.space.id
-                        )
-                    }
-
-                    ForEach(
-                        model.spaces.filter { $0.space.parentID == root.space.id },
-                        id: \.space.id
-                    ) { child in
-                        Button {
-                            Task { await model.assignToSpace(child.space.id) }
-                        } label: {
-                            spaceMenuItemLabel(
-                                "— \(child.space.name)",
-                                isSelected: model.space?.id == child.space.id
-                            )
-                        }
-                    }
-                }
-            } label: {
-                spaceChip
-            }
-            .buttonStyle(.plain)
-
-            Text(saveStateLabel)
-                .font(.vellumMono(11))
-                .foregroundStyle(VellumTheme.mutedCount)
-
-            Spacer(minLength: 8)
-
-            Button {
-                Task { await model.organize() }
-            } label: {
-                if model.isAnalyzing {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("Organizing")
-                } else {
-                    Label("Organize", systemImage: "sparkles")
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(model.isAnalyzing || model.note == nil)
-
-            Menu {
-                ForEach(NoteExporter.Format.allCases, id: \.rawValue) { format in
-                    Button("Export as \(format.displayName)") {
-                        exportNote(format)
-                    }
-                }
-            } label: {
-                Text("Share")
-            }
-            .buttonStyle(.plain)
-            .disabled(model.isLoading || model.note == nil)
-
-            Menu {
-                Button {
-                    isShowingActivity = true
-                } label: {
-                    Label("Activity", systemImage: "clock.arrow.circlepath")
-                }
-
-                Button(role: .destructive) {
-                    isConfirmingDelete = true
-                } label: {
-                    Label("Move to Trash", systemImage: "trash")
-                }
-            } label: {
-                Text("⋯")
-                    .font(.system(size: 17))
-            }
-            .buttonStyle(.plain)
-        }
-        .font(.system(size: 13))
-        .foregroundStyle(VellumTheme.mutedDark)
-        .padding(.horizontal, 24)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-    }
-
-    @ViewBuilder
-    private var spaceChip: some View {
-        if let space = model.space {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(VellumTheme.color(for: space.color))
-                    .frame(width: 6, height: 6)
-                Text(space.name)
-                    .lineLimit(1)
-            }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(VellumTheme.accentDark)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(VellumTheme.accent(0.12), in: Capsule())
-        } else {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(VellumTheme.muted)
-                    .frame(width: 6, height: 6)
-                Text("Unfiled")
-                    .lineLimit(1)
-            }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(VellumTheme.mutedDark)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(VellumTheme.muted.opacity(0.12), in: Capsule())
-        }
-    }
-
-    @ViewBuilder
-    private func spaceMenuItemLabel(_ name: String, isSelected: Bool) -> some View {
-        if isSelected {
-            Label(name, systemImage: "checkmark")
-        } else {
-            Text(name)
-        }
-    }
-
     private var entityChips: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
@@ -312,15 +178,15 @@ struct NoteScreenView: View {
                         .foregroundStyle(VellumTheme.bodyMuted)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 5)
-                        .background(VellumTheme.card, in: Capsule())
+                        .background(VellumTheme.popover, in: Capsule())
                         .overlay {
                             Capsule().stroke(VellumTheme.ink(0.13), lineWidth: 1)
                         }
+                        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 80)
             .padding(.bottom, 9)
         }
         .scrollIndicators(.hidden)
@@ -328,6 +194,8 @@ struct NoteScreenView: View {
 
     private var canvasArea: some View {
         GeometryReader { geometry in
+            let canvasGlobalOrigin = geometry.frame(in: .global).origin
+
             ZStack(alignment: .topLeading) {
                 PageGuideLayer(
                     viewport: canvasViewport,
@@ -509,14 +377,14 @@ struct NoteScreenView: View {
                 backlinksRail
                     .frame(width: 184)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.top, 34)
+                    .padding(.top, topOverlayHeight + 12)
                     .zIndex(2)
 
                 if let entity = model.selectedEntity {
                     EntityPopoverView(entity: entity, model: model, app: app)
                         .frame(width: 270)
                         .padding(.leading, 80)
-                        .padding(.top, 30)
+                        .padding(.top, topOverlayHeight + 12)
                         .transition(.offset(y: 6).combined(with: .opacity))
                         .zIndex(5)
                 }
@@ -560,51 +428,35 @@ struct NoteScreenView: View {
                 .zIndex(4)
                 .animation(.easeOut(duration: 0.18), value: isZoomAtFit)
 
-                NoteToolbarView(
+                DockableToolbarContainer(
                     store: app.toolPreferences,
-                    selectedTool: $selectedTool,
-                    activeOptionsTool: $activeOptionsTool,
-                    canvasReference: canvasReference,
-                    backgroundStyle: Binding(
-                        get: { model.backgroundStyle },
-                        set: { model.backgroundStyle = $0 }
-                    ),
-                    onInsertPhoto: { isShowingPhotosPicker = true },
-                    onInsertFile: { isShowingFileImporter = true }
-                )
-                .fixedSize()
-                .position(
-                    x: geometry.size.width / 2,
-                    y: geometry.size.height
-                        - (app.toolPreferences.preferences.isToolbarCollapsed ? 43 : 87)
-                )
+                    containerSize: geometry.size,
+                    topObstructions: (leftClusterFrame == .zero || rightClusterFrame == .zero)
+                        ? nil
+                        : TopDockObstructions(
+                            navbarTop: leftClusterFrame.minY - canvasGlobalOrigin.y,
+                            overlayBottom: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y,
+                            gapMinX: leftClusterFrame.maxX - canvasGlobalOrigin.x,
+                            gapMaxX: rightClusterFrame.minX - canvasGlobalOrigin.x
+                        )
+                ) { dockEdge, availableAxisLength in
+                    NoteToolbarView(
+                        store: app.toolPreferences,
+                        selectedTool: $selectedTool,
+                        activeOptionsTool: $activeOptionsTool,
+                        canvasReference: canvasReference,
+                        backgroundStyle: Binding(
+                            get: { model.backgroundStyle },
+                            set: { model.backgroundStyle = $0 }
+                        ),
+                        onInsertPhoto: { isShowingPhotosPicker = true },
+                        onInsertFile: { isShowingFileImporter = true },
+                        dockEdge: dockEdge,
+                        availableAxisLength: availableAxisLength
+                    )
+                }
                 .zIndex(4)
 
-                if isShowingThumbnails {
-                    thumbnailOverlay
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                        .zIndex(9)
-                }
-
-                if model.isShowingSuggestions {
-                    suggestionsOverlay
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                        .zIndex(10)
-                }
-
-                if model.isShowingBackgroundChooser {
-                    PageBackgroundChooserOverlay(
-                        onChoose: { kind in
-                            model.backgroundStyle = PageBackgroundStyle(kind: kind)
-                            model.isShowingBackgroundChooser = false
-                        },
-                        onDismiss: {
-                            model.isShowingBackgroundChooser = false
-                        }
-                    )
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    .zIndex(11)
-                }
             }
             .clipped()
             .onAppear {
@@ -697,6 +549,35 @@ struct NoteScreenView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    @ViewBuilder
+    private var modalOverlays: some View {
+        if isShowingThumbnails {
+            thumbnailOverlay
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .zIndex(9)
+        }
+
+        if model.isShowingSuggestions {
+            suggestionsOverlay
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .zIndex(10)
+        }
+
+        if model.isShowingBackgroundChooser {
+            PageBackgroundChooserOverlay(
+                onChoose: { kind in
+                    model.backgroundStyle = PageBackgroundStyle(kind: kind)
+                    model.isShowingBackgroundChooser = false
+                },
+                onDismiss: {
+                    model.isShowingBackgroundChooser = false
+                }
+            )
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            .zIndex(11)
+        }
+    }
+
     private var thumbnailOverlay: some View {
         ZStack(alignment: .trailing) {
             Color.black.opacity(0.001)
@@ -717,7 +598,23 @@ struct NoteScreenView: View {
                     isShowingThumbnails = false
                 },
                 onMovePages: { source, destination in
-                    model.movePages(source: source, to: destination)
+                    // Remap only after the model confirms the mutation: a
+                    // rejected move must leave the cache untouched or rows
+                    // would show the wrong pages' thumbnails indefinitely.
+                    let pageCount = pageState.pageCount
+                    guard model.movePages(source: source, to: destination) else {
+                        return
+                    }
+                    thumbnailStore.applyMove(
+                        fromOffsets: source,
+                        toOffset: destination,
+                        pageCount: pageCount
+                    )
+                },
+                onDeletePage: { index in
+                    let pageCount = pageState.pageCount
+                    guard model.deletePage(at: index) else { return }
+                    thumbnailStore.applyDeletion(at: index, pageCount: pageCount)
                 },
                 onAddPage: {
                     model.addPageAtEnd()
@@ -843,14 +740,6 @@ struct NoteScreenView: View {
             preferences: app.toolPreferences.preferences
         ) else { return }
         lastNonNilTool = tool
-    }
-
-    private var saveStateLabel: String {
-        switch model.saveState {
-        case .saved: "saved · on-device"
-        case .saving: "saving…"
-        case .unsaved: "unsaved"
-        }
     }
 
     private func entityColor(for kind: EntityKind) -> Color {

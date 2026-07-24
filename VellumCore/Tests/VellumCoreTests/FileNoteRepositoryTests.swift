@@ -355,8 +355,8 @@ func deleteAsset() async throws {
     try await repository.deleteAsset(noteID: note.id, relativePath: assetPath)
 }
 
-@Test("Purging drawing assets keeps references and never touches imported assets")
-func purgeUnreferencedDrawingAssets() async throws {
+@Test("Purging assets keeps referenced files and removes orphaned files")
+func purgeUnreferencedAssets() async throws {
     let root = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
@@ -364,19 +364,42 @@ func purgeUnreferencedDrawingAssets() async throws {
     let pageID = note.pages[0].id
     let referencedPath = "pages/\(pageID.uuidString)/drawing-kept.data"
     let unreferencedPath = "pages/\(pageID.uuidString)/drawing-orphan.data"
-    let importedAssetPath = "assets/drawing-decoy.data"
+    let referencedImportedAssetPath = "assets/drawing-decoy.data"
+    let unreferencedImportedAssetPath = "assets/orphan.bin"
     let referencedData = Data([0x01])
     let unreferencedData = Data([0x02])
-    let importedData = Data([0x03])
+    let referencedImportedData = Data([0x03])
+    let unreferencedImportedData = Data([0x04])
+
+    var savedNote = try await repository.loadNote(id: note.id)
+    savedNote.pages[0].drawingAssetPath = referencedPath
+    savedNote.pages[0].elements.append(
+        CanvasElement(
+            content: .image(
+                ImageContent(
+                    assetPath: referencedImportedAssetPath,
+                    originalPixelSize: CanvasSize(width: 1, height: 1)
+                )
+            ),
+            frame: CanvasRect(x: 0, y: 0, width: 1, height: 1)
+        )
+    )
+    try await repository.saveNote(savedNote)
 
     try await repository.saveAsset(referencedData, noteID: note.id, relativePath: referencedPath)
     try await repository.saveAsset(unreferencedData, noteID: note.id, relativePath: unreferencedPath)
-    try await repository.saveAsset(importedData, noteID: note.id, relativePath: importedAssetPath)
-
-    try await repository.purgeUnreferencedDrawingAssets(
+    try await repository.saveAsset(
+        referencedImportedData,
         noteID: note.id,
-        referencedPaths: [referencedPath]
+        relativePath: referencedImportedAssetPath
     )
+    try await repository.saveAsset(
+        unreferencedImportedData,
+        noteID: note.id,
+        relativePath: unreferencedImportedAssetPath
+    )
+
+    try await repository.purgeUnreferencedAssets(noteID: note.id)
 
     #expect(
         try await repository.loadAsset(noteID: note.id, relativePath: referencedPath) == referencedData
@@ -385,7 +408,82 @@ func purgeUnreferencedDrawingAssets() async throws {
         try await repository.loadAsset(noteID: note.id, relativePath: unreferencedPath) == nil
     )
     #expect(
-        try await repository.loadAsset(noteID: note.id, relativePath: importedAssetPath) == importedData
+        try await repository.loadAsset(
+            noteID: note.id,
+            relativePath: referencedImportedAssetPath
+        ) == referencedImportedData
+    )
+    #expect(
+        try await repository.loadAsset(
+            noteID: note.id,
+            relativePath: unreferencedImportedAssetPath
+        ) == nil
+    )
+}
+
+@Test("Purging image assets keeps references and removes orphans")
+func purgeUnreferencedImageAssets() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let note = try await repository.createNote(title: "Purge images")
+    let referencedPath = "assets/\(UUID().uuidString).jpg"
+    let unreferencedPath = "assets/\(UUID().uuidString).jpg"
+    let referencedData = Data([0x10, 0x11])
+    let unreferencedData = Data([0x12, 0x13])
+
+    var savedNote = try await repository.loadNote(id: note.id)
+    savedNote.pages[0].elements.append(
+        CanvasElement(
+            content: .image(
+                ImageContent(
+                    assetPath: referencedPath,
+                    originalPixelSize: CanvasSize(width: 1, height: 1)
+                )
+            ),
+            frame: CanvasRect(x: 0, y: 0, width: 1, height: 1)
+        )
+    )
+    try await repository.saveNote(savedNote)
+
+    try await repository.saveAsset(referencedData, noteID: note.id, relativePath: referencedPath)
+    try await repository.saveAsset(unreferencedData, noteID: note.id, relativePath: unreferencedPath)
+
+    try await repository.purgeUnreferencedAssets(noteID: note.id)
+
+    #expect(
+        try await repository.loadAsset(noteID: note.id, relativePath: referencedPath) == referencedData
+    )
+    #expect(
+        try await repository.loadAsset(noteID: note.id, relativePath: unreferencedPath) == nil
+    )
+}
+
+@Test("Purging PDF assets keeps references and removes orphans")
+func purgeUnreferencedPDFAssets() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let note = try await repository.createNote(title: "Purge PDFs")
+    let referencedPath = "assets/pdf-\(UUID().uuidString).pdf"
+    let unreferencedPath = "assets/pdf-\(UUID().uuidString).pdf"
+    let referencedData = Data([0x25, 0x50, 0x44, 0x46])
+    let unreferencedData = Data([0x25, 0x50, 0x44, 0x47])
+
+    var savedNote = try await repository.loadNote(id: note.id)
+    savedNote.pages[0].pdfPage = PDFPageReference(assetPath: referencedPath, pageIndex: 0)
+    try await repository.saveNote(savedNote)
+
+    try await repository.saveAsset(referencedData, noteID: note.id, relativePath: referencedPath)
+    try await repository.saveAsset(unreferencedData, noteID: note.id, relativePath: unreferencedPath)
+
+    try await repository.purgeUnreferencedAssets(noteID: note.id)
+
+    #expect(
+        try await repository.loadAsset(noteID: note.id, relativePath: referencedPath) == referencedData
+    )
+    #expect(
+        try await repository.loadAsset(noteID: note.id, relativePath: unreferencedPath) == nil
     )
 }
 
@@ -400,6 +498,8 @@ func tornDrawingSaveIsInvisibleAndPurged() async throws {
     let oldData = Data([0x10, 0x20])
     let uncommittedData = Data([0x30, 0x40])
 
+    let savedNote = try await repository.loadNote(id: note.id)
+    try await repository.saveNote(savedNote)
     try await repository.saveAsset(oldData, noteID: note.id, relativePath: oldAssetPath)
     try await repository.saveAsset(uncommittedData, noteID: note.id, relativePath: newAssetPath)
 
@@ -410,16 +510,83 @@ func tornDrawingSaveIsInvisibleAndPurged() async throws {
         try await repository.loadAsset(noteID: note.id, relativePath: reloadedAssetPath) == oldData
     )
 
-    try await repository.purgeUnreferencedDrawingAssets(
-        noteID: note.id,
-        referencedPaths: Set(reloadedNote.pages.map(\.drawingAssetPath))
-    )
+    try await repository.purgeUnreferencedAssets(noteID: note.id)
 
     #expect(
         try await repository.loadAsset(noteID: note.id, relativePath: newAssetPath) == nil
     )
     #expect(
         try await repository.loadAsset(noteID: note.id, relativePath: oldAssetPath) == oldData
+    )
+}
+
+@Test("Purging assets honors the latest manifest instead of an earlier snapshot")
+func purgeHonorsLatestManifestNotStaleSnapshot() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let note = try await repository.createNote(title: "Latest purge manifest")
+    let firstReferencedPath = "assets/\(UUID().uuidString).jpg"
+    let orphanedPath = "assets/\(UUID().uuidString).jpg"
+    let latestReferencedPath = "assets/\(UUID().uuidString).jpg"
+    let firstReferencedData = Data([0x21])
+    let orphanedData = Data([0x22])
+    let latestReferencedData = Data([0x23])
+
+    var savedNote = try await repository.loadNote(id: note.id)
+    savedNote.pages[0].elements.append(
+        CanvasElement(
+            content: .image(
+                ImageContent(
+                    assetPath: firstReferencedPath,
+                    originalPixelSize: CanvasSize(width: 1, height: 1)
+                )
+            ),
+            frame: CanvasRect(x: 0, y: 0, width: 1, height: 1)
+        )
+    )
+    try await repository.saveNote(savedNote)
+    try await repository.saveAsset(
+        firstReferencedData,
+        noteID: note.id,
+        relativePath: firstReferencedPath
+    )
+    try await repository.saveAsset(orphanedData, noteID: note.id, relativePath: orphanedPath)
+
+    savedNote.pages[0].elements.append(
+        CanvasElement(
+            content: .image(
+                ImageContent(
+                    assetPath: latestReferencedPath,
+                    originalPixelSize: CanvasSize(width: 1, height: 1)
+                )
+            ),
+            frame: CanvasRect(x: 0, y: 0, width: 1, height: 1)
+        )
+    )
+    try await repository.saveNote(savedNote)
+    try await repository.saveAsset(
+        latestReferencedData,
+        noteID: note.id,
+        relativePath: latestReferencedPath
+    )
+
+    try await repository.purgeUnreferencedAssets(noteID: note.id)
+
+    #expect(
+        try await repository.loadAsset(
+            noteID: note.id,
+            relativePath: firstReferencedPath
+        ) == firstReferencedData
+    )
+    #expect(
+        try await repository.loadAsset(noteID: note.id, relativePath: orphanedPath) == nil
+    )
+    #expect(
+        try await repository.loadAsset(
+            noteID: note.id,
+            relativePath: latestReferencedPath
+        ) == latestReferencedData
     )
 }
 

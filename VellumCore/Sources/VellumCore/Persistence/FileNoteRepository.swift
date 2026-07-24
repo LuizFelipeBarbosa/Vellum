@@ -425,16 +425,32 @@ public actor FileNoteRepository: NoteRepository {
         }
     }
 
-    public func purgeUnreferencedDrawingAssets(
-        noteID: UUID,
-        referencedPaths: Set<String>
-    ) async throws {
+    public func purgeUnreferencedAssets(noteID: UUID) async throws {
         let fileManager = FileManager.default
         let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: noteID)
         var isPackageDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: package.path, isDirectory: &isPackageDirectory),
               isPackageDirectory.boolValue else {
             return
+        }
+
+        let manifest = package.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifest),
+              let probe = try? FilePersistence.decoder().decode(SchemaProbe.self, from: data),
+              probe.schemaVersion <= Note.currentSchemaVersion,
+              let note = try? FilePersistence.decoder().decode(Note.self, from: data) else {
+            return
+        }
+
+        var referencedPaths = Set(note.pages.map(\.drawingAssetPath))
+        for page in note.pages {
+            if let pdfAssetPath = page.pdfPage?.assetPath {
+                referencedPaths.insert(pdfAssetPath)
+            }
+            for element in page.elements {
+                guard case .image(let content) = element.content else { continue }
+                referencedPaths.insert(content.assetPath)
+            }
         }
 
         let pages = package.appendingPathComponent("pages", isDirectory: true)
@@ -476,6 +492,39 @@ public actor FileNoteRepository: NoteRepository {
                 }
 
                 let relativePath = "pages/\(pageDirectory.lastPathComponent)/\(filename)"
+                guard !referencedPaths.contains(relativePath) else { continue }
+                try? fileManager.removeItem(at: asset)
+            }
+        }
+
+        let importedAssets = package.appendingPathComponent("assets", isDirectory: true)
+        var isAssetsDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: importedAssets.path, isDirectory: &isAssetsDirectory),
+           isAssetsDirectory.boolValue,
+           let assets = try? fileManager.contentsOfDirectory(
+               at: importedAssets,
+               includingPropertiesForKeys: [
+                   .isRegularFileKey,
+                   .isDirectoryKey,
+                   .isSymbolicLinkKey,
+               ],
+               options: [.skipsHiddenFiles]
+           ) {
+            for asset in assets {
+                guard let assetValues = try? asset.resourceValues(
+                    forKeys: [
+                        .isRegularFileKey,
+                        .isDirectoryKey,
+                        .isSymbolicLinkKey,
+                    ]
+                ),
+                assetValues.isRegularFile == true,
+                assetValues.isDirectory != true,
+                assetValues.isSymbolicLink != true else {
+                    continue
+                }
+
+                let relativePath = "assets/\(asset.lastPathComponent)"
                 guard !referencedPaths.contains(relativePath) else { continue }
                 try? fileManager.removeItem(at: asset)
             }

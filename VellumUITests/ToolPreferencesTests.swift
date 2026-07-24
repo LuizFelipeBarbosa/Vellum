@@ -71,6 +71,72 @@ final class ToolPreferencesTests: XCTestCase {
         XCTAssertEqual(decoded.highlighter.style, .marker)
     }
 
+    func testMissingToolbarDockDecodesAsDefault() throws {
+        let json = """
+        {
+          "schemaVersion": 1
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(
+            ToolPreferences.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertEqual(decoded.toolbarDock, ToolPreferences.default.toolbarDock)
+    }
+
+    func testUnknownToolbarDockEdgeFallsBackToDefaultAndPreservesFraction() throws {
+        let json = """
+        {
+          "toolbarDock": { "edge": "diagonal", "fraction": 0.25 }
+        }
+        """
+
+        let decoded = try JSONDecoder().decode(
+            ToolPreferences.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertEqual(decoded.toolbarDock.edge, ToolPreferences.default.toolbarDock.edge)
+        XCTAssertEqual(decoded.toolbarDock.fraction, 0.25)
+    }
+
+    func testToolbarDockFractionIsClampedToUnitRange() throws {
+        let tooHighJSON = """
+        {
+          "toolbarDock": { "edge": "top", "fraction": 1.7 }
+        }
+        """
+        let tooLowJSON = """
+        {
+          "toolbarDock": { "edge": "left", "fraction": -0.3 }
+        }
+        """
+
+        let tooHighDecoded = try JSONDecoder().decode(
+            ToolPreferences.self,
+            from: Data(tooHighJSON.utf8)
+        )
+        let tooLowDecoded = try JSONDecoder().decode(
+            ToolPreferences.self,
+            from: Data(tooLowJSON.utf8)
+        )
+
+        XCTAssertEqual(tooHighDecoded.toolbarDock.fraction, 1.0)
+        XCTAssertEqual(tooLowDecoded.toolbarDock.fraction, 0.0)
+    }
+
+    func testToolbarDockCodableRoundTripPreservesPlacement() throws {
+        var original = ToolPreferences.default
+        original.toolbarDock = ToolbarDockPlacement(edge: .right, fraction: 0.25)
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ToolPreferences.self, from: data)
+
+        XCTAssertEqual(decoded.toolbarDock, original.toolbarDock)
+    }
+
     func testStoreRoundTripPersistsValuesAndCollapsedState() throws {
         let suiteName = "ToolPreferencesTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

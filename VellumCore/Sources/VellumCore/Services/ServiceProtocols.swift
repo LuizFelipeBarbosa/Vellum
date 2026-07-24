@@ -19,7 +19,7 @@ public protocol NoteRepository: Sendable {
     func assetSize(noteID: UUID, relativePath: String) async throws -> Int?
     func saveAsset(_ data: Data, noteID: UUID, relativePath: String) async throws
     func deleteAsset(noteID: UUID, relativePath: String) async throws
-    func purgeUnreferencedDrawingAssets(noteID: UUID, referencedPaths: Set<String>) async throws
+    func purgeUnreferencedAssets(noteID: UUID) async throws
 }
 
 public extension NoteRepository {

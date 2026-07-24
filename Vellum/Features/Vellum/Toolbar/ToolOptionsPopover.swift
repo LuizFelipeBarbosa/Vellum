@@ -14,7 +14,7 @@ struct ToolOptionsPopover: View {
             case .eraser:
                 EraserOptionsView(store: store)
             case .select:
-                SelectionOptionsView(store: store)
+                EmptyView()
             case .text:
                 TextOptionsView(store: store)
             }
@@ -232,24 +232,7 @@ struct EraserOptionsView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(VellumTheme.ink)
 
-            OptionsSectionCaption("Mode")
-
-            Picker("Mode", selection: modeBinding) {
-                Text("Partial")
-                    .tag(EraserMode.partial)
-                Text("Whole Stroke")
-                    .tag(EraserMode.wholeStroke)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("Eraser mode")
-
-            Text("Partial erases pixels; whole stroke removes entire strokes.")
-                .font(.system(size: 12))
-                .foregroundStyle(VellumTheme.mutedDark)
-
             if store.preferences.eraser.mode == .partial {
-                OptionsDivider()
-
                 HStack(spacing: 6) {
                     OptionsSectionCaption("Width")
 
@@ -269,22 +252,15 @@ struct EraserOptionsView: View {
                         .frame(width: 40, height: 40)
                         .accessibilityHidden(true)
                 }
+            } else {
+                Text("Whole-stroke eraser removes entire strokes.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(VellumTheme.mutedDark)
             }
         }
         .padding(18)
         .frame(width: 300, alignment: .leading)
         .background(VellumTheme.popover)
-    }
-
-    private var modeBinding: Binding<EraserMode> {
-        Binding(
-            get: { store.preferences.eraser.mode },
-            set: { mode in
-                store.update { preferences in
-                    preferences.eraser.mode = mode
-                }
-            }
-        )
     }
 
     private var levelBinding: Binding<Double> {
@@ -313,47 +289,6 @@ struct EraserOptionsView: View {
         let normalizedWidth = (store.preferences.eraser.width - widthRange.lowerBound) / span
         let clampedWidth = min(max(normalizedWidth, 0), 1)
         return CGFloat(12 + (clampedWidth * 28))
-    }
-}
-
-struct SelectionOptionsView: View {
-    let store: ToolPreferencesStore
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Selection Options")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(VellumTheme.ink)
-
-            OptionsSectionCaption("Mode")
-
-            Picker("Mode", selection: modeBinding) {
-                Text("Freeform")
-                    .tag(SelectionMode.freeform)
-                Text("Box")
-                    .tag(SelectionMode.boxed)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("Selection mode")
-
-            Text("Drag to select strokes and objects.")
-                .font(.system(size: 12))
-                .foregroundStyle(VellumTheme.mutedDark)
-        }
-        .padding(18)
-        .frame(width: 300, alignment: .leading)
-        .background(VellumTheme.popover)
-    }
-
-    private var modeBinding: Binding<SelectionMode> {
-        Binding(
-            get: { store.preferences.selection.mode },
-            set: { mode in
-                store.update { preferences in
-                    preferences.selection.mode = mode
-                }
-            }
-        )
     }
 }
 
