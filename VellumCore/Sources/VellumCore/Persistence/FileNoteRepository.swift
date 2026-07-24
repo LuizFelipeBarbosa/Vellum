@@ -425,16 +425,32 @@ public actor FileNoteRepository: NoteRepository {
         }
     }
 
-    public func purgeUnreferencedAssets(
-        noteID: UUID,
-        referencedPaths: Set<String>
-    ) async throws {
+    public func purgeUnreferencedAssets(noteID: UUID) async throws {
         let fileManager = FileManager.default
         let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: noteID)
         var isPackageDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: package.path, isDirectory: &isPackageDirectory),
               isPackageDirectory.boolValue else {
             return
+        }
+
+        let manifest = package.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifest),
+              let probe = try? FilePersistence.decoder().decode(SchemaProbe.self, from: data),
+              probe.schemaVersion <= Note.currentSchemaVersion,
+              let note = try? FilePersistence.decoder().decode(Note.self, from: data) else {
+            return
+        }
+
+        var referencedPaths = Set(note.pages.map(\.drawingAssetPath))
+        for page in note.pages {
+            if let pdfAssetPath = page.pdfPage?.assetPath {
+                referencedPaths.insert(pdfAssetPath)
+            }
+            for element in page.elements {
+                guard case .image(let content) = element.content else { continue }
+                referencedPaths.insert(content.assetPath)
+            }
         }
 
         let pages = package.appendingPathComponent("pages", isDirectory: true)
