@@ -39,9 +39,11 @@ final class PageThumbnailStoreTests: XCTestCase {
 
         let renderedImage = store.images[0]
         XCTAssertNotNil(renderedImage)
+        let generationBeforeMove = store.generation
 
         store.applyMove(fromOffsets: [0], toOffset: 2, pageCount: 3)
 
+        XCTAssertEqual(store.generation, generationBeforeMove + 1)
         XCTAssertTrue(store.images[1] === renderedImage)
         XCTAssertNil(store.images[0])
     }
@@ -59,9 +61,11 @@ final class PageThumbnailStoreTests: XCTestCase {
 
         let renderedImage = store.images[1]
         XCTAssertNotNil(renderedImage)
+        let generationBeforeDeletion = store.generation
 
         store.applyDeletion(at: 0, pageCount: 3)
 
+        XCTAssertEqual(store.generation, generationBeforeDeletion + 1)
         XCTAssertTrue(store.images[0] === renderedImage)
         XCTAssertNil(store.images[2])
     }

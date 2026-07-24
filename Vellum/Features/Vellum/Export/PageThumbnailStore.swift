@@ -136,6 +136,7 @@ final class PageThumbnailStore {
         imageGeneration = remappedImageGeneration
         lastRequestSequenceByPageIndex = remappedRequestSequence
         remapVersion += 1
+        generation += 1
         inFlight.removeAll()
     }
 
@@ -163,6 +164,7 @@ final class PageThumbnailStore {
         imageGeneration = remappedImageGeneration
         lastRequestSequenceByPageIndex = remappedRequestSequence
         remapVersion += 1
+        generation += 1
         inFlight.removeAll()
     }
 
