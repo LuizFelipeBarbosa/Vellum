@@ -63,4 +63,29 @@ struct ThumbnailDragMath {
         let index = Int(fingerContentY / rowHeight)
         return index < pageCount ? index : nil
     }
+
+    static func dragStartIndex(
+        fingerContentX: CGFloat,
+        fingerContentY: CGFloat,
+        rowWidth: CGFloat,
+        rowHeight: CGFloat,
+        badgeZone: CGFloat,
+        pageCount: Int
+    ) -> Int? {
+        guard let rowIndex = liftedIndex(
+            fingerContentY: fingerContentY,
+            rowHeight: rowHeight,
+            pageCount: pageCount
+        ) else {
+            return nil
+        }
+
+        let rowY = fingerContentY - CGFloat(rowIndex) * rowHeight
+        if fingerContentX > rowWidth - badgeZone,
+           rowY < badgeZone {
+            return nil
+        }
+
+        return rowIndex
+    }
 }

@@ -18,19 +18,29 @@ struct ThumbnailPanelView: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Pages")
-                    .font(.vellumNewsreader(22, weight: .semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pages")
+                        .font(.vellumNewsreader(22, weight: .semibold))
+
+                    Text(pageCount == 1 ? "1 page" : "\(pageCount) pages")
+                        .font(.vellumMono(10.5))
+                        .foregroundStyle(VellumTheme.mutedCount)
+                }
 
                 Spacer()
 
-                Button("×") {
+                Button {
                     onDismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(VellumTheme.mutedControl)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 18))
-                .foregroundStyle(VellumTheme.mutedCount)
                 .accessibilityLabel("Close pages")
             }
 
@@ -49,9 +59,24 @@ struct ThumbnailPanelView: View {
             Button {
                 onAddPage()
             } label: {
-                Label("Add page", systemImage: "plus")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(VellumTheme.accentDark)
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                    Text("Add page")
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(VellumTheme.accentDark)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .background {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(
+                            VellumTheme.ink(0.2),
+                            style: StrokeStyle(
+                                lineWidth: 1,
+                                dash: [4, 3]
+                            )
+                        )
+                }
             }
             .buttonStyle(.plain)
         }

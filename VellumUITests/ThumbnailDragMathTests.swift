@@ -134,4 +134,85 @@ final class ThumbnailDragMathTests: XCTestCase {
             )
         }
     }
+
+    func testDragStartIndexReturnsCenteredRow() {
+        XCTAssertEqual(
+            ThumbnailDragMath.dragStartIndex(
+                fingerContentX: 107,
+                fingerContentY: 250,
+                rowWidth: 214,
+                rowHeight: 100,
+                badgeZone: 44,
+                pageCount: 4
+            ),
+            2
+        )
+    }
+
+    func testDragStartIndexRejectsDeleteBadgeCorner() {
+        XCTAssertNil(
+            ThumbnailDragMath.dragStartIndex(
+                fingerContentX: 171,
+                fingerContentY: 110,
+                rowWidth: 214,
+                rowHeight: 100,
+                badgeZone: 44,
+                pageCount: 4
+            )
+        )
+    }
+
+    func testDragStartIndexAllowsPointLeftOfDeleteBadge() {
+        XCTAssertEqual(
+            ThumbnailDragMath.dragStartIndex(
+                fingerContentX: 169,
+                fingerContentY: 110,
+                rowWidth: 214,
+                rowHeight: 100,
+                badgeZone: 44,
+                pageCount: 4
+            ),
+            1
+        )
+    }
+
+    func testDragStartIndexAllowsPointBelowDeleteBadge() {
+        XCTAssertEqual(
+            ThumbnailDragMath.dragStartIndex(
+                fingerContentX: 171,
+                fingerContentY: 145,
+                rowWidth: 214,
+                rowHeight: 100,
+                badgeZone: 44,
+                pageCount: 4
+            ),
+            1
+        )
+    }
+
+    func testDragStartIndexRejectsVirtualTrailingRow() {
+        XCTAssertNil(
+            ThumbnailDragMath.dragStartIndex(
+                fingerContentX: 107,
+                fingerContentY: 400,
+                rowWidth: 214,
+                rowHeight: 100,
+                badgeZone: 44,
+                pageCount: 4
+            )
+        )
+    }
+
+    func testDragStartIndexRejectsNegativeContentY() {
+        XCTAssertNil(
+            ThumbnailDragMath.dragStartIndex(
+                fingerContentX: 107,
+                fingerContentY: -1,
+                rowWidth: 214,
+                rowHeight: 100,
+                badgeZone: 44,
+                pageCount: 4
+            )
+        )
+    }
 }

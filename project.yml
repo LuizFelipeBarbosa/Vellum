@@ -63,15 +63,31 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Vellum.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Vellum"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
+  VellumFlowUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: VellumFlowUITests
+    dependencies:
+      - target: Vellum
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.luiz.vellum.flowtests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Vellum
+
 schemes:
   Vellum:
     build:
       targets:
         Vellum: all
         VellumUITests: [test]
+        VellumFlowUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - VellumUITests
+        - VellumFlowUITests

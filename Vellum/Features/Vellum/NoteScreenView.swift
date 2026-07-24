@@ -598,9 +598,24 @@ struct NoteScreenView: View {
                     isShowingThumbnails = false
                 },
                 onMovePages: { source, destination in
-                    model.movePages(source: source, to: destination)
+                    // Remap only after the model confirms the mutation: a
+                    // rejected move must leave the cache untouched or rows
+                    // would show the wrong pages' thumbnails indefinitely.
+                    let pageCount = pageState.pageCount
+                    guard model.movePages(source: source, to: destination) else {
+                        return
+                    }
+                    thumbnailStore.applyMove(
+                        fromOffsets: source,
+                        toOffset: destination,
+                        pageCount: pageCount
+                    )
                 },
-                onDeletePage: { model.deletePage(at: $0) },
+                onDeletePage: { index in
+                    let pageCount = pageState.pageCount
+                    guard model.deletePage(at: index) else { return }
+                    thumbnailStore.applyDeletion(at: index, pageCount: pageCount)
+                },
                 onAddPage: {
                     model.addPageAtEnd()
                 },

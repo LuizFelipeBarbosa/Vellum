@@ -46,13 +46,13 @@ struct ReorderableThumbnailList: View {
     @State private var dragState: ThumbnailDragState?
     @State private var autoScrollTask: Task<Void, Never>?
     @State private var hasAppliedInitialScroll = false
+    @State private var reorderHaptics = ReorderHaptics()
 
-    private let thumbnailWidth: CGFloat = 156
     private let edgeScrollZone: CGFloat = 60
     private let maximumScrollPerTick: CGFloat = 12
 
     private var estimatedRowHeight: CGFloat {
-        thumbnailWidth * CGFloat(geometry.aspectRatio) + 36
+        ThumbnailLayout.width * CGFloat(geometry.aspectRatio) + 33
     }
 
     private var effectiveRowHeight: CGFloat {
@@ -95,6 +95,20 @@ struct ReorderableThumbnailList: View {
         )
         .gesture(
             ReorderLongPressGesture(
+                shouldBeginDrag: { contentPoint in
+                    let shouldBegin = ThumbnailDragMath.dragStartIndex(
+                        fingerContentX: contentPoint.x,
+                        fingerContentY: contentPoint.y,
+                        rowWidth: ThumbnailLayout.width,
+                        rowHeight: effectiveRowHeight,
+                        badgeZone: ThumbnailLayout.badgeZone,
+                        pageCount: pages.count
+                    ) != nil
+                    if shouldBegin {
+                        reorderHaptics.prepare()
+                    }
+                    return shouldBegin
+                },
                 onLift: beginDrag,
                 onMove: moveDrag,
                 onEnd: endDrag,
@@ -108,6 +122,10 @@ struct ReorderableThumbnailList: View {
             guard !hasAppliedInitialScroll else { return }
             hasAppliedInitialScroll = true
             scrollPosition.scrollTo(id: initialScrollTarget, anchor: .center)
+        }
+        .onChange(of: pages.count) { _, _ in
+            guard dragState != nil else { return }
+            cancelDrag()
         }
         .onDisappear {
             stopAutoScroll()
@@ -212,6 +230,7 @@ struct ReorderableThumbnailList: View {
             proposedIndex: draggedIndex,
             isLifted: false
         )
+        reorderHaptics.liftOccurred()
 
         Task { @MainActor in
             guard dragState?.dragID == dragID else { return }
@@ -239,6 +258,7 @@ struct ReorderableThumbnailList: View {
             pageCount: pages.count
         )
         guard proposedIndex != dragState.proposedIndex else { return }
+        reorderHaptics.selectionChanged()
 
         withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
             self.dragState?.proposedIndex = proposedIndex
@@ -248,6 +268,10 @@ struct ReorderableThumbnailList: View {
     private func endDrag() {
         stopAutoScroll()
         guard let dragState else { return }
+        guard dragState.proposedIndex != dragState.draggedIndex else {
+            cancelDrag()
+            return
+        }
 
         let targetFingerPanelY = CGFloat(dragState.proposedIndex) * effectiveRowHeight
             - scrollMetrics.contentOffsetY
@@ -260,6 +284,7 @@ struct ReorderableThumbnailList: View {
             guard self.dragState?.dragID == dragState.dragID else {
                 return
             }
+            reorderHaptics.dropOccurred()
             onMovePages(
                 IndexSet(integer: dragState.draggedIndex),
                 ThumbnailDragMath.dropDestination(
@@ -372,13 +397,11 @@ private struct ThumbnailRowView: View {
     let onSelect: (Int) -> Void
     let onDelete: (Int) -> Void
 
-    private let thumbnailWidth: CGFloat = 156
-
     var body: some View {
         Button {
             onSelect(pageIndex)
         } label: {
-            VStack(spacing: 7) {
+            VStack(spacing: 6) {
                 thumbnail
 
                 Text("\(pageIndex + 1)")
@@ -389,16 +412,17 @@ private struct ThumbnailRowView: View {
                             : VellumTheme.mutedCount
                     )
             }
-            .frame(width: thumbnailWidth)
+            .frame(width: ThumbnailLayout.width)
         }
         .buttonStyle(.plain)
+        .accessibilityValue(store.images[pageIndex] == nil ? "Loading" : "")
         .overlay(alignment: .topTrailing) {
             if isRealPage, canDelete {
                 deleteBadge
             }
         }
-        .padding(.bottom, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity)
         .task(
             id: ThumbnailRequestID(
                 pageIndex: pageIndex,
@@ -443,36 +467,74 @@ private struct ThumbnailRowView: View {
                     .scaledToFit()
             } else {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 5)
+                    RoundedRectangle(cornerRadius: 6)
                         .fill(VellumTheme.paper)
                     ProgressView()
                 }
             }
         }
         .frame(
-            width: thumbnailWidth,
-            height: thumbnailWidth * CGFloat(geometry.aspectRatio)
+            width: ThumbnailLayout.width,
+            height: ThumbnailLayout.width * CGFloat(geometry.aspectRatio)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay {
             if pageIndex == currentPageIndex {
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: 6)
                     .stroke(VellumTheme.accent, lineWidth: 2)
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(VellumTheme.ink(0.10), lineWidth: 1)
             }
         }
     }
 }
 
 struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
+    let shouldBeginDrag: (CGPoint) -> Bool
     let onLift: (CGFloat) -> Void
     let onMove: (CGFloat) -> Void
     let onEnd: () -> Void
     let onCancel: () -> Void
 
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var shouldReceiveTouch: ((UIGestureRecognizer, UITouch) -> Bool)?
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldReceive touch: UITouch
+        ) -> Bool {
+            shouldReceiveTouch?(gestureRecognizer, touch) ?? true
+        }
+
+        // Row selection is a SwiftUI Button whose tap recognizer would
+        // otherwise claim thumbnail touches outright; requiring it to wait
+        // for the long press to fail is what makes hold-to-lift win while
+        // quick taps still select. Scroll pans stay exempt so scrolling
+        // never waits out the press delay. Invariant: every non-pan
+        // recognizer in this subtree waits out the long press — if a new
+        // row interaction (context menu, pinch, DragGesture) feels dead,
+        // check here first.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldBeRequiredToFailBy other: UIGestureRecognizer
+        ) -> Bool {
+            !(other is UIPanGestureRecognizer)
+        }
+    }
+
+    func makeCoordinator(
+        converter: CoordinateSpaceConverter
+    ) -> Coordinator {
+        Coordinator()
+    }
+
     func makeUIGestureRecognizer(
         context: Context
     ) -> UILongPressGestureRecognizer {
         let recognizer = UILongPressGestureRecognizer()
+        context.coordinator.shouldReceiveTouch = gate
+        recognizer.delegate = context.coordinator
         configure(recognizer)
         return recognizer
     }
@@ -481,7 +543,25 @@ struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
         _ recognizer: UILongPressGestureRecognizer,
         context: Context
     ) {
+        context.coordinator.shouldReceiveTouch = gate
         configure(recognizer)
+    }
+
+    // Gating must happen before the recognizer owns the touch, so the SwiftUI
+    // converter is unusable here. Converting into the list's backing
+    // UIScrollView yields content-space coordinates directly (scroll views
+    // scroll via bounds.origin) and stays interface-oriented, unlike
+    // window-base points, which diverge from SwiftUI's global space once the
+    // iPad rotates.
+    private var gate: (UIGestureRecognizer, UITouch) -> Bool {
+        { _, touch in
+            var probe = touch.view
+            while let view = probe, !(view is UIScrollView) {
+                probe = view.superview
+            }
+            guard let scrollView = probe else { return false }
+            return shouldBeginDrag(touch.location(in: scrollView))
+        }
     }
 
     func handleUIGestureRecognizerAction(
@@ -505,7 +585,7 @@ struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
     }
 
     private func configure(_ recognizer: UILongPressGestureRecognizer) {
-        recognizer.minimumPressDuration = 0.2
+        recognizer.minimumPressDuration = 0.3
         recognizer.numberOfTouchesRequired = 1
         recognizer.cancelsTouchesInView = true
     }
@@ -514,10 +594,6 @@ struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
         for recognizer: UILongPressGestureRecognizer,
         context: Context
     ) -> CGFloat {
-        let globalPoint = recognizer.location(in: nil)
-        return context.converter.convert(
-            globalPoint: globalPoint,
-            to: .named("panel")
-        ).y
+        context.converter.location(in: .named("panel")).y
     }
 }

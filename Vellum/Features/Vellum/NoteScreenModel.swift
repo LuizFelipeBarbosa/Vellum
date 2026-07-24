@@ -321,16 +321,17 @@ final class NoteScreenModel {
         note = currentNote
     }
 
-    func movePages(source: IndexSet, to destination: Int) {
+    @discardableResult
+    func movePages(source: IndexSet, to destination: Int) -> Bool {
         guard let canvasView = canvasElements.canvasReference?.canvasView,
               !canvasView.isZooming,
               (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else {
-            return
+            return false
         }
 
         let pageCountBeforeMaterializing = note?.pages.count ?? 0
         materializePagesForFilledBands()
-        guard let currentNote = note else { return }
+        guard let currentNote = note else { return false }
 
         let validSource = IndexSet(
             source.filter { currentNote.pages.indices.contains($0) }
@@ -339,7 +340,7 @@ final class NoteScreenModel {
             if currentNote.pages.count > pageCountBeforeMaterializing {
                 noteWasEdited()
             }
-            return
+            return false
         }
 
         let clampedDestination = min(max(destination, 0), currentNote.pages.count)
@@ -373,20 +374,22 @@ final class NoteScreenModel {
         if let firstMovedPage = validSource.first {
             onScrollToPage?(permutation[firstMovedPage])
         }
+        return true
     }
 
-    func deletePage(at index: Int) {
+    @discardableResult
+    func deletePage(at index: Int) -> Bool {
         guard let canvasView = canvasElements.canvasReference?.canvasView,
               !canvasView.isZooming,
               (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else {
-            return
+            return false
         }
 
         materializePagesForFilledBands()
-        guard let currentNote = note else { return }
+        guard let currentNote = note else { return false }
         guard currentNote.pages.indices.contains(index),
               currentNote.pages.count > 1 else {
-            return
+            return false
         }
 
         pendingPageMutationSave = true
@@ -407,6 +410,7 @@ final class NoteScreenModel {
         }
 
         onScrollToPage?(min(index, (note?.pages.count ?? 1) - 1))
+        return true
     }
 
     func addPageAtEnd() {
