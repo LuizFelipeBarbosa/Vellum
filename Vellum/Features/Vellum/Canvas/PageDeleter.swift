@@ -63,7 +63,7 @@ enum PageDeleter {
             let attachment = pages[0]
             remainingPages[0].drawingAssetPath = attachment.drawingAssetPath
             remainingPages[0].plainText = attachment.plainText
-            remainingPages[0].elements = attachment.elements
+            remainingPages[0].elements = remainingElements
         }
 
         return Result(

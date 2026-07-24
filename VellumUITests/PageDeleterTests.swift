@@ -131,6 +131,14 @@ final class PageDeleterTests: XCTestCase {
         let attachmentElement = makeElement(
             frame: CanvasRect(x: 20, y: 30, width: 40, height: 50)
         )
+        let survivorElement = makeElement(
+            frame: CanvasRect(
+                x: 25,
+                y: Double(PageGeometry.a4.pageHeight + 45),
+                width: 30,
+                height: 35
+            )
+        )
         let pages = [
             makePage(
                 id: UUID(),
@@ -138,7 +146,7 @@ final class PageDeleterTests: XCTestCase {
                 path: "pages/attachment/drawing.data",
                 text: "attachment",
                 background: .ruled,
-                elements: [attachmentElement]
+                elements: [attachmentElement, survivorElement]
             ),
             makePage(
                 id: UUID(),
@@ -159,16 +167,25 @@ final class PageDeleterTests: XCTestCase {
         let result = PageDeleter.deletePage(
             at: 0,
             drawing: PKDrawing(),
-            elements: [attachmentElement],
+            elements: [attachmentElement, survivorElement],
             pages: pages,
             geometry: .a4
         )
 
+        var expectedSurvivor = survivorElement
+        expectedSurvivor.frame.y -= Double(PageGeometry.a4.pageHeight)
+        XCTAssertFalse(result.elements.contains { $0.id == attachmentElement.id })
+        XCTAssertEqual(result.elements, [expectedSurvivor])
+        XCTAssertEqual(
+            result.elements[0].frame.y,
+            survivorElement.frame.y - Double(PageGeometry.a4.pageHeight),
+            accuracy: 0.001
+        )
         XCTAssertEqual(result.pages.map(\.id), [pages[1].id, pages[2].id])
         XCTAssertEqual(result.pages.map(\.order), [0, 1])
         XCTAssertEqual(result.pages[0].drawingAssetPath, pages[0].drawingAssetPath)
         XCTAssertEqual(result.pages[0].plainText, pages[0].plainText)
-        XCTAssertEqual(result.pages[0].elements, pages[0].elements)
+        XCTAssertEqual(result.pages[0].elements, result.elements)
         XCTAssertEqual(result.pages[0].background, pages[1].background)
     }
 

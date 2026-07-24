@@ -342,6 +342,145 @@ final class DrawingMutationTests: XCTestCase {
         }
     }
 
+    func testDeletePageZeroTransactionUndoAndRedoKeepPageZeroElementsMirroringStore() {
+        let geometry = PageGeometry.a4
+        let deletedStroke = makeStroke()
+        let survivorStroke = PKStroke(
+            ink: deletedStroke.ink,
+            path: deletedStroke.path,
+            transform: deletedStroke.transform.concatenating(
+                CGAffineTransform(
+                    translationX: 0,
+                    y: geometry.pageHeight + 100
+                )
+            ),
+            mask: deletedStroke.mask,
+            randomSeed: deletedStroke.randomSeed
+        )
+        let originalDrawing = PKDrawing(strokes: [deletedStroke, survivorStroke])
+        let canvasView = PKCanvasView()
+        canvasView.drawing = originalDrawing
+        let coordinator = PencilCanvasView.Coordinator(
+            onDrawingChanged: { _ in },
+            onViewportChanged: nil
+        )
+        canvasView.delegate = coordinator
+
+        let canvasReference = NoteCanvasReference()
+        canvasReference.canvasView = canvasView
+        let undoManager = UndoManager()
+        let store = CanvasElementsStore()
+        store.canvasReference = canvasReference
+        store.undoManagerOverride = undoManager
+
+        let originalElements = [
+            CanvasElement(
+                content: .image(
+                    ImageContent(
+                        assetPath: "assets/deleted.jpg",
+                        originalPixelSize: CanvasSize(width: 100, height: 100)
+                    )
+                ),
+                frame: CanvasRect(x: 20, y: 30, width: 80, height: 60)
+            ),
+            CanvasElement(
+                content: .image(
+                    ImageContent(
+                        assetPath: "assets/survivor.jpg",
+                        originalPixelSize: CanvasSize(width: 100, height: 100)
+                    )
+                ),
+                frame: CanvasRect(
+                    x: 40,
+                    y: Double(geometry.pageHeight + 50),
+                    width: 80,
+                    height: 60
+                )
+            ),
+        ]
+        store.hydrate(originalElements)
+
+        let firstPageID = UUID()
+        let secondPageID = UUID()
+        let originalPages = [
+            NotePage(
+                id: firstPageID,
+                order: 0,
+                plainText: "",
+                drawingAssetPath: "pages/\(firstPageID.uuidString)/drawing.data",
+                background: .blank,
+                elements: originalElements
+            ),
+            NotePage(
+                id: secondPageID,
+                order: 1,
+                plainText: "",
+                drawingAssetPath: "pages/\(secondPageID.uuidString)/drawing.data",
+                background: .blank
+            ),
+        ]
+        var pages = originalPages
+        store.pagesProvider = { pages }
+        store.onPagesRestored = { pages = $0 }
+
+        let result = PageDeleter.deletePage(
+            at: 0,
+            drawing: canvasView.drawing,
+            elements: store.elements,
+            pages: pages,
+            geometry: geometry
+        )
+        store.performTransaction("Delete Page") {
+            store.mutateDrawing { $0 = result.drawing }
+            store.replaceAllElements(result.elements)
+            pages = result.pages
+        }
+
+        XCTAssertEqual(store.elements, result.elements)
+        XCTAssertEqual(pages[0].elements, result.elements)
+        XCTAssertTrue(undoManager.canUndo)
+
+        undoManager.undo()
+
+        XCTAssertEqual(pages.count, originalPages.count)
+        XCTAssertEqual(pages.map(\.id), originalPages.map(\.id))
+        XCTAssertEqual(pages.map(\.order), originalPages.map(\.order))
+        XCTAssertEqual(store.elements, originalElements)
+
+        let restoredStrokes = canvasView.drawing.strokes
+        XCTAssertEqual(restoredStrokes.count, originalDrawing.strokes.count)
+        for (restoredStroke, originalStroke) in zip(
+            restoredStrokes,
+            originalDrawing.strokes
+        ) {
+            XCTAssertEqual(
+                restoredStroke.renderBounds.minX,
+                originalStroke.renderBounds.minX,
+                accuracy: 0.5
+            )
+            XCTAssertEqual(
+                restoredStroke.renderBounds.minY,
+                originalStroke.renderBounds.minY,
+                accuracy: 0.5
+            )
+            XCTAssertEqual(
+                restoredStroke.renderBounds.width,
+                originalStroke.renderBounds.width,
+                accuracy: 0.5
+            )
+            XCTAssertEqual(
+                restoredStroke.renderBounds.height,
+                originalStroke.renderBounds.height,
+                accuracy: 0.5
+            )
+        }
+
+        undoManager.redo()
+
+        XCTAssertEqual(store.elements, result.elements)
+        XCTAssertEqual(pages[0].elements, store.elements)
+    }
+
     private func makeStroke() -> PKStroke {
         let points = [
             PKStrokePoint(
