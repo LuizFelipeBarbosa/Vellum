@@ -168,6 +168,7 @@ struct NoteHeaderChips: View {
                         .frame(minWidth: 30)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("More options")
                 .frame(minHeight: 44)
             }
             .font(.system(size: 13))

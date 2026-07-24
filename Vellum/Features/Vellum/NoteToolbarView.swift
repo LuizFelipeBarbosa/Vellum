@@ -22,6 +22,7 @@ struct NoteToolbarView: View {
     var onInsertPhoto: (() -> Void)? = nil
     var onInsertFile: (() -> Void)? = nil
     var dockEdge: ToolbarDockEdge = .bottom
+    var availableAxisLength: CGFloat? = nil
 
     private var isVertical: Bool { dockEdge.axis == .vertical }
 
@@ -98,6 +99,7 @@ struct NoteToolbarView: View {
                 store: store,
                 activeInkTool: selectedTool,
                 axis: dockEdge.axis,
+                availableLength: availableAxisLength,
                 onRequestOptions: {
                     activeOptionsTool = selectedTool
                 },

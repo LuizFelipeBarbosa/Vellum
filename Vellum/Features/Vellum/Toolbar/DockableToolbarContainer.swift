@@ -12,7 +12,7 @@ struct DockableToolbarContainer<Content: View>: View {
     let store: ToolPreferencesStore
     let containerSize: CGSize
     let topObstructions: TopDockObstructions?
-    @ViewBuilder let content: (ToolbarDockEdge) -> Content
+    @ViewBuilder let content: (ToolbarDockEdge, CGFloat) -> Content
 
     @State private var toolbarSize: CGSize = .zero
     @State private var dragTranslation: CGSize = .zero
@@ -56,7 +56,11 @@ struct DockableToolbarContainer<Content: View>: View {
     }
 
     var body: some View {
-        content(store.preferences.toolbarDock.edge)
+        let dockEdge = store.preferences.toolbarDock.edge
+        let availableAxisLength = dockEdge.axis == .vertical
+            ? containerSize.height - baseInsets.top - baseInsets.bottom - 2 * 16
+            : containerSize.width - baseInsets.leading - baseInsets.trailing - 2 * 16
+        content(dockEdge, availableAxisLength)
             .fixedSize()
             .onGeometryChange(for: CGSize.self) { proxy in
                 proxy.size

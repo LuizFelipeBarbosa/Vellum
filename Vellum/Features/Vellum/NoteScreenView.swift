@@ -439,7 +439,7 @@ struct NoteScreenView: View {
                             gapMinX: leftClusterFrame.maxX - canvasGlobalOrigin.x,
                             gapMaxX: rightClusterFrame.minX - canvasGlobalOrigin.x
                         )
-                ) { dockEdge in
+                ) { dockEdge, availableAxisLength in
                     NoteToolbarView(
                         store: app.toolPreferences,
                         selectedTool: $selectedTool,
@@ -451,7 +451,8 @@ struct NoteScreenView: View {
                         ),
                         onInsertPhoto: { isShowingPhotosPicker = true },
                         onInsertFile: { isShowingFileImporter = true },
-                        dockEdge: dockEdge
+                        dockEdge: dockEdge,
+                        availableAxisLength: availableAxisLength
                     )
                 }
                 .zIndex(4)

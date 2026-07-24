@@ -355,8 +355,8 @@ func deleteAsset() async throws {
     try await repository.deleteAsset(noteID: note.id, relativePath: assetPath)
 }
 
-@Test("Purging drawing assets keeps references and never touches imported assets")
-func purgeUnreferencedDrawingAssets() async throws {
+@Test("Purging assets keeps referenced files and removes orphaned files")
+func purgeUnreferencedAssets() async throws {
     let root = try makeTemporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
@@ -364,16 +364,66 @@ func purgeUnreferencedDrawingAssets() async throws {
     let pageID = note.pages[0].id
     let referencedPath = "pages/\(pageID.uuidString)/drawing-kept.data"
     let unreferencedPath = "pages/\(pageID.uuidString)/drawing-orphan.data"
-    let importedAssetPath = "assets/drawing-decoy.data"
+    let referencedImportedAssetPath = "assets/drawing-decoy.data"
+    let unreferencedImportedAssetPath = "assets/orphan.bin"
     let referencedData = Data([0x01])
     let unreferencedData = Data([0x02])
-    let importedData = Data([0x03])
+    let referencedImportedData = Data([0x03])
+    let unreferencedImportedData = Data([0x04])
 
     try await repository.saveAsset(referencedData, noteID: note.id, relativePath: referencedPath)
     try await repository.saveAsset(unreferencedData, noteID: note.id, relativePath: unreferencedPath)
-    try await repository.saveAsset(importedData, noteID: note.id, relativePath: importedAssetPath)
+    try await repository.saveAsset(
+        referencedImportedData,
+        noteID: note.id,
+        relativePath: referencedImportedAssetPath
+    )
+    try await repository.saveAsset(
+        unreferencedImportedData,
+        noteID: note.id,
+        relativePath: unreferencedImportedAssetPath
+    )
 
-    try await repository.purgeUnreferencedDrawingAssets(
+    try await repository.purgeUnreferencedAssets(
+        noteID: note.id,
+        referencedPaths: [referencedPath, referencedImportedAssetPath]
+    )
+
+    #expect(
+        try await repository.loadAsset(noteID: note.id, relativePath: referencedPath) == referencedData
+    )
+    #expect(
+        try await repository.loadAsset(noteID: note.id, relativePath: unreferencedPath) == nil
+    )
+    #expect(
+        try await repository.loadAsset(
+            noteID: note.id,
+            relativePath: referencedImportedAssetPath
+        ) == referencedImportedData
+    )
+    #expect(
+        try await repository.loadAsset(
+            noteID: note.id,
+            relativePath: unreferencedImportedAssetPath
+        ) == nil
+    )
+}
+
+@Test("Purging image assets keeps references and removes orphans")
+func purgeUnreferencedImageAssets() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let note = try await repository.createNote(title: "Purge images")
+    let referencedPath = "assets/\(UUID().uuidString).jpg"
+    let unreferencedPath = "assets/\(UUID().uuidString).jpg"
+    let referencedData = Data([0x10, 0x11])
+    let unreferencedData = Data([0x12, 0x13])
+
+    try await repository.saveAsset(referencedData, noteID: note.id, relativePath: referencedPath)
+    try await repository.saveAsset(unreferencedData, noteID: note.id, relativePath: unreferencedPath)
+
+    try await repository.purgeUnreferencedAssets(
         noteID: note.id,
         referencedPaths: [referencedPath]
     )
@@ -384,8 +434,32 @@ func purgeUnreferencedDrawingAssets() async throws {
     #expect(
         try await repository.loadAsset(noteID: note.id, relativePath: unreferencedPath) == nil
     )
+}
+
+@Test("Purging PDF assets keeps references and removes orphans")
+func purgeUnreferencedPDFAssets() async throws {
+    let root = try makeTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let note = try await repository.createNote(title: "Purge PDFs")
+    let referencedPath = "assets/pdf-\(UUID().uuidString).pdf"
+    let unreferencedPath = "assets/pdf-\(UUID().uuidString).pdf"
+    let referencedData = Data([0x25, 0x50, 0x44, 0x46])
+    let unreferencedData = Data([0x25, 0x50, 0x44, 0x47])
+
+    try await repository.saveAsset(referencedData, noteID: note.id, relativePath: referencedPath)
+    try await repository.saveAsset(unreferencedData, noteID: note.id, relativePath: unreferencedPath)
+
+    try await repository.purgeUnreferencedAssets(
+        noteID: note.id,
+        referencedPaths: [referencedPath]
+    )
+
     #expect(
-        try await repository.loadAsset(noteID: note.id, relativePath: importedAssetPath) == importedData
+        try await repository.loadAsset(noteID: note.id, relativePath: referencedPath) == referencedData
+    )
+    #expect(
+        try await repository.loadAsset(noteID: note.id, relativePath: unreferencedPath) == nil
     )
 }
 
@@ -410,7 +484,7 @@ func tornDrawingSaveIsInvisibleAndPurged() async throws {
         try await repository.loadAsset(noteID: note.id, relativePath: reloadedAssetPath) == oldData
     )
 
-    try await repository.purgeUnreferencedDrawingAssets(
+    try await repository.purgeUnreferencedAssets(
         noteID: note.id,
         referencedPaths: Set(reloadedNote.pages.map(\.drawingAssetPath))
     )

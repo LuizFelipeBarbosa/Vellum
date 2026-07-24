@@ -425,7 +425,7 @@ public actor FileNoteRepository: NoteRepository {
         }
     }
 
-    public func purgeUnreferencedDrawingAssets(
+    public func purgeUnreferencedAssets(
         noteID: UUID,
         referencedPaths: Set<String>
     ) async throws {
@@ -476,6 +476,39 @@ public actor FileNoteRepository: NoteRepository {
                 }
 
                 let relativePath = "pages/\(pageDirectory.lastPathComponent)/\(filename)"
+                guard !referencedPaths.contains(relativePath) else { continue }
+                try? fileManager.removeItem(at: asset)
+            }
+        }
+
+        let importedAssets = package.appendingPathComponent("assets", isDirectory: true)
+        var isAssetsDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: importedAssets.path, isDirectory: &isAssetsDirectory),
+           isAssetsDirectory.boolValue,
+           let assets = try? fileManager.contentsOfDirectory(
+               at: importedAssets,
+               includingPropertiesForKeys: [
+                   .isRegularFileKey,
+                   .isDirectoryKey,
+                   .isSymbolicLinkKey,
+               ],
+               options: [.skipsHiddenFiles]
+           ) {
+            for asset in assets {
+                guard let assetValues = try? asset.resourceValues(
+                    forKeys: [
+                        .isRegularFileKey,
+                        .isDirectoryKey,
+                        .isSymbolicLinkKey,
+                    ]
+                ),
+                assetValues.isRegularFile == true,
+                assetValues.isDirectory != true,
+                assetValues.isSymbolicLink != true else {
+                    continue
+                }
+
+                let relativePath = "assets/\(asset.lastPathComponent)"
                 guard !referencedPaths.contains(relativePath) else { continue }
                 try? fileManager.removeItem(at: asset)
             }

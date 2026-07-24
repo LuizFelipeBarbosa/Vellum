@@ -335,7 +335,7 @@ struct ToolPreferences: Codable, Equatable, Sendable {
             return defaultConfig
         }
         return ToolbarDockPlacement(
-            edge: payload.edge.flatMap(ToolbarDockEdge.init(rawValue:)) ?? .bottom,
+            edge: payload.edge.flatMap(ToolbarDockEdge.init(rawValue:)) ?? defaultConfig.edge,
             fraction: payload.fraction.map { CGFloat(min(max($0, 0), 1)) }
                 ?? defaultConfig.fraction
         )

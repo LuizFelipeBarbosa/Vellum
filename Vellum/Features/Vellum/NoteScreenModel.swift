@@ -203,8 +203,17 @@ final class NoteScreenModel {
                 errorMessage = message
             }
             onNoteChanged(loadedNote)
-            let referencedPaths = Set(loadedNote.pages.map(\.drawingAssetPath))
-            try? await notes.purgeUnreferencedDrawingAssets(
+            var referencedPaths = Set(loadedNote.pages.map(\.drawingAssetPath))
+            for page in loadedNote.pages {
+                if let pdfAssetPath = page.pdfPage?.assetPath {
+                    referencedPaths.insert(pdfAssetPath)
+                }
+                for element in page.elements {
+                    guard case .image(let content) = element.content else { continue }
+                    referencedPaths.insert(content.assetPath)
+                }
+            }
+            try? await notes.purgeUnreferencedAssets(
                 noteID: loadedNote.id,
                 referencedPaths: referencedPaths
             )

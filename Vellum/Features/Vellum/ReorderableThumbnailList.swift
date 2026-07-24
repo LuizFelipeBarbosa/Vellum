@@ -19,6 +19,7 @@ private struct ThumbnailScrollMetrics: Equatable {
 }
 
 private struct ThumbnailDragState {
+    let dragID: UUID
     var draggedIndex: Int
     var grabOffsetY: CGFloat
     var fingerPanelY: CGFloat
@@ -197,7 +198,9 @@ struct ReorderableThumbnailList: View {
             return
         }
 
+        let dragID = UUID()
         dragState = ThumbnailDragState(
+            dragID: dragID,
             draggedIndex: draggedIndex,
             grabOffsetY: ThumbnailDragMath.grabOffsetY(
                 fingerPanelY: fingerPanelY,
@@ -211,7 +214,7 @@ struct ReorderableThumbnailList: View {
         )
 
         Task { @MainActor in
-            guard dragState?.draggedIndex == draggedIndex else { return }
+            guard dragState?.dragID == dragID else { return }
             dragState?.isLifted = true
         }
         updateAutoScroll()
@@ -254,7 +257,7 @@ struct ReorderableThumbnailList: View {
         withAnimation(animation, completionCriteria: .logicallyComplete) {
             self.dragState?.fingerPanelY = targetFingerPanelY
         } completion: {
-            guard self.dragState?.draggedIndex == dragState.draggedIndex else {
+            guard self.dragState?.dragID == dragState.dragID else {
                 return
             }
             onMovePages(
@@ -280,7 +283,7 @@ struct ReorderableThumbnailList: View {
         withAnimation(animation, completionCriteria: .logicallyComplete) {
             self.dragState?.fingerPanelY = originFingerPanelY
         } completion: {
-            guard self.dragState?.draggedIndex == dragState.draggedIndex else {
+            guard self.dragState?.dragID == dragState.dragID else {
                 return
             }
             self.dragState = nil
