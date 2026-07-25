@@ -107,6 +107,17 @@ final class ShapeRecognitionFlowUITests: XCTestCase {
         )
         XCTAssertTrue(app.buttons["Delete selection"].exists)
         XCTAssertTrue(app.buttons["Style selection"].exists)
+
+        // The tap puts the canvas in the same state the Select tool would: one way to edit a
+        // shape, not a tap-only variant with its own rules.
+        XCTAssertTrue(
+            app.buttons["Select"].isSelected,
+            "tapping a shape did not switch to the Select tool"
+        )
+        XCTAssertTrue(
+            app.otherElements["vellum-shape-vertex-handles"].waitForExistence(timeout: 5),
+            "the tapped shape exposed no edit handles"
+        )
     }
 
     /// Covers that the handles are there and on the curve. Dragging one is covered by

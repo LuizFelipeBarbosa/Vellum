@@ -365,7 +365,10 @@ struct NoteScreenView: View {
                     canvasReference: canvasReference,
                     elementsStore: model.canvasElements,
                     selectionController: selectionController,
-                    isEnabled: selectedTool != .eraser
+                    // While Select is already active the capture surface owns taps, including
+                    // tapping away to deselect; two tap handlers on one canvas would race.
+                    isEnabled: selectedTool != .eraser && selectedTool != .select,
+                    onShapeSelected: { selectedTool = .select }
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .allowsHitTesting(false)
@@ -998,7 +1001,7 @@ private struct NoteScreenPrimaryChangeObservers: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: selectedTool) { _, newTool in
-                selectionController.clearSelection()
+                selectionController.toolChanged()
                 app.toolPreferences.update { preferences in
                     preferences.lastSelectedTool = newTool
                 }

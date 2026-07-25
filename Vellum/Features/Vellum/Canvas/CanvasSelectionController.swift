@@ -35,6 +35,7 @@ final class CanvasSelectionController {
     private var captureRect: CGRect?
     private var handleDragBounds: CGRect?
     private var drawingBeforeHide: PKDrawing?
+    private var keepsSelectionThroughNextToolChange = false
     private var vertexDragBaseline: [CanvasElement]?
     private var vertexDragElementID: UUID?
     private var vertexDragIndex: Int?
@@ -134,8 +135,12 @@ final class CanvasSelectionController {
         captureRect = nil
     }
 
-    func selectElement(id: UUID) {
+    /// Selects one element. `survivesNextToolChange` is for selecting by tapping a shape, which
+    /// also switches to the Select tool: without it the tool change would clear the selection the
+    /// tap just made.
+    func selectElement(id: UUID, survivesNextToolChange: Bool = false) {
         restoreHiddenStrokes()
+        keepsSelectionThroughNextToolChange = survivesNextToolChange
         let selection = Selection(
             strokeIndices: IndexSet(),
             elementIDs: [id]
@@ -149,6 +154,16 @@ final class CanvasSelectionController {
         captureStart = nil
         captureMode = nil
         captureRect = nil
+    }
+
+    /// Switching tools drops the selection, except the one a shape tap just made on its way into
+    /// the Select tool.
+    func toolChanged() {
+        guard !keepsSelectionThroughNextToolChange else {
+            keepsSelectionThroughNextToolChange = false
+            return
+        }
+        clearSelection()
     }
 
     func beginMoveDrag() {

@@ -8,13 +8,17 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
     let elementsStore: CanvasElementsStore
     let selectionController: CanvasSelectionController
     let isEnabled: Bool
+    /// Called when a tap lands on a shape. The note screen switches to the Select tool, so a
+    /// tapped shape behaves exactly as one selected with that tool — one way to edit, not two.
+    let onShapeSelected: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             canvasReference: canvasReference,
             elementsStore: elementsStore,
             selectionController: selectionController,
-            isEnabled: isEnabled
+            isEnabled: isEnabled,
+            onShapeSelected: onShapeSelected
         )
     }
 
@@ -31,6 +35,7 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
         context.coordinator.elementsStore = elementsStore
         context.coordinator.selectionController = selectionController
         context.coordinator.isEnabled = isEnabled
+        context.coordinator.onShapeSelected = onShapeSelected
         context.coordinator.syncInstallation()
     }
 
@@ -50,6 +55,8 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
             }
         }
 
+        var onShapeSelected: () -> Void
+
         let observer = PenDwellObserverGestureRecognizer()
         weak var installedCanvas: PKCanvasView?
 
@@ -65,12 +72,14 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
             canvasReference: NoteCanvasReference,
             elementsStore: CanvasElementsStore,
             selectionController: CanvasSelectionController,
-            isEnabled: Bool
+            isEnabled: Bool,
+            onShapeSelected: @escaping () -> Void
         ) {
             self.canvasReference = canvasReference
             self.elementsStore = elementsStore
             self.selectionController = selectionController
             self.isEnabled = isEnabled
+            self.onShapeSelected = onShapeSelected
             super.init()
 
             observer.allowsPencilTouches = false
@@ -166,7 +175,11 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
                 minimumHitWidth: Self.minimumHitWidth,
                 extraRadius: Self.touchHitRadius
             ) {
-                selectionController.selectElement(id: element.id)
+                selectionController.selectElement(
+                    id: element.id,
+                    survivesNextToolChange: true
+                )
+                onShapeSelected()
             } else {
                 selectionController.clearSelection()
             }

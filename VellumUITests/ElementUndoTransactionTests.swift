@@ -321,6 +321,38 @@ final class ElementUndoTransactionTests: XCTestCase {
         withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
     }
 
+    func testTapSelectionSurvivesTheToolChangeItTriggers() {
+        let (store, _) = makeStore()
+        let shapeElement = makeShapeElement(geometry: .ellipse)
+        store.hydrate([shapeElement])
+        let harness = makeSelectionController(for: store)
+
+        // Tapping a shape selects it and switches to the Select tool; the tool change must not
+        // clear the selection the tap just made.
+        harness.controller.selectElement(id: shapeElement.id, survivesNextToolChange: true)
+        harness.controller.toolChanged()
+
+        XCTAssertNotNil(harness.controller.selection)
+
+        // The exemption is spent, so the next tool change clears as usual.
+        harness.controller.toolChanged()
+        XCTAssertNil(harness.controller.selection)
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
+    func testASelectionMadeAnyOtherWayIsClearedByAToolChange() {
+        let (store, _) = makeStore()
+        let shapeElement = makeShapeElement(geometry: .ellipse)
+        store.hydrate([shapeElement])
+        let harness = makeSelectionController(for: store)
+
+        harness.controller.selectElement(id: shapeElement.id)
+        harness.controller.toolChanged()
+
+        XCTAssertNil(harness.controller.selection)
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
     func testEllipseSelectionOffersARadiusHandlePerAxisEnd() throws {
         let (store, _) = makeStore()
         let ellipseElement = makeShapeElement(geometry: .ellipse)
