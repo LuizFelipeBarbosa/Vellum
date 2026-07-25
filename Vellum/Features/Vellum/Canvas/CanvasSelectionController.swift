@@ -434,15 +434,21 @@ final class CanvasSelectionController {
     }
 
     func beginVertexDrag(elementID: UUID, vertexIndex: Int) {
-        resetVertexDrag()
-
         guard let elementsStore,
               let element = elementsStore.elements.first(where: { $0.id == elementID }),
               case .shape = element.content else {
+            resetVertexDrag()
             return
         }
 
-        vertexDragBaseline = elementsStore.elements
+        // Ownership of a two-finger vertex drag alternates between the handles, and every takeover
+        // arrives here. Re-snapshotting would take the baseline from elements this same gesture has
+        // already moved, leaving everything before the last takeover outside "Edit Shape"; holding
+        // the pre-edit snapshot until `endVertexDrag` clears it keeps the whole gesture undoable as
+        // one step. A takeover therefore only retargets which vertex the samples move.
+        if vertexDragBaseline == nil {
+            vertexDragBaseline = elementsStore.elements
+        }
         vertexDragElementID = elementID
         vertexDragIndex = vertexIndex
         isVertexDragging = true
@@ -456,6 +462,9 @@ final class CanvasSelectionController {
             resetVertexDrag()
             return
         }
+        // The element the drag started on is gone or is no longer a shape, so something outside
+        // this gesture rewrote the store. The baseline predates that rewrite and would fold it
+        // into "Edit Shape", so this session is abandoned rather than finished.
         guard var element = elementsStore.elements.first(where: { $0.id == elementID }),
               case .shape(let shape) = element.content else {
             resetVertexDrag()
@@ -468,6 +477,9 @@ final class CanvasSelectionController {
             to: snapGrid?(contentPoint)
         )
 
+        // A sample the editors can't convert is dropped, not fatal to the drag: earlier samples
+        // were already applied live, so tearing the session down here would strand them with no
+        // baseline and leave the reshaped element non-undoable.
         switch shape.geometry {
         case .polyline:
             guard let moved = ShapeVertexEditor.movingVertex(
@@ -477,7 +489,6 @@ final class CanvasSelectionController {
                 frame: element.frame,
                 rotation: element.rotation
             ) else {
-                resetVertexDrag()
                 return
             }
             element.content = .shape(moved.content)
@@ -489,7 +500,6 @@ final class CanvasSelectionController {
                 frame: element.frame,
                 rotation: element.rotation
             ) else {
-                resetVertexDrag()
                 return
             }
             element.frame = resized

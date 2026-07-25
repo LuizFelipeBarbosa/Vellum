@@ -45,7 +45,11 @@ struct SelectionCaptureSurface: UIViewRepresentable {
             didSet {
                 guard oldValue, !isEnabled else { return }
                 invalidateAutoScroll(clearDragLocation: true)
-                activeDragIntent = nil
+                // `syncInstallation` is about to disable the pan recognizer, and the `.cancelled`
+                // that produces arrives with no active intent left to act on. Hand the drag back
+                // here instead, or a move leaves its strokes hidden behind a transient drawing
+                // override that nothing clears.
+                finishActiveDrag()
                 claimedDragIntent = nil
                 dragStartLocation = nil
                 resetPinchClaimDecision()
@@ -233,21 +237,27 @@ struct SelectionCaptureSurface: UIViewRepresentable {
                     break
                 }
             case .ended, .cancelled, .failed:
-                switch activeDragIntent {
-                case .move:
-                    controller.endMoveDrag()
-                case .capture:
-                    controller.endCapture()
-                case nil:
-                    break
-                }
+                finishActiveDrag()
                 invalidateAutoScroll(clearDragLocation: true)
-                activeDragIntent = nil
                 claimedDragIntent = nil
                 dragStartLocation = nil
             default:
                 break
             }
+        }
+
+        /// Hands an in-flight drag back to the controller. Idempotent, so whichever of the
+        /// recognizer's own end state and a mid-gesture disable arrives second is a no-op.
+        private func finishActiveDrag() {
+            switch activeDragIntent {
+            case .move:
+                controller.endMoveDrag()
+            case .capture:
+                controller.endCapture()
+            case nil:
+                break
+            }
+            activeDragIntent = nil
         }
 
         private func updateMoveTranslation(for gesture: UIPanGestureRecognizer) {

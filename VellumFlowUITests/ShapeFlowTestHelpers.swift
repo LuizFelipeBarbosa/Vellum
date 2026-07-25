@@ -119,14 +119,13 @@ enum ShapeFlowTestHelpers {
     ) -> Bool {
         guard windowPoints.count >= 2 else { return false }
 
+        // Points are window-relative, so they are offsets from the window's origin — the same
+        // convention `boxSelect` uses. Subtracting the window's own position here would cancel
+        // the origin back out and treat them as absolute screen points.
+        let windowOrigin = window.coordinate(withNormalizedOffset: .zero)
         let screenPoints = windowPoints.map { windowPoint in
-            window.coordinate(withNormalizedOffset: .zero)
-                .withOffset(
-                    CGVector(
-                        dx: windowPoint.x - window.frame.minX,
-                        dy: windowPoint.y - window.frame.minY
-                    )
-                )
+            windowOrigin
+                .withOffset(CGVector(dx: windowPoint.x, dy: windowPoint.y))
                 .screenPoint
         }
 
@@ -210,6 +209,18 @@ enum ShapeFlowTestHelpers {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        // `exists` does not wait. Called right after entering a note the toolbar may not be in
+        // the accessibility tree yet, and skipping the expand tap leaves every tool unreachable.
+        // The collapse toggle is the one control the toolbar renders in both states (labelled
+        // "Expand toolbar" only while collapsed), so waiting for either label proves the toolbar
+        // rendered without paying a timeout on the common already-expanded path.
+        let toolbarToggle = app.buttons.matching(
+            NSPredicate(
+                format: "label == 'Expand toolbar' OR label == 'Collapse toolbar'"
+            )
+        ).firstMatch
+        _ = toolbarToggle.waitForExistence(timeout: 5)
+
         let expandToolbar = app.buttons["Expand toolbar"]
         if expandToolbar.exists {
             expandToolbar.tap()

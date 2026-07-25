@@ -321,6 +321,52 @@ final class ElementUndoTransactionTests: XCTestCase {
         withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
     }
 
+    // Two fingers resting on two vertex handles hand the drag back and forth, and every handover
+    // re-enters `beginVertexDrag`. The baseline has to survive that: taking a fresh one from
+    // elements this same gesture already moved leaves the first finger's work outside "Edit Shape",
+    // so undo lands on a mid-gesture shape and the rest of the edit can never be taken back.
+    func testAHandoverBetweenVertexHandlesUndoesToTheShapeBeforeTheDrag() {
+        let (store, undoManager) = makeStore()
+        let shapeElement = makeShapeElement(
+            geometry: .polyline(
+                vertices: [
+                    CanvasPoint(x: 0, y: 0),
+                    CanvasPoint(x: 0.5, y: 1),
+                    CanvasPoint(x: 1, y: 0),
+                ],
+                isClosed: false
+            )
+        )
+        store.hydrate([shapeElement])
+        let harness = makeSelectionController(for: store)
+        select(shapeElement, with: harness.controller)
+
+        harness.controller.beginVertexDrag(elementID: shapeElement.id, vertexIndex: 0)
+        harness.controller.setVertexPosition(CGPoint(x: 60, y: 60))
+        let midGesture = store.elements
+        XCTAssertNotEqual(midGesture, [shapeElement])
+
+        // The first handle never reported an end, so the second one takes the drag over in flight.
+        harness.controller.beginVertexDrag(elementID: shapeElement.id, vertexIndex: 2)
+        harness.controller.setVertexPosition(CGPoint(x: 300, y: 300))
+        harness.controller.endVertexDrag()
+
+        let finalElements = store.elements
+        XCTAssertNotEqual(finalElements, midGesture)
+        XCTAssertEqual(undoManager.undoActionName, "Edit Shape")
+
+        undoManager.undo()
+
+        XCTAssertNotEqual(store.elements, midGesture, "undo stopped at a mid-gesture shape")
+        XCTAssertEqual(store.elements, [shapeElement])
+        XCTAssertFalse(undoManager.canUndo, "the whole two-finger gesture must be one undo step")
+
+        undoManager.redo()
+
+        XCTAssertEqual(store.elements, finalElements)
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
     func testTapSelectionSurvivesTheToolChangeItTriggers() {
         let (store, _) = makeStore()
         let shapeElement = makeShapeElement(geometry: .ellipse)
@@ -395,6 +441,112 @@ final class ElementUndoTransactionTests: XCTestCase {
 
         undoManager.undo()
         XCTAssertEqual(store.elements, [ellipseElement])
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
+    func testAnUnconvertibleVertexSampleIsSkippedWithoutLosingTheUndoStep() {
+        let (store, undoManager) = makeStore()
+        let shapeElement = makeShapeElement(
+            geometry: .polyline(
+                vertices: [
+                    CanvasPoint(x: 0, y: 0),
+                    CanvasPoint(x: 0.5, y: 1),
+                    CanvasPoint(x: 1, y: 0),
+                ],
+                isClosed: false
+            )
+        )
+        store.hydrate([shapeElement])
+        let harness = makeSelectionController(for: store)
+        select(shapeElement, with: harness.controller)
+
+        harness.controller.beginVertexDrag(elementID: shapeElement.id, vertexIndex: 0)
+        harness.controller.setVertexPosition(CGPoint(x: 12, y: 18))
+        let afterFirstSample = store.elements
+
+        // A non-finite sample is one the vertex editor refuses to convert.
+        harness.controller.setVertexPosition(CGPoint(x: CGFloat.nan, y: 18))
+
+        XCTAssertTrue(harness.controller.isVertexDragging)
+        XCTAssertEqual(store.elements, afterFirstSample)
+
+        harness.controller.setVertexPosition(CGPoint(x: 6, y: 14))
+        harness.controller.endVertexDrag()
+
+        let finalElements = store.elements
+        XCTAssertNotEqual(finalElements, [shapeElement])
+        XCTAssertEqual(undoManager.undoActionName, "Edit Shape")
+
+        undoManager.undo()
+
+        XCTAssertEqual(store.elements, [shapeElement])
+        XCTAssertFalse(undoManager.canUndo, "the whole drag must be exactly one undo step")
+
+        undoManager.redo()
+
+        XCTAssertEqual(store.elements, finalElements)
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
+    func testAnUnconvertibleRadiusSampleIsSkippedWithoutLosingTheUndoStep() throws {
+        let (store, undoManager) = makeStore()
+        let ellipseElement = makeShapeElement(geometry: .ellipse)
+        store.hydrate([ellipseElement])
+        let harness = makeSelectionController(for: store)
+        select(ellipseElement, with: harness.controller)
+
+        harness.controller.beginVertexDrag(elementID: ellipseElement.id, vertexIndex: 1)
+        harness.controller.setVertexPosition(
+            CGPoint(x: ellipseElement.frame.x + ellipseElement.frame.width + 40, y: 70)
+        )
+        let afterFirstSample = store.elements
+
+        harness.controller.setVertexPosition(CGPoint(x: CGFloat.infinity, y: 70))
+
+        XCTAssertTrue(harness.controller.isVertexDragging)
+        XCTAssertEqual(store.elements, afterFirstSample)
+
+        harness.controller.endVertexDrag()
+
+        let resized = try XCTUnwrap(store.elements.first)
+        XCTAssertEqual(resized.frame.width, ellipseElement.frame.width + 40, accuracy: 0.001)
+        XCTAssertEqual(undoManager.undoActionName, "Edit Shape")
+
+        undoManager.undo()
+
+        XCTAssertEqual(store.elements, [ellipseElement])
+        XCTAssertFalse(undoManager.canUndo, "the whole drag must be exactly one undo step")
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
+    func testAVanishedElementAbandonsTheVertexDragInsteadOfMisattributingIt() {
+        let (store, undoManager) = makeStore()
+        let shapeElement = makeShapeElement(
+            geometry: .polyline(
+                vertices: [
+                    CanvasPoint(x: 0, y: 0),
+                    CanvasPoint(x: 1, y: 1),
+                ],
+                isClosed: false
+            )
+        )
+        store.hydrate([shapeElement])
+        let harness = makeSelectionController(for: store)
+        select(shapeElement, with: harness.controller)
+
+        harness.controller.beginVertexDrag(elementID: shapeElement.id, vertexIndex: 0)
+        harness.controller.setVertexPosition(CGPoint(x: 12, y: 18))
+
+        // Something outside this gesture rewrote the store. The drag baseline predates that, so
+        // the session is dropped rather than folded into an "Edit Shape" step that would undo it.
+        store.removeElementLive(id: shapeElement.id)
+        harness.controller.setVertexPosition(CGPoint(x: 6, y: 14))
+
+        XCTAssertFalse(harness.controller.isVertexDragging)
+
+        harness.controller.endVertexDrag()
+
+        XCTAssertFalse(undoManager.canUndo)
         withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
     }
 

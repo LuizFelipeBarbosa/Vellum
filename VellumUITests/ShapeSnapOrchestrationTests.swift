@@ -1,5 +1,6 @@
 import Foundation
 import PencilKit
+import UIKit
 @testable import Vellum
 import VellumCore
 import XCTest
@@ -118,6 +119,73 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
             equalTo: mismatchedStroke.renderBounds
         )
         XCTAssertEqual(shapeElements(in: harness.store).count, 1)
+    }
+
+    // Regression test for the same data-loss race as
+    // `testPenLiftImmediatelyAfterDwellStillCommitsTheShape`, on the snap-on-lift
+    // path: the deferred commit used to re-read `activeInkConfig` / `elementsStore`,
+    // so a tool switch or a teardown landing before it ran dropped the shape.
+    func testSnapOnLiftCommitsWithTheLiftedToolEvenIfTheToolChangesFirst() async throws {
+        let marker = InkToolConfig(
+            style: .marker,
+            color: CodableColor(red: 0.8, green: 0.6, blue: 0.2, alpha: 0.1),
+            width: 12
+        )
+        let harness = makeHarness(policy: .snapOnLift, inkConfig: marker)
+        let points = recognizableLinePoints()
+
+        harness.controller.strokeBegan()
+        harness.controller.strokeContinued(
+            points: timedPoints(points, zoomScale: harness.canvasView.zoomScale)
+        )
+        harness.controller.dwellFired()
+
+        let matchingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        harness.canvasView.drawing = PKDrawing(strokes: [matchingStroke])
+        harness.controller.strokeEnded(cancelled: false)
+
+        harness.controller.activeInkConfig = nil
+        harness.controller.elementsStore = nil
+        await drainMainQueue()
+
+        XCTAssertTrue(
+            harness.canvasView.drawing.strokes.isEmpty,
+            "the inked stroke still has to be replaced by the shape"
+        )
+        let element = try XCTUnwrap(shapeElements(in: harness.store).first)
+        guard case .shape(let content) = element.content else {
+            return XCTFail("Expected a snapped shape element.")
+        }
+        XCTAssertEqual(
+            content.strokeColor.alpha,
+            0.55,
+            "the commit must use the ink config captured at lift, not the current one"
+        )
+        XCTAssertEqual(harness.undoManager.undoActionName, "Draw Shape")
+    }
+
+    // The recognizer promises one end notification per stroke, but the surface also
+    // ends the stroke when it is torn down, which can land right after a real lift.
+    // A second notification must not commit the pending shape twice.
+    func testASecondStrokeEndedCommitsNothingFurther() async {
+        let harness = makeHarness(policy: .snapOnLift)
+        let points = recognizableLinePoints()
+
+        harness.controller.strokeBegan()
+        harness.controller.strokeContinued(
+            points: timedPoints(points, zoomScale: harness.canvasView.zoomScale)
+        )
+        harness.controller.dwellFired()
+
+        let matchingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        harness.canvasView.drawing = PKDrawing(strokes: [matchingStroke])
+        harness.controller.strokeEnded(cancelled: false)
+        harness.controller.strokeEnded(cancelled: true)
+        await drainMainQueue()
+
+        XCTAssertEqual(shapeElements(in: harness.store).count, 1)
+        XCTAssertTrue(harness.canvasView.drawing.strokes.isEmpty)
+        XCTAssertEqual(harness.undoManager.undoActionName, "Draw Shape")
     }
 
     func testRecognizerNilLeavesDrawingElementsAndUndoStateUnchanged() {
@@ -572,6 +640,91 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         )
     }
 
+    // `reset()` is the only signal for a stroke UIKit terminates without delivering
+    // touchesEnded/touchesCancelled (the recognizer disabled or detached mid-touch),
+    // so it has to report the end — exactly once, or the controller would commit an
+    // already-committed live session a second time.
+    func testGestureResetReportsAnUnfinishedStrokeExactlyOnce() {
+        let recognizer = PenDwellObserverGestureRecognizer()
+        recognizer.allowsDirectTouches = true
+        var endedCalls: [Bool] = []
+        recognizer.onStrokeEnded = { endedCalls.append($0) }
+        let touch = StubTouch()
+        let event = StubEvent()
+
+        recognizer.touchesBegan([touch], with: event)
+        recognizer.reset()
+
+        XCTAssertEqual(endedCalls, [true], "an abandoned stroke has to be reported")
+
+        recognizer.reset()
+
+        XCTAssertEqual(endedCalls, [true], "a reported stroke must stay reported once")
+    }
+
+    // A normal lift already reports the end, and the `state = .failed` it performs can
+    // make UIKit reset the recognizer right after — that reset must stay silent.
+    func testALiftFollowedByAResetReportsTheStrokeEndOnlyOnce() {
+        let recognizer = PenDwellObserverGestureRecognizer()
+        recognizer.allowsDirectTouches = true
+        var endedCalls: [Bool] = []
+        recognizer.onStrokeEnded = { endedCalls.append($0) }
+        let touch = StubTouch()
+        let event = StubEvent()
+
+        recognizer.touchesBegan([touch], with: event)
+        recognizer.touchesEnded([touch], with: event)
+        recognizer.reset()
+
+        XCTAssertEqual(endedCalls, [false])
+    }
+
+    // The controller half of the same failure: if a stroke that opened a live line
+    // adjustment never reports its end, the next stroke must not inherit the pivot and
+    // rewrite that element, and PencilKit must get its drawing recognizer back.
+    func testAStrokeThatNeverEndedDoesNotRedirectTheNextStroke() async throws {
+        let harness = makeHarness(policy: .snapMidStroke)
+        let points = recognizableLinePoints()
+
+        harness.controller.strokeBegan()
+        harness.controller.strokeContinued(
+            points: timedPoints(points, zoomScale: harness.canvasView.zoomScale)
+        )
+        harness.controller.dwellFired()
+        await drainMainQueue()
+
+        let snappedElement = try XCTUnwrap(shapeElements(in: harness.store).first)
+        XCTAssertFalse(
+            harness.canvasView.drawingGestureRecognizer.isEnabled,
+            "an open line adjustment holds PencilKit off"
+        )
+
+        // No strokeEnded: the gesture was reset out from under the controller.
+        harness.controller.strokeBegan()
+
+        XCTAssertTrue(harness.canvasView.drawingGestureRecognizer.isEnabled)
+        XCTAssertEqual(
+            harness.undoManager.undoActionName,
+            "Draw Shape",
+            "the abandoned adjustment still owes its undo step"
+        )
+
+        harness.controller.strokeContinued(
+            points: [
+                TimedPoint(
+                    location: CGPoint(x: 900, y: 900),
+                    timestamp: 5
+                ),
+            ]
+        )
+
+        XCTAssertEqual(
+            shapeElements(in: harness.store),
+            [snappedElement],
+            "the stale pivot must not drag the previous element along"
+        )
+    }
+
     private func makeHarness(
         policy: ShapeSnapPolicy,
         inkConfig: InkToolConfig = ToolPreferences.default.pen
@@ -769,6 +922,19 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         let store: CanvasElementsStore
         let undoManager: UndoManager
         let controller: ShapeSnapController
+    }
+
+    /// UITouch and UIEvent are only ever vended by UIKit, so driving the recognizer
+    /// directly means standing in for them: everything the recognizer reads is
+    /// overridden here, and nothing else is touched.
+    private final class StubTouch: UITouch {
+        override var type: UITouch.TouchType { .direct }
+        override var timestamp: TimeInterval { 0 }
+        override func location(in view: UIView?) -> CGPoint { .zero }
+    }
+
+    private final class StubEvent: UIEvent {
+        override func coalescedTouches(for touch: UITouch) -> [UITouch]? { [touch] }
     }
 
     /// The controller only holds its canvas and store weakly, so the test has to keep them alive.

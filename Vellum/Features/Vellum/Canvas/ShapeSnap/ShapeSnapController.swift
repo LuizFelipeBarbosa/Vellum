@@ -35,13 +35,17 @@ final class ShapeSnapController {
     var isDrawingEnabled = true
     let policy: ShapeSnapPolicy
 
-    var detector = DwellDetector()
-    var capturedContentPoints: [CGPoint] = []
-    var pendingDwellWorkItem: DispatchWorkItem?
-    var isTrackingStroke = false
-    var hasSnappedThisStroke = false
-    var pendingShapeToCommitOnLift: RecognizedShape?
-    var pendingCaptureBoundingBox: CGRect?
+    // Per-stroke scratch state. None of it is read from a SwiftUI body — only from
+    // this controller and its gesture callbacks — and `capturedContentPoints` alone
+    // is written once per touch sample (up to ~240 Hz on Pencil). Left observable it
+    // would invalidate every view holding this controller at sample rate.
+    @ObservationIgnored private var detector = DwellDetector()
+    @ObservationIgnored var capturedContentPoints: [CGPoint] = []
+    @ObservationIgnored private var pendingDwellWorkItem: DispatchWorkItem?
+    @ObservationIgnored private var isTrackingStroke = false
+    @ObservationIgnored private var hasSnappedThisStroke = false
+    @ObservationIgnored var pendingShapeToCommitOnLift: RecognizedShape?
+    @ObservationIgnored private var pendingCaptureBoundingBox: CGRect?
 
     private struct LineAdjustState {
         let elementID: UUID
@@ -65,6 +69,13 @@ final class ShapeSnapController {
     }
 
     func strokeBegan() {
+        // A stroke can terminate without ever reaching `strokeEnded` (a gesture
+        // reset, a canvas swap), leaving a live line adjustment open. Close it here
+        // before anything else: a stale pivot would otherwise redirect this stroke
+        // into rewriting the previous element, and PencilKit's drawing recognizer
+        // would stay disabled. Runs even while disabled — this is cleanup, not work.
+        finishLineAdjustment()
+
         guard isEnabled else { return }
 
         detector.reset()
@@ -328,30 +339,48 @@ final class ShapeSnapController {
     func strokeEnded(cancelled: Bool) {
         cancelPendingDwell()
 
-        if let lineAdjustState {
-            elementsStore?.commitLiveSession(
-                lineAdjustState.liveSessionToken,
-                label: "Draw Shape"
-            )
-            canvasReference?.canvasView?.drawingGestureRecognizer.isEnabled = isDrawingEnabled
-            self.lineAdjustState = nil
+        if finishLineAdjustment() {
             resetStrokeState()
             return
         }
 
+        // Resolve every input the deferred commit needs NOW, for the reason spelled
+        // out in `performMidStrokeSnap`: a tool switch or a view teardown between
+        // this lift and the next runloop turn would leave `activeInkConfig` /
+        // `elementsStore` cleared, and the commit would silently drop the shape.
         if case .snapOnLift = policy,
            !cancelled,
            let shape = pendingShapeToCommitOnLift,
-           let captureBoundingBox = pendingCaptureBoundingBox {
-            DispatchQueue.main.async { [weak self] in
-                self?.commitShapeOnLift(
+           let captureBoundingBox = pendingCaptureBoundingBox,
+           canvasReference?.canvasView != nil,
+           let elementsStore,
+           let config = activeInkConfig {
+            DispatchQueue.main.async {
+                ShapeSnapController.commitShapeOnLift(
                     shape,
-                    captureBoundingBox: captureBoundingBox
+                    captureBoundingBox: captureBoundingBox,
+                    elementsStore: elementsStore,
+                    config: config
                 )
             }
         }
 
         resetStrokeState()
+    }
+
+    /// Closes an in-flight live line adjustment: registers its single undo step and
+    /// hands PencilKit's drawing recognizer back. Returns whether one was open.
+    @discardableResult
+    private func finishLineAdjustment() -> Bool {
+        guard let lineAdjustState else { return false }
+
+        self.lineAdjustState = nil
+        elementsStore?.commitLiveSession(
+            lineAdjustState.liveSessionToken,
+            label: "Draw Shape"
+        )
+        canvasReference?.canvasView?.drawingGestureRecognizer.isEnabled = isDrawingEnabled
+        return true
     }
 
     /// Pulls an axis-aligned shape onto the page's rules, grid, or dots. Tilted shapes come back
@@ -396,16 +425,14 @@ final class ShapeSnapController {
         dwellScheduleGeneration += 1
     }
 
-    private func commitShapeOnLift(
+    /// Static on purpose: every input arrives by value from `strokeEnded`, so the
+    /// commit cannot be derailed by controller state that moved on in the meantime.
+    private static func commitShapeOnLift(
         _ shape: RecognizedShape,
-        captureBoundingBox: CGRect
+        captureBoundingBox: CGRect,
+        elementsStore: CanvasElementsStore,
+        config: InkToolConfig
     ) {
-        guard canvasReference?.canvasView != nil,
-              let elementsStore,
-              let config = activeInkConfig else {
-            return
-        }
-
         let strokeColor = Self.styledStrokeColor(for: config)
         let strokeWidth = Self.styledStrokeWidth(for: config)
         let builtElement = ShapeElementBuilder.element(

@@ -66,7 +66,12 @@ final class PenDwellObserverGestureRecognizer: UIGestureRecognizer {
 
     override func reset() {
         super.reset()
-        clearTrackedTouch()
+        // UIKit also resets on paths that never deliver touchesEnded/touchesCancelled
+        // — the recognizer being disabled or detached mid-touch, for one. That is the
+        // only stroke termination the observer would otherwise stay silent about,
+        // leaving the controller stuck mid-stroke with PencilKit's drawing recognizer
+        // still disabled.
+        endTrackedStroke(cancelled: true)
     }
 
     override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -99,15 +104,24 @@ final class PenDwellObserverGestureRecognizer: UIGestureRecognizer {
               touches.contains(where: { $0 === trackedTouch }) else {
             return
         }
-        onStrokeEnded?(cancelled)
+        endTrackedStroke(cancelled: cancelled)
         state = .failed
-        clearTrackedTouch()
     }
 
     private func abortTrackedStroke() {
-        onStrokeEnded?(true)
+        endTrackedStroke(cancelled: true)
         state = .failed
+    }
+
+    /// The one place `onStrokeEnded` is delivered. A tracked touch is the permit to
+    /// report an end, and it is spent BEFORE the callback runs, so every termination
+    /// notifies exactly once: assigning `state` (right after this returns) can make
+    /// UIKit call `reset()`, and so can anything the callback itself does — either
+    /// way the re-entrant path finds no tracked touch and stays quiet.
+    private func endTrackedStroke(cancelled: Bool) {
+        guard trackedTouch != nil else { return }
         clearTrackedTouch()
+        onStrokeEnded?(cancelled)
     }
 
     private func clearTrackedTouch() {
