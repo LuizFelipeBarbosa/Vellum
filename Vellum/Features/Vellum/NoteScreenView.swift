@@ -18,6 +18,8 @@ struct NoteScreenView: View {
     @State private var lastNonNilTool: (any PKTool)?
     @State private var canvasReference = NoteCanvasReference()
     @State private var selectionController = CanvasSelectionController()
+    /// The tool a shape tap set aside, restored when that selection ends.
+    @State private var toolBorrowedByShapeTap: ToolID?
     @State private var shapeSnapController = ShapeSnapController()
     @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
     @State private var canvasSize: CGSize = .zero
@@ -108,6 +110,16 @@ struct NoteScreenView: View {
                 cacheCurrentTool: cacheCurrentTool
             )
         )
+        .onChange(of: selectionController.selection != nil) { _, hasSelection in
+            // A shape tap borrows the Select tool so the shape edits the one way shapes edit.
+            // Once the selection ends the tool goes back, so selecting a shape never costs the
+            // pen you were drawing with. If the tool has moved on already, the user chose it.
+            guard !hasSelection, let borrowedFrom = toolBorrowedByShapeTap else { return }
+            toolBorrowedByShapeTap = nil
+            if selectedTool == .select {
+                selectedTool = borrowedFrom
+            }
+        }
         .modifier(
             NoteScreenCanvasContentChangeObservers(
                 model: model,
@@ -368,7 +380,12 @@ struct NoteScreenView: View {
                     // While Select is already active the capture surface owns taps, including
                     // tapping away to deselect; two tap handlers on one canvas would race.
                     isEnabled: selectedTool != .eraser && selectedTool != .select,
-                    onShapeSelected: { selectedTool = .select }
+                    onShapeSelected: {
+                        if selectedTool != .select {
+                            toolBorrowedByShapeTap = selectedTool
+                        }
+                        selectedTool = .select
+                    }
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .allowsHitTesting(false)

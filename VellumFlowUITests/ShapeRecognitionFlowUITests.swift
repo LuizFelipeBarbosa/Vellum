@@ -118,6 +118,18 @@ final class ShapeRecognitionFlowUITests: XCTestCase {
             app.otherElements["vellum-shape-vertex-handles"].waitForExistence(timeout: 5),
             "the tapped shape exposed no edit handles"
         )
+
+        // The Select tool is borrowed, not taken: deselecting hands the pen back.
+        relaunched.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.30)).tap()
+        let penRestored = expectation(
+            for: NSPredicate(format: "isSelected == true"),
+            evaluatedWith: app.buttons["Pen"]
+        )
+        wait(for: [penRestored], timeout: 5)
+        XCTAssertFalse(
+            app.buttons["Duplicate selection"].exists,
+            "the selection menu outlived the selection"
+        )
     }
 
     /// Covers that the handles are there and on the curve. Dragging one is covered by
