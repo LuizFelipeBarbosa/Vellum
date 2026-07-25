@@ -1,4 +1,5 @@
 import Foundation
+import PencilKit
 @testable import Vellum
 import VellumCore
 import XCTest
@@ -199,11 +200,190 @@ final class ElementUndoTransactionTests: XCTestCase {
         XCTAssertFalse(undoManager.canUndo)
     }
 
+    func testDrawShapeTransactionUndoesAndRedoesAtomically() {
+        let originalStroke = makeStroke()
+        let canvasView = PKCanvasView()
+        canvasView.drawing = PKDrawing(strokes: [originalStroke])
+        let coordinator = PencilCanvasView.Coordinator(
+            onDrawingChanged: { _ in },
+            onViewportChanged: nil
+        )
+        canvasView.delegate = coordinator
+        let canvasReference = NoteCanvasReference()
+        canvasReference.canvasView = canvasView
+        let undoManager = UndoManager()
+        let store = CanvasElementsStore()
+        store.canvasReference = canvasReference
+        store.undoManagerOverride = undoManager
+        let shapeElement = CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0.5),
+                            CanvasPoint(x: 1, y: 0.5),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: 4
+                )
+            ),
+            frame: CanvasRect(x: 10, y: 12, width: 100, height: 8)
+        )
+
+        store.performTransaction("Draw Shape") {
+            store.mutateDrawing { $0.strokes.removeAll() }
+            store.addElement(shapeElement)
+        }
+
+        XCTAssertTrue(canvasView.drawing.strokes.isEmpty)
+        XCTAssertEqual(store.elements, [shapeElement])
+        XCTAssertEqual(undoManager.undoActionName, "Draw Shape")
+
+        undoManager.undo()
+
+        XCTAssertEqual(canvasView.drawing.strokes.count, 1)
+        XCTAssertEqual(
+            canvasView.drawing.strokes[0].renderBounds,
+            originalStroke.renderBounds
+        )
+        XCTAssertTrue(store.elements.isEmpty)
+        XCTAssertFalse(undoManager.canUndo)
+        XCTAssertTrue(undoManager.canRedo)
+
+        undoManager.redo()
+
+        XCTAssertTrue(canvasView.drawing.strokes.isEmpty)
+        XCTAssertEqual(store.elements, [shapeElement])
+        XCTAssertEqual(undoManager.undoActionName, "Draw Shape")
+    }
+
+    func testVertexDragRegistersOneUndoStepAndReplaysFinalShape() throws {
+        let (store, undoManager) = makeStore()
+        let shapeElement = makeShapeElement(
+            geometry: .polyline(
+                vertices: [
+                    CanvasPoint(x: 0, y: 0),
+                    CanvasPoint(x: 0.5, y: 1),
+                    CanvasPoint(x: 1, y: 0),
+                ],
+                isClosed: false
+            )
+        )
+        store.hydrate([shapeElement])
+        let harness = makeSelectionController(for: store)
+        select(shapeElement, with: harness.controller)
+
+        XCTAssertEqual(harness.controller.vertexEditableElement(), shapeElement)
+
+        harness.controller.setVertexPosition(CGPoint(x: 300, y: 300))
+        XCTAssertEqual(store.elements, [shapeElement])
+        XCTAssertFalse(undoManager.canUndo)
+
+        harness.controller.beginVertexDrag(
+            elementID: shapeElement.id,
+            vertexIndex: 0
+        )
+        harness.controller.setVertexPosition(CGPoint(x: 12, y: 18))
+        harness.controller.setVertexPosition(CGPoint(x: 6, y: 14))
+        harness.controller.endVertexDrag()
+
+        let finalElements = store.elements
+        XCTAssertNotEqual(finalElements, [shapeElement])
+        XCTAssertTrue(undoManager.canUndo)
+        XCTAssertEqual(undoManager.undoActionName, "Edit Shape")
+
+        harness.controller.setVertexPosition(CGPoint(x: 400, y: 400))
+        XCTAssertEqual(store.elements, finalElements)
+        XCTAssertEqual(undoManager.undoActionName, "Edit Shape")
+
+        let finalElement = try XCTUnwrap(finalElements.first)
+        let finalBounds = try XCTUnwrap(harness.controller.selectionBounds)
+        XCTAssertEqual(finalBounds.minX, CGFloat(finalElement.frame.x), accuracy: 0.001)
+        XCTAssertEqual(finalBounds.minY, CGFloat(finalElement.frame.y), accuracy: 0.001)
+        XCTAssertEqual(finalBounds.width, CGFloat(finalElement.frame.width), accuracy: 0.001)
+        XCTAssertEqual(finalBounds.height, CGFloat(finalElement.frame.height), accuracy: 0.001)
+
+        undoManager.undo()
+
+        XCTAssertEqual(store.elements, [shapeElement])
+        XCTAssertEqual(store.elements.first?.content, shapeElement.content)
+        XCTAssertEqual(store.elements.first?.frame, shapeElement.frame)
+        XCTAssertFalse(undoManager.canUndo)
+        XCTAssertTrue(undoManager.canRedo)
+        XCTAssertEqual(undoManager.redoActionName, "Edit Shape")
+
+        undoManager.redo()
+
+        XCTAssertEqual(store.elements, finalElements)
+        XCTAssertEqual(undoManager.undoActionName, "Edit Shape")
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
+    func testEllipseSelectionIsNotVertexEditable() {
+        let (store, _) = makeStore()
+        let ellipseElement = makeShapeElement(geometry: .ellipse)
+        store.hydrate([ellipseElement])
+        let harness = makeSelectionController(for: store)
+
+        select(ellipseElement, with: harness.controller)
+
+        XCTAssertNotNil(harness.controller.selection)
+        XCTAssertNil(harness.controller.vertexEditableElement())
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
     private func makeStore() -> (CanvasElementsStore, UndoManager) {
         let store = CanvasElementsStore()
         let undoManager = UndoManager()
         store.undoManagerOverride = undoManager
         return (store, undoManager)
+    }
+
+    private func makeSelectionController(
+        for store: CanvasElementsStore
+    ) -> (
+        controller: CanvasSelectionController,
+        canvasView: PKCanvasView,
+        coordinator: PencilCanvasView.Coordinator
+    ) {
+        let canvasView = PKCanvasView()
+        let coordinator = PencilCanvasView.Coordinator(
+            onDrawingChanged: { _ in },
+            onViewportChanged: nil
+        )
+        canvasView.delegate = coordinator
+
+        let canvasReference = NoteCanvasReference()
+        canvasReference.canvasView = canvasView
+        store.canvasReference = canvasReference
+
+        let controller = CanvasSelectionController()
+        controller.canvasReference = canvasReference
+        controller.elementsStore = store
+        return (controller, canvasView, coordinator)
+    }
+
+    private func select(
+        _ element: CanvasElement,
+        with controller: CanvasSelectionController
+    ) {
+        let margin = 10.0
+        controller.beginCapture(
+            at: CGPoint(
+                x: element.frame.x - margin,
+                y: element.frame.y - margin
+            ),
+            mode: .boxed
+        )
+        controller.extendCapture(
+            to: CGPoint(
+                x: element.frame.x + element.frame.width + margin,
+                y: element.frame.y + element.frame.height + margin
+            )
+        )
+        controller.endCapture()
     }
 
     private func makeElement(text: String) -> CanvasElement {
@@ -228,6 +408,48 @@ final class ElementUndoTransactionTests: XCTestCase {
                 )
             ),
             frame: CanvasRect(x: 20, y: 30, width: 200, height: 100)
+        )
+    }
+
+    private func makeShapeElement(
+        geometry: ShapeContent.Geometry
+    ) -> CanvasElement {
+        CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: geometry,
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: 4
+                )
+            ),
+            frame: CanvasRect(x: 20, y: 30, width: 100, height: 80)
+        )
+    }
+
+    private func makeStroke() -> PKStroke {
+        let points = [
+            PKStrokePoint(
+                location: CGPoint(x: 10, y: 12),
+                timeOffset: 0,
+                size: CGSize(width: 4, height: 4),
+                opacity: 1,
+                force: 1,
+                azimuth: 0,
+                altitude: .pi / 2
+            ),
+            PKStrokePoint(
+                location: CGPoint(x: 110, y: 12),
+                timeOffset: 0.1,
+                size: CGSize(width: 4, height: 4),
+                opacity: 1,
+                force: 1,
+                azimuth: 0,
+                altitude: .pi / 2
+            ),
+        ]
+        return PKStroke(
+            ink: PKInk(.pen, color: .black),
+            path: PKStrokePath(controlPoints: points, creationDate: Date())
         )
     }
 }

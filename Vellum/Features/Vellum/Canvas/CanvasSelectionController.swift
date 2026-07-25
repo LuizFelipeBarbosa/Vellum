@@ -21,6 +21,7 @@ final class CanvasSelectionController {
     private(set) var handleScale = CGSize(width: 1, height: 1)
     private(set) var handleRotation: Double = 0
     private(set) var isHandleDragging = false
+    private(set) var isVertexDragging = false
     weak var canvasReference: NoteCanvasReference?
     weak var elementsStore: CanvasElementsStore?
     var persistImageData: ((Data) async -> String?)?
@@ -31,6 +32,9 @@ final class CanvasSelectionController {
     private var captureRect: CGRect?
     private var handleDragBounds: CGRect?
     private var drawingBeforeHide: PKDrawing?
+    private var vertexDragBaseline: [CanvasElement]?
+    private var vertexDragElementID: UUID?
+    private var vertexDragIndex: Int?
 
     func beginCapture(at point: CGPoint, mode: SelectionMode) {
         selection = nil
@@ -118,6 +122,23 @@ final class CanvasSelectionController {
         restoreHiddenStrokes()
         selection = nil
         selectionBounds = nil
+        capturePath = nil
+        dragTranslation = .zero
+        strokesSnapshot = nil
+        resetHandleDrag()
+        captureStart = nil
+        captureMode = nil
+        captureRect = nil
+    }
+
+    func selectElement(id: UUID) {
+        restoreHiddenStrokes()
+        let selection = Selection(
+            strokeIndices: IndexSet(),
+            elementIDs: [id]
+        )
+        self.selection = selection
+        selectionBounds = bounds(for: selection)
         capturePath = nil
         dragTranslation = .zero
         strokesSnapshot = nil
@@ -276,6 +297,9 @@ final class CanvasSelectionController {
                 if case .text(var text) = element.content {
                     text.fontSize *= Double(min(scale.width, scale.height))
                     element.content = .text(text)
+                } else if case .shape(var shape) = element.content {
+                    shape.strokeWidth *= Double(min(scale.width, scale.height))
+                    element.content = .shape(shape)
                 }
                 elementsStore.updateElement(element)
             }
@@ -285,6 +309,84 @@ final class CanvasSelectionController {
         selectionBounds = bounds(for: selection)
         strokesSnapshot = nil
         resetHandleDrag()
+    }
+
+    /// The single selected `.shape` polyline element eligible for vertex editing, or nil.
+    /// Requires exactly one selected element, zero selected strokes, and polyline geometry.
+    func vertexEditableElement() -> CanvasElement? {
+        guard let selection,
+              selection.strokeIndices.isEmpty,
+              selection.elementIDs.count == 1,
+              let elementID = selection.elementIDs.first,
+              let element = elementsStore?.elements.first(where: { $0.id == elementID }),
+              case .shape(let shape) = element.content,
+              case .polyline = shape.geometry else {
+            return nil
+        }
+        return element
+    }
+
+    func beginVertexDrag(elementID: UUID, vertexIndex: Int) {
+        resetVertexDrag()
+
+        guard let elementsStore,
+              let element = elementsStore.elements.first(where: { $0.id == elementID }),
+              case .shape(let shape) = element.content,
+              case .polyline = shape.geometry else {
+            return
+        }
+
+        vertexDragBaseline = elementsStore.elements
+        vertexDragElementID = elementID
+        vertexDragIndex = vertexIndex
+        isVertexDragging = true
+    }
+
+    func setVertexPosition(_ contentPoint: CGPoint) {
+        guard isVertexDragging else { return }
+        guard let elementID = vertexDragElementID,
+              let vertexIndex = vertexDragIndex,
+              let elementsStore else {
+            resetVertexDrag()
+            return
+        }
+        guard var element = elementsStore.elements.first(where: { $0.id == elementID }),
+              case .shape(let shape) = element.content else {
+            resetVertexDrag()
+            return
+        }
+        guard let moved = ShapeVertexEditor.movingVertex(
+            at: vertexIndex,
+            to: contentPoint,
+            content: shape,
+            frame: element.frame,
+            rotation: element.rotation
+        ) else {
+            resetVertexDrag()
+            return
+        }
+
+        element.content = .shape(moved.content)
+        element.frame = moved.frame
+        elementsStore.updateElementLive(element)
+
+        if let selection = self.selection {
+            self.selection = selection
+            selectionBounds = bounds(for: selection)
+        }
+    }
+
+    func endVertexDrag() {
+        defer { resetVertexDrag() }
+        guard isVertexDragging,
+              let vertexDragBaseline,
+              let elementsStore else {
+            return
+        }
+        elementsStore.registerEditingSessionUndo(
+            from: vertexDragBaseline,
+            label: "Edit Shape"
+        )
     }
 
     func restyleSelection(color: CodableColor?, strokeWidth: Double?) {
@@ -327,13 +429,42 @@ final class CanvasSelectionController {
                 drawing = PKDrawing(strokes: strokes)
             }
 
-            guard let color else { return }
-            for elementID in selection.elementIDs {
-                guard var element = elementsStore.elements.first(where: { $0.id == elementID }),
-                      case .text(var text) = element.content else { continue }
-                text.color = color
-                element.content = .text(text)
-                elementsStore.updateElement(element)
+            if color != nil || strokeWidth != nil {
+                for elementID in selection.elementIDs {
+                    guard var element = elementsStore.elements.first(
+                        where: { $0.id == elementID }
+                    ) else { continue }
+
+                    var didChange = false
+                    switch element.content {
+                    case .text(var text):
+                        if let color, text.color != color {
+                            text.color = color
+                            element.content = .text(text)
+                            didChange = true
+                        }
+                    case .shape(var shape):
+                        if let color, shape.strokeColor != color {
+                            shape.strokeColor = color
+                            didChange = true
+                        }
+                        if let strokeWidth,
+                           strokeWidth > 0,
+                           shape.strokeWidth != strokeWidth {
+                            shape.strokeWidth = strokeWidth
+                            didChange = true
+                        }
+                        if didChange {
+                            element.content = .shape(shape)
+                        }
+                    case .image, .unknown:
+                        continue
+                    }
+
+                    if didChange {
+                        elementsStore.updateElement(element)
+                    }
+                }
             }
         }
 
@@ -654,6 +785,13 @@ final class CanvasSelectionController {
         handleRotation = 0
         isHandleDragging = false
         handleDragBounds = nil
+    }
+
+    private func resetVertexDrag() {
+        isVertexDragging = false
+        vertexDragBaseline = nil
+        vertexDragElementID = nil
+        vertexDragIndex = nil
     }
 
     private static func copy(_ stroke: PKStroke, translatedBy translation: CGSize) -> PKStroke {

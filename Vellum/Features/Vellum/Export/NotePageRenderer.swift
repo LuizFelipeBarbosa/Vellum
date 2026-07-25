@@ -90,6 +90,18 @@ enum NotePageRenderer {
             )
         }
 
+        for element in content.elements {
+            guard case .shape(let shapeContent) = element.content else { continue }
+            drawShape(
+                shapeContent,
+                for: element,
+                pageRect: pageRect,
+                pageBounds: pageBounds,
+                interfaceStyle: content.interfaceStyle,
+                in: ctx
+            )
+        }
+
         drawInk(
             content.drawing,
             pageRect: pageRect,
@@ -415,6 +427,39 @@ enum NotePageRenderer {
         UIGraphicsPushContext(ctx)
         image.draw(in: fittedRect)
         UIGraphicsPopContext()
+        ctx.restoreGState()
+    }
+
+    private static func drawShape(
+        _ shapeContent: ShapeContent,
+        for element: CanvasElement,
+        pageRect: CGRect,
+        pageBounds: CGRect,
+        interfaceStyle: UIUserInterfaceStyle,
+        in ctx: CGContext
+    ) {
+        guard element.rotatedBoundingBox.intersects(pageRect) else { return }
+
+        let path = ShapeGeometry.path(
+            for: shapeContent,
+            in: element.frame,
+            rotation: element.rotation
+        )
+
+        ctx.saveGState()
+        ctx.clip(to: pageBounds)
+        ctx.translateBy(x: 0, y: -pageRect.minY)
+        ctx.addPath(path)
+        ctx.setStrokeColor(
+            ShapeInkAppearance.displayColor(
+                for: shapeContent.strokeColor,
+                style: interfaceStyle
+            ).cgColor
+        )
+        ctx.setLineWidth(CGFloat(shapeContent.strokeWidth))
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+        ctx.strokePath()
         ctx.restoreGState()
     }
 

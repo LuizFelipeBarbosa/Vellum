@@ -1,11 +1,14 @@
 import SwiftUI
+import VellumCore
 
 struct SelectionOverlayView: View {
     let controller: CanvasSelectionController
     let selectionMode: SelectionMode
     let isActive: Bool
+    let isSelectToolActive: Bool
 
     @State private var activeHandle: SelectionHandle?
+    @State private var activeVertexIndex: Int?
 
     private static let coordinateSpaceName = "vellum-selection-overlay"
 
@@ -28,7 +31,15 @@ struct SelectionOverlayView: View {
                             if controller.capturePath == nil,
                                controller.strokesSnapshot == nil
                                 || controller.isHandleDragging {
-                                selectionHandles(in: bounds)
+                                if !controller.isVertexDragging {
+                                    selectionHandles(in: bounds)
+                                }
+
+                                if !controller.isHandleDragging,
+                                   let element = controller.vertexEditableElement(),
+                                   case .shape(let content) = element.content {
+                                    vertexHandles(for: element, content: content)
+                                }
                             }
                         }
 
@@ -52,9 +63,13 @@ struct SelectionOverlayView: View {
     }
 
     private var captureSurface: some View {
-        SelectionCaptureSurface(controller: controller, selectionMode: selectionMode)
-            .allowsHitTesting(false)
-            .accessibilityLabel("Canvas selection area")
+        SelectionCaptureSurface(
+            controller: controller,
+            selectionMode: selectionMode,
+            isEnabled: isSelectToolActive
+        )
+        .allowsHitTesting(false)
+        .accessibilityLabel("Canvas selection area")
     }
 
     @ViewBuilder
@@ -143,6 +158,71 @@ struct SelectionOverlayView: View {
                 .gesture(handleGesture(.rotation, bounds: bounds))
                 .accessibilityLabel(SelectionHandle.rotation.accessibilityLabel)
         }
+    }
+
+    private func vertexHandles(
+        for element: CanvasElement,
+        content: ShapeContent
+    ) -> some View {
+        let vertices = ShapeVertexEditor.absoluteVertices(
+            content: content,
+            frame: element.frame,
+            rotation: element.rotation
+        )
+
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(vertices.enumerated()), id: \.offset) { index, vertex in
+                Circle()
+                    .fill(VellumTheme.accentDark)
+                    .frame(width: 9, height: 9)
+                    .overlay {
+                        Circle()
+                            .stroke(VellumTheme.popover, lineWidth: 1.5)
+                    }
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+                    .position(vertex)
+                    .gesture(
+                        vertexGesture(
+                            elementID: element.id,
+                            vertexIndex: index
+                        )
+                    )
+                    .accessibilityLabel("Shape vertex handle")
+                    .accessibilityIdentifier("vellum-shape-vertex-handle-\(index)")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Shape vertex handles")
+        .accessibilityIdentifier("vellum-shape-vertex-handles")
+        .accessibilityValue(vertexSummary(vertices))
+    }
+
+    private func vertexGesture(
+        elementID: UUID,
+        vertexIndex: Int
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.coordinateSpaceName))
+            .onChanged { value in
+                if activeVertexIndex == nil {
+                    activeVertexIndex = vertexIndex
+                    controller.beginVertexDrag(
+                        elementID: elementID,
+                        vertexIndex: vertexIndex
+                    )
+                }
+                guard activeVertexIndex == vertexIndex else { return }
+                controller.setVertexPosition(value.location)
+            }
+            .onEnded { _ in
+                guard activeVertexIndex == vertexIndex else { return }
+                controller.endVertexDrag()
+                activeVertexIndex = nil
+            }
+    }
+
+    private func vertexSummary(_ vertices: [CGPoint]) -> String {
+        vertices.map { "\($0.x),\($0.y)" }.joined(separator: ";")
     }
 
     private func handleGesture(

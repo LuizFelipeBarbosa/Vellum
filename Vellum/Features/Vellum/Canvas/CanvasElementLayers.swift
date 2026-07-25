@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VellumCore
 
 struct ImageElementsLayer: View {
@@ -35,6 +36,54 @@ struct ImageElementsLayer: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(VellumTheme.ink(0.06))
         }
+    }
+}
+
+struct ShapeElementsLayer: View {
+    let store: CanvasElementsStore
+    let viewport: CanvasViewport
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var shapeCount: Int {
+        store.elements.reduce(into: 0) { count, element in
+            if case .shape = element.content {
+                count += 1
+            }
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(store.elements) { element in
+                if case .shape(let content) = element.content {
+                    Path(
+                        ShapeGeometry.path(
+                            for: content,
+                            in: element.frame,
+                            rotation: element.rotation
+                        )
+                    )
+                    .stroke(
+                        Color(
+                            ShapeInkAppearance.displayColor(
+                                for: content.strokeColor,
+                                style: colorScheme == .dark ? .dark : .light
+                            )
+                        ),
+                        style: StrokeStyle(
+                            lineWidth: CGFloat(content.strokeWidth),
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
+                    )
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("vellum-shape-element-count")
+        .accessibilityValue("\(shapeCount)")
     }
 }
 

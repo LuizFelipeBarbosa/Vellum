@@ -8,9 +8,14 @@ import VellumCore
 struct SelectionCaptureSurface: UIViewRepresentable {
     let controller: CanvasSelectionController
     let selectionMode: SelectionMode
+    let isEnabled: Bool
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(controller: controller, selectionMode: selectionMode)
+        Coordinator(
+            controller: controller,
+            selectionMode: selectionMode,
+            isEnabled: isEnabled
+        )
     }
 
     func makeUIView(context: Context) -> UIView {
@@ -24,6 +29,7 @@ struct SelectionCaptureSurface: UIViewRepresentable {
     func updateUIView(_ view: UIView, context: Context) {
         context.coordinator.controller = controller
         context.coordinator.selectionMode = selectionMode
+        context.coordinator.isEnabled = isEnabled
         context.coordinator.syncInstallation()
     }
 
@@ -35,6 +41,15 @@ struct SelectionCaptureSurface: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var controller: CanvasSelectionController
         var selectionMode: SelectionMode
+        var isEnabled: Bool {
+            didSet {
+                guard oldValue, !isEnabled else { return }
+                invalidateAutoScroll(clearDragLocation: true)
+                dragKind = nil
+                dragStartLocation = nil
+                resetPinchClaimDecision()
+            }
+        }
         let panGestureRecognizer = UIPanGestureRecognizer()
         let tapGestureRecognizer = UITapGestureRecognizer()
         let pinchGestureRecognizer = UIPinchGestureRecognizer()
@@ -47,9 +62,14 @@ struct SelectionCaptureSurface: UIViewRepresentable {
         private var autoScrollDisplayLink: CADisplayLink?
         private var lastDragScreenLocation: CGPoint?
 
-        init(controller: CanvasSelectionController, selectionMode: SelectionMode) {
+        init(
+            controller: CanvasSelectionController,
+            selectionMode: SelectionMode,
+            isEnabled: Bool
+        ) {
             self.controller = controller
             self.selectionMode = selectionMode
+            self.isEnabled = isEnabled
             super.init()
 
             panGestureRecognizer.maximumNumberOfTouches = 1
@@ -61,6 +81,10 @@ struct SelectionCaptureSurface: UIViewRepresentable {
         }
 
         func syncInstallation() {
+            panGestureRecognizer.isEnabled = isEnabled
+            tapGestureRecognizer.isEnabled = isEnabled
+            pinchGestureRecognizer.isEnabled = isEnabled
+
             guard let canvasView = controller.canvasReference?.canvasView,
                   canvasView !== installedCanvas else { return }
 

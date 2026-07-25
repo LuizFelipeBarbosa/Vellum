@@ -214,6 +214,351 @@ final class NotePageRendererTests: XCTestCase {
         )
     }
 
+    func testOpenPolylineShapeDrawsAlongItsDiagonal() throws {
+        let frame = CanvasRect(x: 180, y: 220, width: 240, height: 180)
+        let element = CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0),
+                            CanvasPoint(x: 1, y: 1),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: 8
+                )
+            ),
+            frame: frame
+        )
+        let rendered = try pixelBuffer(
+            for: render(pageIndex: 0, content: makeContent(elements: [element]))
+        )
+        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+
+        for point in [
+            CGPoint(x: 240, y: 265),
+            CGPoint(x: 300, y: 310),
+            CGPoint(x: 360, y: 355),
+        ] {
+            let sampleRect = CGRect(
+                x: point.x - 6,
+                y: point.y - 6,
+                width: 12,
+                height: 12
+            )
+            XCTAssertGreaterThan(
+                differingPixelCount(rendered, reference, in: sampleRect),
+                0
+            )
+        }
+    }
+
+    func testClosedPolylineShapeDrawsAlongEveryEdge() throws {
+        let frame = CanvasRect(x: 180, y: 220, width: 240, height: 160)
+        let element = CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0),
+                            CanvasPoint(x: 1, y: 0),
+                            CanvasPoint(x: 1, y: 1),
+                            CanvasPoint(x: 0, y: 1),
+                        ],
+                        isClosed: true
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: 8
+                )
+            ),
+            frame: frame
+        )
+        let rendered = try pixelBuffer(
+            for: render(pageIndex: 0, content: makeContent(elements: [element]))
+        )
+        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+
+        for point in [
+            CGPoint(x: 300, y: 220),
+            CGPoint(x: 420, y: 300),
+            CGPoint(x: 300, y: 380),
+            CGPoint(x: 180, y: 300),
+        ] {
+            let sampleRect = CGRect(
+                x: point.x - 6,
+                y: point.y - 6,
+                width: 12,
+                height: 12
+            )
+            XCTAssertGreaterThan(
+                differingPixelCount(rendered, reference, in: sampleRect),
+                0
+            )
+        }
+    }
+
+    func testRotatedEllipseShapeUsesTiltedBoundary() throws {
+        let frame = CanvasRect(x: 250, y: 260, width: 240, height: 120)
+        let rotation = Double.pi / 6
+        let element = CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .ellipse,
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: 8
+                )
+            ),
+            frame: frame,
+            rotation: rotation
+        )
+        let rendered = try pixelBuffer(
+            for: render(pageIndex: 0, content: makeContent(elements: [element]))
+        )
+        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+        let center = CGPoint(x: cgRect(frame).midX, y: cgRect(frame).midY)
+        let radiusX = CGFloat(frame.width / 2)
+        let tiltedRight = CGPoint(
+            x: center.x + cos(CGFloat(rotation)) * radiusX,
+            y: center.y + sin(CGFloat(rotation)) * radiusX
+        )
+        let untiltedRight = CGPoint(x: center.x + radiusX, y: center.y)
+
+        XCTAssertGreaterThan(
+            differingPixelCount(
+                rendered,
+                reference,
+                in: CGRect(
+                    x: tiltedRight.x - 6,
+                    y: tiltedRight.y - 6,
+                    width: 12,
+                    height: 12
+                )
+            ),
+            0
+        )
+        XCTAssertEqual(
+            differingPixelCount(
+                rendered,
+                reference,
+                in: CGRect(
+                    x: untiltedRight.x - 3,
+                    y: untiltedRight.y - 3,
+                    width: 6,
+                    height: 6
+                )
+            ),
+            0
+        )
+    }
+
+    func testShapeAndInkRenderTogetherInOverlappingRegion() throws {
+        let shape = CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0),
+                            CanvasPoint(x: 1, y: 1),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: 8
+                )
+            ),
+            frame: CanvasRect(x: 250, y: 300, width: 160, height: 160)
+        )
+        let stroke = makeStroke(
+            locations: [
+                CGPoint(x: 250, y: 460),
+                CGPoint(x: 330, y: 380),
+                CGPoint(x: 410, y: 300),
+            ],
+            size: CGSize(width: 12, height: 12)
+        )
+        let rendered = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    drawing: PKDrawing(strokes: [stroke]),
+                    elements: [shape]
+                )
+            )
+        )
+        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+
+        for point in [
+            CGPoint(x: 270, y: 320),
+            CGPoint(x: 330, y: 380),
+        ] {
+            XCTAssertGreaterThan(
+                differingPixelCount(
+                    rendered,
+                    reference,
+                    in: CGRect(
+                        x: point.x - 6,
+                        y: point.y - 6,
+                        width: 12,
+                        height: 12
+                    )
+                ),
+                0
+            )
+        }
+    }
+
+    func testShapeStrokePixelsDifferBetweenLightAndDarkInterfaceStyles() throws {
+        let center = CGPoint(
+            x: PageLayout.contentWidth / 2,
+            y: PageGeometry.a4.pageHeight / 2
+        )
+        let shape = makeHorizontalShape(
+            strokeColor: ToolPreferences.default.pen.color,
+            strokeWidth: 28
+        )
+        let paperStyle = PageBackgroundStyle(
+            kind: .blank,
+            paperTint: CodableColor(red: 0.4, green: 0.4, blue: 0.4)
+        )
+        let lightPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    elements: [shape],
+                    style: paperStyle,
+                    interfaceStyle: .light
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let darkPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    elements: [shape],
+                    style: paperStyle,
+                    interfaceStyle: .dark
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let strokeSampleRect = CGRect(
+            x: center.x - 40,
+            y: center.y - 12,
+            width: 80,
+            height: 24
+        )
+
+        XCTAssertGreaterThan(
+            differingPixelCount(lightPixels, darkPixels, in: strokeSampleRect),
+            0
+        )
+        XCTAssertTrue(
+            lightPixels.pixel(atContentPoint: center).differs(
+                from: darkPixels.pixel(atContentPoint: center)
+            )
+        )
+    }
+
+    func testDarkInterfaceStyleRendersDefaultPenShapeLighterThanPaper() throws {
+        let center = CGPoint(
+            x: PageLayout.contentWidth / 2,
+            y: PageGeometry.a4.pageHeight / 2
+        )
+        let paperPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(style: .blank, interfaceStyle: .dark),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let shapePixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    elements: [
+                        makeHorizontalShape(
+                            strokeColor: ToolPreferences.default.pen.color,
+                            strokeWidth: 28
+                        ),
+                    ],
+                    style: .blank,
+                    interfaceStyle: .dark
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let paperPixel = paperPixels.pixel(atContentPoint: center)
+        let shapePixel = shapePixels.pixel(atContentPoint: center)
+
+        XCTAssertTrue(shapePixel.differs(from: paperPixel))
+        XCTAssertGreaterThan(shapePixel.luminance, paperPixel.luminance)
+    }
+
+    func testDarkInterfaceStylePreservesTranslucentShapeAlpha() throws {
+        let center = CGPoint(
+            x: PageLayout.contentWidth / 2,
+            y: PageGeometry.a4.pageHeight / 2
+        )
+        let markerColor = ToolPreferences.default.highlighter.color
+        let translucentShape = makeHorizontalShape(
+            strokeColor: CodableColor(
+                red: markerColor.red,
+                green: markerColor.green,
+                blue: markerColor.blue,
+                alpha: 0.55
+            ),
+            strokeWidth: 32
+        )
+        let opaqueShape = makeHorizontalShape(
+            strokeColor: CodableColor(
+                red: markerColor.red,
+                green: markerColor.green,
+                blue: markerColor.blue
+            ),
+            strokeWidth: 32
+        )
+        let paper = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(style: .blank, interfaceStyle: .dark),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let translucent = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    elements: [translucentShape],
+                    style: .blank,
+                    interfaceStyle: .dark
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let opaque = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    elements: [opaqueShape],
+                    style: .blank,
+                    interfaceStyle: .dark
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let paperPixel = paper.pixel(atContentPoint: center)
+        let translucentPixel = translucent.pixel(atContentPoint: center)
+        let opaquePixel = opaque.pixel(atContentPoint: center)
+
+        XCTAssertTrue(translucentPixel.differs(from: paperPixel))
+        XCTAssertTrue(translucentPixel.differs(from: opaquePixel))
+        XCTAssertGreaterThan(translucentPixel.luminance, paperPixel.luminance)
+        XCTAssertLessThan(translucentPixel.luminance, opaquePixel.luminance)
+    }
+
     func testEmptyContentRendersAtRequestedSize() throws {
         let pointSize = renderPointSize
         let image = NotePageRenderer.image(
@@ -892,6 +1237,37 @@ final class NotePageRendererTests: XCTestCase {
         )
     }
 
+    private func makeHorizontalShape(
+        strokeColor: CodableColor,
+        strokeWidth: Double
+    ) -> CanvasElement {
+        let center = CGPoint(
+            x: PageLayout.contentWidth / 2,
+            y: PageGeometry.a4.pageHeight / 2
+        )
+        return CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0.5),
+                            CanvasPoint(x: 1, y: 0.5),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: strokeColor,
+                    strokeWidth: strokeWidth
+                )
+            ),
+            frame: CanvasRect(
+                x: Double(center.x - 100),
+                y: Double(center.y - 40),
+                width: 200,
+                height: 80
+            )
+        )
+    }
+
     private func solidImage(color: UIColor, size: CGSize) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
@@ -1003,6 +1379,10 @@ final class NotePageRendererTests: XCTestCase {
         let green: UInt8
         let blue: UInt8
         let alpha: UInt8
+
+        var luminance: Double {
+            0.2126 * Double(red) + 0.7152 * Double(green) + 0.0722 * Double(blue)
+        }
 
         func differs(from other: Pixel) -> Bool {
             abs(Int(red) - Int(other.red)) > 4

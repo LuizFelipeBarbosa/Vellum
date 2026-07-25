@@ -84,6 +84,66 @@ final class SelectionTransformTests: XCTestCase {
         assertTransform(actual, equals: expected)
     }
 
+    func testShapeHandleTransformScalesFrameStrokeWidthAndRotation() throws {
+        let originalRotation = 0.2
+        let originalStrokeWidth = 6.0
+        let element = makeShapeElement(
+            frame: CanvasRect(x: 50, y: 40, width: 40, height: 20),
+            rotation: originalRotation,
+            strokeWidth: originalStrokeWidth
+        )
+        let harness = makeHarness(strokes: [], elements: [element])
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 150, y: 120))
+        let scale = CGSize(width: 2, height: 1.5)
+        let appliedRotation = Double.pi / 4
+        let originalCenter = CGPoint(
+            x: element.frame.x + element.frame.width / 2,
+            y: element.frame.y + element.frame.height / 2
+        )
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: scale,
+            rotation: appliedRotation
+        )
+        harness.controller.endHandleDrag()
+
+        let transformed = try XCTUnwrap(harness.store.elements.first)
+        XCTAssertEqual(
+            transformed.frame.width,
+            element.frame.width * Double(scale.width),
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformed.frame.height,
+            element.frame.height * Double(scale.height),
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformed.frame.x,
+            Double(originalCenter.x) - transformed.frame.width / 2,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformed.frame.y,
+            Double(originalCenter.y) - transformed.frame.height / 2,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformed.rotation,
+            originalRotation + appliedRotation,
+            accuracy: 0.000_001
+        )
+        guard case .shape(let shape) = transformed.content else {
+            return XCTFail("Expected a shape element")
+        }
+        XCTAssertEqual(
+            shape.strokeWidth,
+            originalStrokeWidth * Double(min(scale.width, scale.height)),
+            accuracy: 0.000_001
+        )
+    }
+
     func testMixedHandleTransformIsExactlyOneUndoStep() throws {
         let element = makeElement(
             frame: CanvasRect(x: 65, y: 20, width: 32, height: 28),
@@ -179,6 +239,40 @@ final class SelectionTransformTests: XCTestCase {
         XCTAssertEqual(restyled.path.creationDate, stroke.path.creationDate)
     }
 
+    func testShapeRestyleAppliesColorAndWidthIndependently() throws {
+        let originalColor = CodableColor(red: 0.1, green: 0.2, blue: 0.3)
+        var element = makeShapeElement(
+            frame: CanvasRect(x: 30, y: 30, width: 80, height: 60),
+            strokeWidth: 6
+        )
+        guard case .shape(var originalShape) = element.content else {
+            return XCTFail("Expected a shape element")
+        }
+        originalShape.strokeColor = originalColor
+        element.content = .shape(originalShape)
+        let harness = makeHarness(strokes: [], elements: [element])
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 150, y: 120))
+
+        harness.controller.restyleSelection(color: nil, strokeWidth: 11)
+
+        let widthRestyled = try XCTUnwrap(harness.store.elements.first)
+        guard case .shape(let widthRestyledShape) = widthRestyled.content else {
+            return XCTFail("Expected a shape element")
+        }
+        XCTAssertEqual(widthRestyledShape.strokeColor, originalColor)
+        XCTAssertEqual(widthRestyledShape.strokeWidth, 11)
+
+        let updatedColor = CodableColor(red: 0.7, green: 0.5, blue: 0.2)
+        harness.controller.restyleSelection(color: updatedColor, strokeWidth: nil)
+
+        let colorRestyled = try XCTUnwrap(harness.store.elements.first)
+        guard case .shape(let colorRestyledShape) = colorRestyled.content else {
+            return XCTFail("Expected a shape element")
+        }
+        XCTAssertEqual(colorRestyledShape.strokeColor, updatedColor)
+        XCTAssertEqual(colorRestyledShape.strokeWidth, 11)
+    }
+
     private func select(
         in harness: Harness,
         from start: CGPoint,
@@ -248,6 +342,30 @@ final class SelectionTransformTests: XCTestCase {
                     text: "Selected",
                     fontSize: 18,
                     color: CodableColor(red: 0, green: 0, blue: 0)
+                )
+            ),
+            frame: frame,
+            rotation: rotation
+        )
+    }
+
+    private func makeShapeElement(
+        frame: CanvasRect,
+        rotation: Double = 0,
+        strokeWidth: Double = 6
+    ) -> CanvasElement {
+        CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0),
+                            CanvasPoint(x: 1, y: 1),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: strokeWidth
                 )
             ),
             frame: frame,
