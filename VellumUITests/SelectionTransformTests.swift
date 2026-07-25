@@ -273,6 +273,61 @@ final class SelectionTransformTests: XCTestCase {
         XCTAssertEqual(colorRestyledShape.strokeWidth, 11)
     }
 
+    func testLiveTransformFollowsAMoveDragForSelectedElementsOnly() throws {
+        let selected = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
+        let untouched = makeShapeElement(
+            frame: CanvasRect(x: 300, y: 300, width: 60, height: 40)
+        )
+        let harness = makeHarness(strokes: [], elements: [selected, untouched])
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 120))
+
+        harness.controller.beginMoveDrag()
+        harness.controller.setDragTranslation(CGSize(width: 35, height: -18))
+
+        assertTransform(
+            harness.controller.liveTransform(forElementWith: selected.id),
+            equals: CGAffineTransform(translationX: 35, y: -18)
+        )
+        assertTransform(
+            harness.controller.liveTransform(forElementWith: untouched.id),
+            equals: .identity
+        )
+    }
+
+    func testLiveTransformScalesAboutTheSelectionCenterDuringAHandleDrag() throws {
+        let element = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
+        let harness = makeHarness(strokes: [], elements: [element])
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 120))
+        let bounds = try XCTUnwrap(harness.controller.selectionBounds)
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: CGSize(width: 2, height: 2),
+            rotation: 0
+        )
+
+        // The preview must pin the same center the commit does, or the shape would jump on drop.
+        let transform = harness.controller.liveTransform(forElementWith: element.id)
+        let movedCenter = center.applying(transform)
+        XCTAssertEqual(movedCenter.x, center.x, accuracy: 0.001)
+        XCTAssertEqual(movedCenter.y, center.y, accuracy: 0.001)
+
+        let corner = CGPoint(x: bounds.minX, y: bounds.minY).applying(transform)
+        XCTAssertEqual(corner.x, center.x - bounds.width, accuracy: 0.001)
+        XCTAssertEqual(corner.y, center.y - bounds.height, accuracy: 0.001)
+    }
+
+    func testLiveTransformIsIdentityWithoutASelection() {
+        let element = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
+        let harness = makeHarness(strokes: [], elements: [element])
+
+        assertTransform(
+            harness.controller.liveTransform(forElementWith: element.id),
+            equals: .identity
+        )
+    }
+
     private func select(
         in harness: Harness,
         from start: CGPoint,

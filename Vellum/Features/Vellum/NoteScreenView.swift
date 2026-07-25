@@ -247,6 +247,7 @@ struct NoteScreenView: View {
 
                 ImageElementsLayer(
                     store: model.canvasElements,
+                    selectionController: selectionController,
                     viewport: canvasViewport
                 )
                 .frame(
@@ -268,6 +269,7 @@ struct NoteScreenView: View {
 
                 ShapeElementsLayer(
                     store: model.canvasElements,
+                    selectionController: selectionController,
                     viewport: canvasViewport
                 )
                 .frame(

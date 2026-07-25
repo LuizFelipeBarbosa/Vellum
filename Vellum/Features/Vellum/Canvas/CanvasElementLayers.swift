@@ -4,6 +4,7 @@ import VellumCore
 
 struct ImageElementsLayer: View {
     let store: CanvasElementsStore
+    let selectionController: CanvasSelectionController
     let viewport: CanvasViewport
 
     var body: some View {
@@ -20,6 +21,9 @@ struct ImageElementsLayer: View {
                             y: CGFloat(element.frame.y + element.frame.height / 2)
                         )
                         .rotationEffect(.radians(element.rotation))
+                        .transformEffect(
+                            selectionController.liveTransform(forElementWith: element.id)
+                        )
                 }
             }
         }
@@ -41,6 +45,7 @@ struct ImageElementsLayer: View {
 
 struct ShapeElementsLayer: View {
     let store: CanvasElementsStore
+    let selectionController: CanvasSelectionController
     let viewport: CanvasViewport
 
     @Environment(\.colorScheme) private var colorScheme
@@ -76,6 +81,9 @@ struct ShapeElementsLayer: View {
                             lineCap: .round,
                             lineJoin: .round
                         )
+                    )
+                    .transformEffect(
+                        selectionController.liveTransform(forElementWith: element.id)
                     )
                 }
             }

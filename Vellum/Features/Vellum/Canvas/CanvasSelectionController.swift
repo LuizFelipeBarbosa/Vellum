@@ -311,6 +311,32 @@ final class CanvasSelectionController {
         resetHandleDrag()
     }
 
+    /// Content-space preview transform for an element while a selection drag is in flight, so
+    /// element layers follow the selection box instead of sitting still until the drop. Selected
+    /// strokes get the same preview from `strokesSnapshot`; elements need no snapshot because
+    /// their layer can simply be transformed in place. Identity for anything not being dragged.
+    func liveTransform(forElementWith id: UUID) -> CGAffineTransform {
+        guard let selection, selection.elementIDs.contains(id) else { return .identity }
+
+        guard isHandleDragging else {
+            return CGAffineTransform(
+                translationX: dragTranslation.width,
+                y: dragTranslation.height
+            )
+        }
+        guard let bounds = selectionBounds else { return .identity }
+
+        // Same composition as endHandleDrag, using the raw handle scale so the preview matches
+        // the stroke snapshot; endHandleDrag clamps only when it commits.
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        return CGAffineTransform(translationX: -center.x, y: -center.y)
+            .concatenating(
+                CGAffineTransform(scaleX: handleScale.width, y: handleScale.height)
+            )
+            .concatenating(CGAffineTransform(rotationAngle: handleRotation))
+            .concatenating(CGAffineTransform(translationX: center.x, y: center.y))
+    }
+
     /// The single selected `.shape` polyline element eligible for vertex editing, or nil.
     /// Requires exactly one selected element, zero selected strokes, and polyline geometry.
     func vertexEditableElement() -> CanvasElement? {
