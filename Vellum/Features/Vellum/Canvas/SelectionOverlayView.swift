@@ -31,14 +31,22 @@ struct SelectionOverlayView: View {
                             if controller.capturePath == nil,
                                controller.strokesSnapshot == nil
                                 || controller.isHandleDragging {
+                                let shape = controller.vertexEditableElement()
+
                                 if !controller.isVertexDragging {
-                                    selectionHandles(in: bounds)
+                                    // A shape carries its own handles, which sit on the curve or
+                                    // the vertices — right where the frame's resize handles would
+                                    // be. Showing both stacks two grabbable targets on the same
+                                    // point, so the frame's give way and only rotation remains.
+                                    selectionHandles(
+                                        in: bounds,
+                                        includesResizeHandles: shape == nil
+                                            || controller.isHandleDragging
+                                    )
                                 }
 
-                                if !controller.isHandleDragging,
-                                   let element = controller.vertexEditableElement(),
-                                   case .shape(let content) = element.content {
-                                    vertexHandles(for: element, content: content)
+                                if !controller.isHandleDragging, let shape {
+                                    vertexHandles(for: shape)
                                 }
                             }
                         }
@@ -121,7 +129,10 @@ struct SelectionOverlayView: View {
         }
     }
 
-    private func selectionHandles(in bounds: CGRect) -> some View {
+    private func selectionHandles(
+        in bounds: CGRect,
+        includesResizeHandles: Bool
+    ) -> some View {
         ZStack(alignment: .topLeading) {
             Path { path in
                 path.move(to: livePoint(for: .top, in: bounds))
@@ -130,7 +141,7 @@ struct SelectionOverlayView: View {
             .stroke(VellumTheme.accentDark, lineWidth: 1.5)
             .allowsHitTesting(false)
 
-            ForEach(SelectionHandle.resizeHandles) { handle in
+            ForEach(includesResizeHandles ? SelectionHandle.resizeHandles : []) { handle in
                 Rectangle()
                     .fill(VellumTheme.popover)
                     .frame(width: 10, height: 10)
@@ -160,15 +171,8 @@ struct SelectionOverlayView: View {
         }
     }
 
-    private func vertexHandles(
-        for element: CanvasElement,
-        content: ShapeContent
-    ) -> some View {
-        let vertices = ShapeVertexEditor.absoluteVertices(
-            content: content,
-            frame: element.frame,
-            rotation: element.rotation
-        )
+    private func vertexHandles(for element: CanvasElement) -> some View {
+        let vertices = controller.vertexEditHandles(for: element)
 
         return ZStack(alignment: .topLeading) {
             ForEach(Array(vertices.enumerated()), id: \.offset) { index, vertex in

@@ -321,7 +321,7 @@ final class ElementUndoTransactionTests: XCTestCase {
         withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
     }
 
-    func testEllipseSelectionIsNotVertexEditable() {
+    func testEllipseSelectionOffersARadiusHandlePerAxisEnd() throws {
         let (store, _) = makeStore()
         let ellipseElement = makeShapeElement(geometry: .ellipse)
         store.hydrate([ellipseElement])
@@ -330,7 +330,39 @@ final class ElementUndoTransactionTests: XCTestCase {
         select(ellipseElement, with: harness.controller)
 
         XCTAssertNotNil(harness.controller.selection)
-        XCTAssertNil(harness.controller.vertexEditableElement())
+        let editable = try XCTUnwrap(harness.controller.vertexEditableElement())
+        let handles = harness.controller.vertexEditHandles(for: editable)
+        XCTAssertEqual(handles.count, 4)
+
+        // Each handle sits on the curve, not on the corner of a box around it.
+        let frame = ellipseElement.frame
+        let center = CGPoint(x: frame.x + frame.width / 2, y: frame.y + frame.height / 2)
+        XCTAssertEqual(handles[0], CGPoint(x: center.x, y: frame.y))
+        XCTAssertEqual(handles[2], CGPoint(x: center.x, y: frame.y + frame.height))
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
+    func testDraggingAnEllipseRadiusHandleResizesOneAxisInOneUndoStep() throws {
+        let (store, undoManager) = makeStore()
+        let ellipseElement = makeShapeElement(geometry: .ellipse)
+        store.hydrate([ellipseElement])
+        let harness = makeSelectionController(for: store)
+        select(ellipseElement, with: harness.controller)
+
+        harness.controller.beginVertexDrag(elementID: ellipseElement.id, vertexIndex: 1)
+        harness.controller.setVertexPosition(
+            CGPoint(x: ellipseElement.frame.x + ellipseElement.frame.width + 40, y: 70)
+        )
+        harness.controller.endVertexDrag()
+
+        let resized = try XCTUnwrap(store.elements.first)
+        XCTAssertEqual(resized.frame.width, ellipseElement.frame.width + 40, accuracy: 0.001)
+        XCTAssertEqual(resized.frame.height, ellipseElement.frame.height, accuracy: 0.001)
+        XCTAssertEqual(resized.frame.x, ellipseElement.frame.x, accuracy: 0.001)
+        XCTAssertEqual(undoManager.undoActionName, "Edit Shape")
+
+        undoManager.undo()
+        XCTAssertEqual(store.elements, [ellipseElement])
         withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
     }
 

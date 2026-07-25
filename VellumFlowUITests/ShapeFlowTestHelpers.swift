@@ -108,6 +108,87 @@ enum ShapeFlowTestHelpers {
         )
     }
 
+    /// Draws a multi-segment stroke — something `press(thenDragTo:)` cannot express — and holds
+    /// still at the end long enough to trigger the dwell snap. Blocks until the pen lifts.
+    @discardableResult
+    static func drawStroke(
+        in app: XCUIApplication,
+        window: XCUIElement,
+        through windowPoints: [CGPoint],
+        holdDuration: TimeInterval = 1.2
+    ) -> Bool {
+        guard windowPoints.count >= 2 else { return false }
+
+        let screenPoints = windowPoints.map { windowPoint in
+            window.coordinate(withNormalizedOffset: .zero)
+                .withOffset(
+                    CGVector(
+                        dx: windowPoint.x - window.frame.minX,
+                        dy: windowPoint.y - window.frame.minY
+                    )
+                )
+                .screenPoint
+        }
+
+        // Densify so the recognizer sees a stroke rather than a handful of corners.
+        let stepLength: CGFloat = 8
+        let stepInterval: TimeInterval = 0.02
+        var moves: [(point: CGPoint, offset: TimeInterval)] = []
+        var offset: TimeInterval = 0
+        for (start, end) in zip(screenPoints, screenPoints.dropFirst()) {
+            let length = hypot(end.x - start.x, end.y - start.y)
+            let steps = max(1, Int(ceil(length / stepLength)))
+            for step in 1...steps {
+                let fraction = CGFloat(step) / CGFloat(steps)
+                offset += stepInterval
+                moves.append(
+                    (
+                        point: CGPoint(
+                            x: start.x + (end.x - start.x) * fraction,
+                            y: start.y + (end.y - start.y) * fraction
+                        ),
+                        offset: offset
+                    )
+                )
+            }
+        }
+
+        // Repeating the last point keeps XCTest from interpolating across the hold.
+        let holdInterval: TimeInterval = 0.05
+        let holdSamples = max(1, Int((holdDuration / holdInterval).rounded()))
+        guard let last = screenPoints.last else { return false }
+        for _ in 1...holdSamples {
+            offset += holdInterval
+            moves.append((point: last, offset: offset))
+        }
+
+        guard let record = makeGestureRecord(
+            named: "Shape stroke",
+            gesture: PointerGesture(
+                start: screenPoints[0],
+                moves: moves,
+                liftOffset: offset + holdInterval
+            ),
+            targetProcessID: processID(of: app)
+        ) else {
+            return false
+        }
+        return synthesize(record)
+    }
+
+    /// Boxed-selection drag around a rectangle of window points.
+    static func boxSelect(in app: XCUIApplication, window: XCUIElement, around rect: CGRect) {
+        selectTool("Select", in: app)
+        selectTool("Box", in: app)
+        window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: rect.minX, dy: rect.minY))
+            .press(
+                forDuration: 0.05,
+                thenDragTo: window.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: rect.maxX, dy: rect.maxY))
+            )
+    }
+
     static func processID(of app: XCUIApplication) -> Int32 {
         guard let messageSend = dlsym(dlopen(nil, RTLD_NOW), "objc_msgSend") else { return 0 }
         typealias IntegerReturnMessage = @convention(c) (AnyObject, Selector) -> Int32

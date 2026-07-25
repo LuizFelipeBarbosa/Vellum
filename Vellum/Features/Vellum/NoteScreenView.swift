@@ -417,8 +417,9 @@ struct NoteScreenView: View {
                 )
                 .clipped()
 
-                if selectedTool == .select,
-                   selectionController.selection != nil,
+                // Not gated on the Select tool: tapping a shape selects it while an ink tool is
+                // active, and that is exactly when the actions need to be reachable.
+                if selectionController.selection != nil,
                    selectionController.strokesSnapshot == nil,
                    selectionController.dragTranslation == .zero,
                    let bounds = selectionController.selectionBounds {
@@ -943,6 +944,22 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                         scrollCanvas(index)
                     }
                 }
+                let resolveSnapGrid = { [weak model, weak pageState] (point: CGPoint) -> ShapeSnapGrid? in
+                    guard let model, let pageState, let note = model.note else { return nil }
+                    let geometry = pageState.pageGeometry
+                    let pageIndex = geometry.pageIndex(
+                        forContentY: point.y,
+                        pageCount: pageState.pageCount
+                    )
+                    // A PDF page draws no pattern, so there is no lattice to align to there.
+                    guard !model.pdfBands.contains(pageIndex) else { return nil }
+                    return ShapeGridSnapper.grid(
+                        for: note.backgroundStyle,
+                        pageRect: geometry.pageRect(index: pageIndex)
+                    )
+                }
+                selectionController.snapGrid = resolveSnapGrid
+                shapeSnapController.snapGrid = resolveSnapGrid
                 selectionController.persistImageData = { [weak model] data in
                     await model?.persistPastedImageData(data)
                 }

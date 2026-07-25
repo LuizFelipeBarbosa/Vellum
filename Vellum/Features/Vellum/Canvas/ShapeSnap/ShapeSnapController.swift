@@ -29,6 +29,9 @@ final class ShapeSnapController {
     weak var elementsStore: CanvasElementsStore?
     var isEnabled = false
     var activeInkConfig: InkToolConfig?
+    /// Alignment lattice for a content-space point, or nil where there is nothing to align to.
+    /// Supplied by the note screen, which is what knows the page background.
+    var snapGrid: ((CGPoint) -> ShapeSnapGrid?)?
     var isDrawingEnabled = true
     let policy: ShapeSnapPolicy
 
@@ -105,9 +108,12 @@ final class ShapeSnapController {
                 return
             }
             let builtElement = ShapeElementBuilder.element(
-                from: .polyline(
-                    vertices: [lineAdjustState.pivot, adjusted.point],
-                    isClosed: false
+                from: alignedToPageGrid(
+                    .polyline(
+                        vertices: [lineAdjustState.pivot, adjusted.point],
+                        isClosed: false
+                    ),
+                    near: lineAdjustState.pivot
                 ),
                 strokeColor: lineAdjustState.strokeColor,
                 strokeWidth: lineAdjustState.strokeWidth
@@ -174,6 +180,7 @@ final class ShapeSnapController {
         }
 
         let shape = ShapeRecognizer.recognize(points: capturedContentPoints)
+            .map { alignedToPageGrid($0, near: capturedContentPoints[0]) }
         cancelPendingDwell()
         detector.reset()
         guard let shape else { return }
@@ -332,6 +339,15 @@ final class ShapeSnapController {
         }
 
         resetStrokeState()
+    }
+
+    /// Pulls an axis-aligned shape onto the page's rules, grid, or dots. Tilted shapes come back
+    /// untouched — `ShapeGridSnapper` makes that call, so every snap site shares one rule.
+    private func alignedToPageGrid(
+        _ shape: RecognizedShape,
+        near point: CGPoint
+    ) -> RecognizedShape {
+        ShapeGridSnapper.snapped(shape, to: snapGrid?(point))
     }
 
     static func styledStrokeColor(for config: InkToolConfig) -> CodableColor {

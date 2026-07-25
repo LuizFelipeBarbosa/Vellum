@@ -26,6 +26,9 @@ final class CanvasSelectionController {
     weak var elementsStore: CanvasElementsStore?
     var persistImageData: ((Data) async -> String?)?
     var onOperationFailed: ((String) -> Void)?
+    /// Alignment lattice for a content-space point, or nil where there is nothing to align to.
+    /// Supplied by the note screen, which is what knows the page background.
+    var snapGrid: ((CGPoint) -> ShapeSnapGrid?)?
 
     private var captureStart: CGPoint?
     private var captureMode: SelectionMode?
@@ -345,11 +348,31 @@ final class CanvasSelectionController {
               selection.elementIDs.count == 1,
               let elementID = selection.elementIDs.first,
               let element = elementsStore?.elements.first(where: { $0.id == elementID }),
-              case .shape(let shape) = element.content,
-              case .polyline = shape.geometry else {
+              case .shape = element.content else {
             return nil
         }
         return element
+    }
+
+    /// Where the on-shape edit handles belong, in content space: one per vertex for a polyline,
+    /// one per axis end for an ellipse — which has no vertices to grab but is still draggable
+    /// by its own curve rather than by a box around it.
+    func vertexEditHandles(for element: CanvasElement) -> [CGPoint] {
+        guard case .shape(let shape) = element.content else { return [] }
+
+        switch shape.geometry {
+        case .polyline:
+            return ShapeVertexEditor.absoluteVertices(
+                content: shape,
+                frame: element.frame,
+                rotation: element.rotation
+            )
+        case .ellipse:
+            return ShapeEllipseEditor.radiusHandles(
+                frame: element.frame,
+                rotation: element.rotation
+            )
+        }
     }
 
     func beginVertexDrag(elementID: UUID, vertexIndex: Int) {
@@ -357,8 +380,7 @@ final class CanvasSelectionController {
 
         guard let elementsStore,
               let element = elementsStore.elements.first(where: { $0.id == elementID }),
-              case .shape(let shape) = element.content,
-              case .polyline = shape.geometry else {
+              case .shape = element.content else {
             return
         }
 
@@ -381,19 +403,39 @@ final class CanvasSelectionController {
             resetVertexDrag()
             return
         }
-        guard let moved = ShapeVertexEditor.movingVertex(
-            at: vertexIndex,
-            to: contentPoint,
-            content: shape,
-            frame: element.frame,
-            rotation: element.rotation
-        ) else {
-            resetVertexDrag()
-            return
-        }
 
-        element.content = .shape(moved.content)
-        element.frame = moved.frame
+        // Editing lands on the paper's lattice for the same reason drawing does.
+        let target = ShapeGridSnapper.snappedPoint(
+            contentPoint,
+            to: snapGrid?(contentPoint)
+        )
+
+        switch shape.geometry {
+        case .polyline:
+            guard let moved = ShapeVertexEditor.movingVertex(
+                at: vertexIndex,
+                to: target,
+                content: shape,
+                frame: element.frame,
+                rotation: element.rotation
+            ) else {
+                resetVertexDrag()
+                return
+            }
+            element.content = .shape(moved.content)
+            element.frame = moved.frame
+        case .ellipse:
+            guard let resized = ShapeEllipseEditor.resizing(
+                handleIndex: vertexIndex,
+                to: target,
+                frame: element.frame,
+                rotation: element.rotation
+            ) else {
+                resetVertexDrag()
+                return
+            }
+            element.frame = resized
+        }
         elementsStore.updateElementLive(element)
 
         if let selection = self.selection {
