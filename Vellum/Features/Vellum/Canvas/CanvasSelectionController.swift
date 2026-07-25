@@ -124,6 +124,9 @@ final class CanvasSelectionController {
 
     func clearSelection() {
         restoreHiddenStrokes()
+        // The exemption below belongs to the selection a shape tap just made, so it dies with
+        // that selection: an unrelated later tool change must never inherit it.
+        keepsSelectionThroughNextToolChange = false
         selection = nil
         selectionBounds = nil
         capturePath = nil

@@ -208,6 +208,52 @@ struct ShapeRecognizerTests {
         expectVertices(vertices, near: [truth[0], truth[4]], tolerance: 4)
     }
 
+    @Test("An open stroke exactly at the straightening corner ceiling still straightens")
+    func straightensOpenStrokeAtTheCornerCeiling() throws {
+        let truth = zigzag(cornerCount: ShapeRecognizerConfig.default.maxStraightenedCorners)
+        let stroke = jittered(sampleChain(truth, spacing: 3), amplitude: 0.5, seed: 13)
+
+        // Confirms the fixture really carries four corners rather than trusting its shape.
+        let unstraightened = try openPolylineVertices(
+            from: ShapeRecognizer.recognize(
+                points: stroke,
+                config: ShapeRecognizerConfig(straightensOpenPolylines: false)
+            )
+        )
+        #expect(unstraightened.count == truth.count)
+
+        let vertices = try openPolylineVertices(
+            from: ShapeRecognizer.recognize(points: stroke)
+        )
+        #expect(vertices.count == 2)
+        expectVertices(vertices, near: [truth[0], truth[truth.count - 1]], tolerance: 4)
+    }
+
+    @Test("An open stroke past the straightening corner ceiling keeps its ink")
+    func rejectsOpenStrokePastTheCornerCeiling() {
+        let truth = zigzag(cornerCount: ShapeRecognizerConfig.default.maxStraightenedCorners + 1)
+        let stroke = jittered(sampleChain(truth, spacing: 3), amplitude: 0.5, seed: 14)
+
+        // Rejected outright, not straightened and not returned as the polyline it was drawn as:
+        // a stroke this corner-rich under a false dwell is far likelier to be handwriting.
+        #expect(ShapeRecognizer.recognize(points: stroke) == nil)
+    }
+
+    @Test("The tighter straightening ceiling does not apply when straightening is off")
+    func keepsCornerRichOpenStrokeWhenStraighteningIsOff() throws {
+        let truth = zigzag(cornerCount: ShapeRecognizerConfig.default.maxStraightenedCorners + 1)
+        let stroke = jittered(sampleChain(truth, spacing: 3), amplitude: 0.5, seed: 14)
+        let vertices = try openPolylineVertices(
+            from: ShapeRecognizer.recognize(
+                points: stroke,
+                config: ShapeRecognizerConfig(straightensOpenPolylines: false)
+            )
+        )
+
+        #expect(vertices.count == truth.count)
+        expectVertices(vertices, near: truth, tolerance: 4)
+    }
+
     @Test("A closed shape keeps its corners while open strokes straighten")
     func straighteningLeavesClosedShapesAlone() throws {
         let truth = [
@@ -638,6 +684,14 @@ struct ShapeRecognizerTests {
                 x: center.x + localX * cosine - localY * sine,
                 y: center.y + localX * sine + localY * cosine
             )
+        }
+    }
+
+    /// An open saw-tooth carrying exactly `cornerCount` interior corners, each turn far past the
+    /// recognizer's corner angle threshold so the count is unambiguous.
+    private func zigzag(cornerCount: Int) -> [CGPoint] {
+        (0...(cornerCount + 1)).map { index in
+            CGPoint(x: 10 + 40 * CGFloat(index), y: index.isMultiple(of: 2) ? 10 : 70)
         }
     }
 

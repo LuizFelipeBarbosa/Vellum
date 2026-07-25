@@ -390,6 +390,188 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         XCTAssertEqual(harness.undoManager.undoActionName, "Draw Shape")
     }
 
+    // Regression test for a latched exemption: `survivesNextToolChange` is set by a shape tap
+    // and spent by the tool change that same tap triggers. Dropping the selection has to spend
+    // it too, or an unrelated later tool change inherits it and silently keeps a selection.
+    func testClearingTheSelectionSpendsTheToolChangeExemption() {
+        let harness = makeSelectionHarness()
+        let shape = makeOpenPolylineElement()
+        harness.store.hydrate([shape])
+
+        harness.controller.selectElement(id: shape.id, survivesNextToolChange: true)
+        harness.controller.clearSelection()
+
+        // A selection made by lassoing carries no exemption of its own.
+        harness.controller.beginCapture(at: CGPoint(x: 10, y: 10), mode: .boxed)
+        harness.controller.extendCapture(to: CGPoint(x: 400, y: 400))
+        harness.controller.endCapture()
+        XCTAssertNotNil(harness.controller.selection)
+
+        harness.controller.toolChanged()
+
+        XCTAssertNil(harness.controller.selection)
+        withExtendedLifetime(harness) {}
+    }
+
+    // The overlay's `activeVertexIndex` can outlive a gesture SwiftUI cancels, so both of its
+    // recovery paths lean on the controller: a fresh handle may take over a drag still marked as
+    // in flight, and ending a drag that is no longer running must be harmless. The @State latch
+    // itself is only reachable through a real SwiftUI gesture, so it is not covered here.
+    func testAVertexDragCanBeTakenOverByAnotherHandleAndEndedTwice() throws {
+        let harness = makeSelectionHarness()
+        let shape = makeOpenPolylineElement()
+        harness.store.hydrate([shape])
+        harness.controller.selectElement(id: shape.id)
+
+        harness.controller.beginVertexDrag(elementID: shape.id, vertexIndex: 0)
+        harness.controller.setVertexPosition(CGPoint(x: 60, y: 60))
+
+        // The first handle never reported an end, so the second one has to rebind the drag.
+        harness.controller.beginVertexDrag(elementID: shape.id, vertexIndex: 2)
+        XCTAssertTrue(harness.controller.isVertexDragging)
+        harness.controller.setVertexPosition(CGPoint(x: 300, y: 300))
+        harness.controller.endVertexDrag()
+
+        let edited = try XCTUnwrap(harness.store.elements.first)
+        let vertices = shapeVertices(of: edited)
+        XCTAssertEqual(vertices.count, 3)
+        XCTAssertEqual(vertices[0].x, 60, accuracy: 0.001)
+        XCTAssertEqual(vertices[0].y, 60, accuracy: 0.001)
+        XCTAssertEqual(vertices[2].x, 300, accuracy: 0.001)
+        XCTAssertEqual(vertices[2].y, 300, accuracy: 0.001)
+        XCTAssertFalse(harness.controller.isVertexDragging)
+        XCTAssertEqual(harness.undoManager.undoActionName, "Edit Shape")
+
+        // What the overlay calls to release a drag it may or may not still own.
+        harness.controller.endVertexDrag()
+
+        XCTAssertEqual(harness.store.elements, [edited])
+        XCTAssertFalse(harness.controller.isVertexDragging)
+        withExtendedLifetime(harness) {}
+    }
+
+    private func makeSelectionHarness() -> SelectionHarness {
+        let canvasView = PKCanvasView()
+        let coordinator = PencilCanvasView.Coordinator(
+            onDrawingChanged: { _ in },
+            onViewportChanged: nil
+        )
+        canvasView.delegate = coordinator
+        let canvasReference = NoteCanvasReference()
+        canvasReference.canvasView = canvasView
+        let undoManager = UndoManager()
+        let store = CanvasElementsStore()
+        store.canvasReference = canvasReference
+        store.undoManagerOverride = undoManager
+        let controller = CanvasSelectionController()
+        controller.canvasReference = canvasReference
+        controller.elementsStore = store
+        return SelectionHarness(
+            canvasView: canvasView,
+            coordinator: coordinator,
+            store: store,
+            undoManager: undoManager,
+            controller: controller
+        )
+    }
+
+    private func makeOpenPolylineElement() -> CanvasElement {
+        CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0),
+                            CanvasPoint(x: 1, y: 0),
+                            CanvasPoint(x: 1, y: 1),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: 4
+                )
+            ),
+            frame: CanvasRect(x: 100, y: 100, width: 100, height: 100)
+        )
+    }
+
+    func testStrokeBeyondCapturePointLimitAbandonsRecognition() async {
+        let harness = makeHarness(policy: .snapMidStroke)
+        harness.controller.strokeBegan()
+
+        let filler = (0..<4_000).map { CGPoint(x: CGFloat($0 % 400), y: CGFloat($0 / 400)) }
+        harness.controller.strokeContinued(points: timedPoints(filler, zoomScale: 1))
+        XCTAssertEqual(
+            harness.controller.capturedContentPoints.count,
+            4_000,
+            "a stroke under the cap should still be captured"
+        )
+
+        harness.controller.strokeContinued(
+            points: timedPoints(Array(filler.prefix(200)), zoomScale: 1)
+        )
+        XCTAssertTrue(
+            harness.controller.capturedContentPoints.isEmpty,
+            "outgrowing the cap should drop the capture rather than trim its front"
+        )
+
+        // Recognition stays off for the rest of the stroke, even for a shape it would have taken.
+        harness.controller.strokeContinued(
+            points: timedPoints(recognizableLinePoints(), zoomScale: 1)
+        )
+        XCTAssertTrue(harness.controller.capturedContentPoints.isEmpty)
+
+        harness.controller.dwellFired()
+        await drainMainQueue()
+        XCTAssertTrue(
+            shapeElements(in: harness.store).isEmpty,
+            "an abandoned capture must not snap a shape"
+        )
+        XCTAssertTrue(
+            harness.canvasView.drawingGestureRecognizer.isEnabled,
+            "giving up on recognition must leave PencilKit free to keep inking"
+        )
+
+        // The next stroke starts clean.
+        harness.controller.strokeEnded(cancelled: false)
+        harness.controller.strokeBegan()
+        harness.controller.strokeContinued(
+            points: timedPoints(recognizableLinePoints(), zoomScale: 1)
+        )
+        harness.controller.dwellFired()
+        await drainMainQueue()
+        XCTAssertEqual(
+            shapeElements(in: harness.store).count,
+            1,
+            "the abandonment flag must not survive into the next stroke"
+        )
+    }
+
+    func testRecognizerDisableWaitsForPenLift() {
+        let harness = makeHarness(policy: .snapMidStroke)
+        let coordinator = ShapeSnapSurface.Coordinator(controller: harness.controller)
+
+        coordinator.syncInstallation()
+        XCTAssertTrue(
+            coordinator.recognizer.isEnabled,
+            "an ink tool should switch the observer on"
+        )
+
+        coordinator.recognizer.onStrokeBegan?()
+        harness.controller.isEnabled = false
+        coordinator.syncInstallation()
+        XCTAssertTrue(
+            coordinator.recognizer.isEnabled,
+            "disabling mid-stroke would cancel the touch and strand strokeEnded's teardown"
+        )
+
+        coordinator.recognizer.onStrokeEnded?(false)
+        XCTAssertFalse(
+            coordinator.recognizer.isEnabled,
+            "the pen lift is where a pending disable takes effect"
+        )
+    }
+
     private func makeHarness(
         policy: ShapeSnapPolicy,
         inkConfig: InkToolConfig = ToolPreferences.default.pen
@@ -587,5 +769,14 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         let store: CanvasElementsStore
         let undoManager: UndoManager
         let controller: ShapeSnapController
+    }
+
+    /// The controller only holds its canvas and store weakly, so the test has to keep them alive.
+    private struct SelectionHarness {
+        let canvasView: PKCanvasView
+        let coordinator: PencilCanvasView.Coordinator
+        let store: CanvasElementsStore
+        let undoManager: UndoManager
+        let controller: CanvasSelectionController
     }
 }

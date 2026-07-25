@@ -53,6 +53,9 @@ final class ShapeSnapController {
     }
 
     private var lineAdjustState: LineAdjustState?
+    /// Set once a stroke outgrows `capturePointLimit`: recognition is off for the
+    /// rest of that stroke, and `capturedContentPoints` stays empty.
+    private var hasAbandonedCapture = false
     private var dwellScheduleGeneration = 0
     private static let capturePointLimit = 4_096
     private static let captureBoundsInflation: CGFloat = 20
@@ -69,6 +72,7 @@ final class ShapeSnapController {
         cancelPendingDwell()
         isTrackingStroke = true
         hasSnappedThisStroke = false
+        hasAbandonedCapture = false
         pendingShapeToCommitOnLift = nil
         pendingCaptureBoundingBox = nil
     }
@@ -133,7 +137,20 @@ final class ShapeSnapController {
             return
         }
 
-        guard !hasSnappedThisStroke else { return }
+        guard !hasSnappedThisStroke, !hasAbandonedCapture else { return }
+
+        // A stroke this long is a scribble, not a shape. Trimming the front of the
+        // capture would only pretend otherwise: `isClosedStroke` compares the first
+        // and last captured points, so a trimmed stroke could never read as closed.
+        // Give up on recognition for the rest of the stroke — PencilKit keeps inking
+        // it, we just stop watching.
+        guard capturedContentPoints.count + points.count <= Self.capturePointLimit else {
+            hasAbandonedCapture = true
+            capturedContentPoints.removeAll(keepingCapacity: false)
+            detector.reset()
+            cancelPendingDwell()
+            return
+        }
 
         var contentPoints: [CGPoint] = []
         contentPoints.reserveCapacity(points.count)
@@ -147,10 +164,6 @@ final class ShapeSnapController {
         }
 
         capturedContentPoints.append(contentsOf: contentPoints)
-        let excessPointCount = capturedContentPoints.count - Self.capturePointLimit
-        if excessPointCount > 0 {
-            capturedContentPoints.removeFirst(excessPointCount)
-        }
 
         guard let stationarySince = detector.stationarySince else {
             cancelPendingDwell()
@@ -454,6 +467,7 @@ final class ShapeSnapController {
         capturedContentPoints.removeAll(keepingCapacity: true)
         isTrackingStroke = false
         hasSnappedThisStroke = false
+        hasAbandonedCapture = false
         pendingShapeToCommitOnLift = nil
         pendingCaptureBoundingBox = nil
         lineAdjustState = nil

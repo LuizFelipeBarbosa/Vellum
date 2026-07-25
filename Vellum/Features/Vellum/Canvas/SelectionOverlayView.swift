@@ -196,6 +196,14 @@ struct SelectionOverlayView: View {
                     .accessibilityIdentifier("vellum-shape-vertex-handle-\(index)")
             }
         }
+        // Swapping the selected shape under an in-flight drag cancels the gesture, and the
+        // handles going away does the same; either way `.onEnded` never runs.
+        .onChange(of: element.id) { _, _ in
+            releaseStrandedVertexDrag()
+        }
+        .onDisappear {
+            releaseStrandedVertexDrag()
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Shape vertex handles")
         .accessibilityIdentifier("vellum-shape-vertex-handles")
@@ -208,14 +216,16 @@ struct SelectionOverlayView: View {
     ) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.coordinateSpaceName))
             .onChanged { value in
-                if activeVertexIndex == nil {
+                // A cancelled gesture never reports `.onEnded`, so `activeVertexIndex` can
+                // outlive its drag. Rather than dead-end every other handle, let a fresh touch
+                // take the drag over — `beginVertexDrag` drops whatever was still in flight.
+                if activeVertexIndex != vertexIndex {
                     activeVertexIndex = vertexIndex
                     controller.beginVertexDrag(
                         elementID: elementID,
                         vertexIndex: vertexIndex
                     )
                 }
-                guard activeVertexIndex == vertexIndex else { return }
                 controller.setVertexPosition(value.location)
             }
             .onEnded { _ in
@@ -223,6 +233,15 @@ struct SelectionOverlayView: View {
                 controller.endVertexDrag()
                 activeVertexIndex = nil
             }
+    }
+
+    /// Lets go of a drag SwiftUI cancelled: without this the stale index blocks every other
+    /// handle and the controller stays in its dragging state, which hides the rotation handle
+    /// for good. `endVertexDrag` commits whatever the drag already wrote and is a no-op when
+    /// no drag is in flight.
+    private func releaseStrandedVertexDrag() {
+        activeVertexIndex = nil
+        controller.endVertexDrag()
     }
 
     private func vertexSummary(_ vertices: [CGPoint]) -> String {

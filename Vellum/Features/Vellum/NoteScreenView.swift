@@ -377,9 +377,11 @@ struct NoteScreenView: View {
                     canvasReference: canvasReference,
                     elementsStore: model.canvasElements,
                     selectionController: selectionController,
-                    // While Select is already active the capture surface owns taps, including
-                    // tapping away to deselect; two tap handlers on one canvas would race.
-                    isEnabled: selectedTool != .eraser && selectedTool != .select,
+                    // Only the ink tools borrow a tap for shape selection. While Select is
+                    // already active its capture surface owns taps, including tapping away to
+                    // deselect, and two tap handlers on one canvas would race; the eraser and
+                    // Text each answer their own taps instead.
+                    isEnabled: selectedTool.isInkTool,
                     onShapeSelected: {
                         if selectedTool != .select {
                             toolBorrowedByShapeTap = selectedTool

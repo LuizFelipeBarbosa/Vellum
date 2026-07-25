@@ -209,6 +209,83 @@ final class ShapeEraserTests: XCTestCase {
         XCTAssertFalse(harness.undoManager.canUndo)
     }
 
+    func testWideningTheEraserMidDragErasesAShapeTheNarrowTipMissed() {
+        let shape = makePolylineShape(
+            frame: CanvasRect(x: 100, y: 100, width: 120, height: 40)
+        )
+        let harness = makeHarness(
+            elements: [shape],
+            eraserConfig: EraserConfig(mode: .partial, width: 8)
+        )
+        let samplePoint = CGPoint(x: 160, y: 134)
+
+        harness.eraser.dragBegan()
+        harness.eraser.dragSample(at: samplePoint)
+        XCTAssertEqual(harness.store.elements, [shape])
+
+        harness.eraser.eraserConfig = EraserConfig(mode: .partial, width: 60)
+        harness.eraser.dragSample(at: samplePoint)
+
+        XCTAssertTrue(
+            harness.store.elements.isEmpty,
+            "the wider tip must be applied mid-drag, not left stale from the first sample"
+        )
+        harness.eraser.dragEnded()
+        XCTAssertEqual(harness.undoManager.undoActionName, "Erase Shapes")
+    }
+
+    func testDragErasesARotatedShapeAwayFromItsUnrotatedFrame() {
+        // Rotating the horizontal line a quarter turn stands it up outside its own frame,
+        // so a swipe near the top of the rotated line must still register.
+        let shape = makePolylineShape(
+            frame: CanvasRect(x: 100, y: 100, width: 120, height: 40),
+            rotation: .pi / 2
+        )
+        let harness = makeHarness(
+            elements: [shape],
+            eraserConfig: EraserConfig(mode: .partial, width: 20)
+        )
+
+        harness.eraser.dragBegan()
+        for x in stride(from: CGFloat(120), through: 200, by: 20) {
+            harness.eraser.dragSample(at: CGPoint(x: x, y: 70))
+        }
+        harness.eraser.dragEnded()
+
+        XCTAssertTrue(harness.store.elements.isEmpty)
+        XCTAssertEqual(harness.undoManager.undoActionName, "Erase Shapes")
+    }
+
+    func testHitTestPicksTheOverlappingShapeDrawnOnTop() {
+        let frame = CanvasRect(x: 100, y: 100, width: 120, height: 40)
+        let polyline = makePolylineShape(frame: frame)
+        let ellipse = makeEllipseShape(frame: frame)
+        let extraRadius: CGFloat = 12
+        let sharedPoint = CGPoint(x: 100, y: 120)
+        XCTAssertTrue(shapeHitPath(for: polyline, eraserRadius: extraRadius).contains(sharedPoint))
+        XCTAssertTrue(shapeHitPath(for: ellipse, eraserRadius: extraRadius).contains(sharedPoint))
+
+        let topOfPolyline = ShapeHitTester.hitTest(
+            elements: [polyline, ellipse],
+            at: sharedPoint,
+            minimumHitWidth: 4,
+            extraRadius: extraRadius
+        )
+        let topOfEllipse = ShapeHitTester.hitTest(
+            elements: [ellipse, polyline],
+            at: sharedPoint,
+            minimumHitWidth: 4,
+            extraRadius: extraRadius
+        )
+
+        XCTAssertEqual(
+            topOfPolyline?.id,
+            ellipse.id,
+            "elements paint in array order, so the later one is on top and wins the tap"
+        )
+        XCTAssertEqual(topOfEllipse?.id, polyline.id)
+    }
+
     private func makeHarness(
         elements: [CanvasElement],
         eraserConfig: EraserConfig,
@@ -247,7 +324,10 @@ final class ShapeEraserTests: XCTestCase {
         )
     }
 
-    private func makePolylineShape(frame: CanvasRect) -> CanvasElement {
+    private func makePolylineShape(
+        frame: CanvasRect,
+        rotation: Double = 0
+    ) -> CanvasElement {
         CanvasElement(
             content: .shape(
                 ShapeContent(
@@ -262,7 +342,8 @@ final class ShapeEraserTests: XCTestCase {
                     strokeWidth: 4
                 )
             ),
-            frame: frame
+            frame: frame,
+            rotation: rotation
         )
     }
 

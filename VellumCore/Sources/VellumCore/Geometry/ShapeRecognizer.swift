@@ -31,6 +31,11 @@ public struct ShapeRecognizerConfig: Sendable {
     /// corners. Corner detection still gates the result: a stroke too corner-rich to be a shape
     /// is rejected rather than straightened, so handwriting under a false dwell keeps its ink.
     public var straightensOpenPolylines: Bool
+    /// Corner ceiling for the straightening path only, deliberately far tighter than `maxCorners`
+    /// because straightening throws away everything between the endpoints. A mid-word pause can
+    /// read as a dwell, and flattening a cursive fragment to a chord is unrecoverable, so anything
+    /// this corner-rich is rejected and keeps its ink. Ignored when straightening is off.
+    public var maxStraightenedCorners: Int
 
     public static let `default` = ShapeRecognizerConfig()
 
@@ -48,7 +53,8 @@ public struct ShapeRecognizerConfig: Sendable {
         minPoints: Int = 8,
         minDiagonal: CGFloat = 16,
         squareAxisRatio: CGFloat = 0.85,
-        straightensOpenPolylines: Bool = true
+        straightensOpenPolylines: Bool = true,
+        maxStraightenedCorners: Int = 4
     ) {
         self.dwellTailTolerance = dwellTailTolerance
         self.resampleSpacing = resampleSpacing
@@ -64,6 +70,7 @@ public struct ShapeRecognizerConfig: Sendable {
         self.minDiagonal = minDiagonal
         self.squareAxisRatio = squareAxisRatio
         self.straightensOpenPolylines = straightensOpenPolylines
+        self.maxStraightenedCorners = maxStraightenedCorners
     }
 }
 
@@ -134,7 +141,14 @@ public enum ShapeRecognizer {
             if corners.isEmpty {
                 return fitLine(points: outline, config: config)
             }
-            guard corners.count <= maximumCorners,
+            // Straightening answers to its own tighter ceiling: keeping an L or a V's corners is
+            // cheap to undo, collapsing a word to a chord is not. Over the ceiling the stroke is
+            // rejected outright rather than falling back to an un-straightened polyline, because
+            // the reason it failed is that it does not look like a shape at all.
+            let openStrokeCeiling = config.straightensOpenPolylines
+                ? max(0, config.maxStraightenedCorners)
+                : maximumCorners
+            guard corners.count <= openStrokeCeiling,
                   let first = simplified.first,
                   let last = simplified.last else {
                 return nil
