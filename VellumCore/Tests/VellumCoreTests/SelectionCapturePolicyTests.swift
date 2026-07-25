@@ -3,51 +3,53 @@ import Testing
 
 @Suite("Selection capture policy")
 struct SelectionCapturePolicyTests {
-    @Test("Pencil drags are always allowed")
-    func pencilDragsAreAlwaysAllowed() {
-        for insideSelection in [false, true] {
+    @Test("Any pointer moves an existing selection, with or without finger capture")
+    func anyPointerMovesExistingSelection() {
+        for pointer in [CapturePointerKind.pencil, .finger] {
             for allowsFingerCapture in [false, true] {
                 #expect(
-                    SelectionCapturePolicy.allowsDrag(
-                        pointer: .pencil,
-                        insideSelection: insideSelection,
+                    SelectionCapturePolicy.dragIntent(
+                        pointer: pointer,
+                        hasSelection: true,
                         allowsFingerCapture: allowsFingerCapture
-                    )
+                    ) == .move
                 )
             }
         }
     }
 
-    @Test("Finger drags inside a selection are allowed for moves")
-    func fingerDragsInsideSelectionAreAllowed() {
-        #expect(
-            SelectionCapturePolicy.allowsDrag(
-                pointer: .finger,
-                insideSelection: true,
-                allowsFingerCapture: false
+    @Test("Pencil drags start a capture when nothing is selected")
+    func pencilDragsCaptureWithoutSelection() {
+        for allowsFingerCapture in [false, true] {
+            #expect(
+                SelectionCapturePolicy.dragIntent(
+                    pointer: .pencil,
+                    hasSelection: false,
+                    allowsFingerCapture: allowsFingerCapture
+                ) == .capture
             )
-        )
+        }
     }
 
-    @Test("Finger drags outside a selection are allowed when finger capture is enabled")
-    func fingerDragsOutsideSelectionAreAllowedWhenEnabled() {
+    @Test("Finger drags start a capture with nothing selected when finger capture is enabled")
+    func fingerDragsCaptureWhenEnabled() {
         #expect(
-            SelectionCapturePolicy.allowsDrag(
+            SelectionCapturePolicy.dragIntent(
                 pointer: .finger,
-                insideSelection: false,
+                hasSelection: false,
                 allowsFingerCapture: true
-            )
+            ) == .capture
         )
     }
 
-    @Test("Finger drags outside a selection are denied when finger capture is disabled")
-    func fingerDragsOutsideSelectionAreDeniedWhenDisabled() {
+    @Test("Finger drags scroll the canvas with nothing selected when finger capture is disabled")
+    func fingerDragsFallThroughWhenDisabled() {
         #expect(
-            !SelectionCapturePolicy.allowsDrag(
+            SelectionCapturePolicy.dragIntent(
                 pointer: .finger,
-                insideSelection: false,
+                hasSelection: false,
                 allowsFingerCapture: false
-            )
+            ) == nil
         )
     }
 }
