@@ -18,6 +18,7 @@ struct NoteScreenView: View {
     @State private var lastNonNilTool: (any PKTool)?
     @State private var canvasReference = NoteCanvasReference()
     @State private var selectionController = CanvasSelectionController()
+    @State private var shapeSnapController = ShapeSnapController()
     @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
     @State private var canvasSize: CGSize = .zero
     @State private var pageState = NotePageState()
@@ -91,6 +92,7 @@ struct NoteScreenView: View {
                 app: app,
                 canvasReference: canvasReference,
                 selectionController: selectionController,
+                shapeSnapController: shapeSnapController,
                 pageState: pageState,
                 selectedTool: $selectedTool,
                 cacheCurrentTool: cacheCurrentTool,
@@ -264,6 +266,27 @@ struct NoteScreenView: View {
                 )
                 .clipped()
 
+                ShapeElementsLayer(
+                    store: model.canvasElements,
+                    viewport: canvasViewport
+                )
+                .frame(
+                    width: PageLayout.contentWidth,
+                    height: pageState.contentHeight,
+                    alignment: .topLeading
+                )
+                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
+                .offset(
+                    x: -canvasViewport.contentOffset.x,
+                    y: -canvasViewport.contentOffset.y
+                )
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    alignment: .topLeading
+                )
+                .clipped()
+
                 PencilCanvasView(
                     drawingData: model.drawingData,
                     onDrawingChanged: { data in
@@ -316,6 +339,35 @@ struct NoteScreenView: View {
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
 
+                ShapeSnapSurface(
+                    controller: shapeSnapController,
+                    isEnabled: selectedTool.isInkTool,
+                    inkConfig: selectedTool.inkConfigKeyPath.map {
+                        app.toolPreferences.preferences[keyPath: $0]
+                    },
+                    isDrawingEnabled: selectedTool.usesDrawingGesture
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .allowsHitTesting(false)
+
+                ShapeEraserSurface(
+                    canvasReference: canvasReference,
+                    elementsStore: model.canvasElements,
+                    eraserConfig: app.toolPreferences.preferences.eraser,
+                    isEnabled: selectedTool == .eraser
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .allowsHitTesting(false)
+
+                ShapeTapSelectionSurface(
+                    canvasReference: canvasReference,
+                    elementsStore: model.canvasElements,
+                    selectionController: selectionController,
+                    isEnabled: selectedTool != .eraser
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .allowsHitTesting(false)
+
                 TextElementsLayer(
                     store: model.canvasElements,
                     textDefaults: app.toolPreferences.preferences.text,
@@ -342,7 +394,9 @@ struct NoteScreenView: View {
                 SelectionOverlayView(
                     controller: selectionController,
                     selectionMode: app.toolPreferences.preferences.selection.mode,
-                    isActive: selectedTool == .select
+                    isActive: selectionController.selection != nil
+                        || selectedTool == .select,
+                    isSelectToolActive: selectedTool == .select
                 )
                 .frame(
                     width: PageLayout.contentWidth,
@@ -856,6 +910,7 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
     let app: VellumAppModel
     let canvasReference: NoteCanvasReference
     let selectionController: CanvasSelectionController
+    let shapeSnapController: ShapeSnapController
     let pageState: NotePageState
     @Binding var selectedTool: ToolID
     let cacheCurrentTool: () -> Void
@@ -870,6 +925,8 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                 model.canvasElements.canvasReference = canvasReference
                 selectionController.canvasReference = canvasReference
                 selectionController.elementsStore = model.canvasElements
+                shapeSnapController.canvasReference = canvasReference
+                shapeSnapController.elementsStore = model.canvasElements
                 model.canvasElements.onSnapshotApplied = { [weak selectionController] in
                     selectionController?.externalDrawingDidChange()
                 }

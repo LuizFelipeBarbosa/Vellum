@@ -1,0 +1,223 @@
+import Darwin
+import XCTest
+
+@MainActor
+enum ShapeFlowTestHelpers {
+    /// A synthesized single-touch gesture: press at `start`, visit each move in order,
+    /// then lift. Offsets are seconds from the press. Repeat a point to hold still —
+    /// XCTest interpolates motion between distinct points.
+    struct PointerGesture {
+        var start: CGPoint
+        var moves: [(point: CGPoint, offset: TimeInterval)]
+        var liftOffset: TimeInterval
+    }
+
+    /// A built-but-not-yet-synthesized event record. The wrapped ObjC object is only ever
+    /// handed to `synthesize`, so crossing a queue boundary with it is safe.
+    struct GestureRecord: @unchecked Sendable {
+        fileprivate let record: AnyObject
+        /// The record does not keep the pointer path alive on its own.
+        fileprivate let path: AnyObject
+    }
+
+    /// Builds an XCTest pointer-event record without synthesizing it, so the caller can
+    /// dispatch the (blocking) synthesis and observe the app while the touch is down.
+    /// Returns nil if the private synthesis API is unavailable.
+    static func makeGestureRecord(
+        named name: String,
+        gesture: PointerGesture,
+        targetProcessID: Int32
+    ) -> GestureRecord? {
+        guard let messageSend = dlsym(dlopen(nil, RTLD_NOW), "objc_msgSend"),
+              let pathClass = NSClassFromString("XCPointerEventPath"),
+              let recordClass = NSClassFromString("XCSynthesizedEventRecord") else {
+            return nil
+        }
+
+        typealias AllocateMessage = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>
+        typealias PointInitializerMessage = @convention(c) (
+            AnyObject, Selector, CGPoint, TimeInterval
+        ) -> Unmanaged<AnyObject>
+        typealias ObjectInitializerMessage = @convention(c) (
+            AnyObject, Selector, AnyObject
+        ) -> Unmanaged<AnyObject>
+        typealias DoubleMessage = @convention(c) (AnyObject, Selector, TimeInterval) -> Void
+        typealias PointDoubleMessage = @convention(c) (
+            AnyObject, Selector, CGPoint, TimeInterval
+        ) -> Void
+        typealias ObjectMessage = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+        typealias IntegerMessage = @convention(c) (AnyObject, Selector, Int64) -> Void
+
+        let allocate = unsafeBitCast(messageSend, to: AllocateMessage.self)
+        let initializePath = unsafeBitCast(messageSend, to: PointInitializerMessage.self)
+        let initializeRecord = unsafeBitCast(messageSend, to: ObjectInitializerMessage.self)
+        let sendDouble = unsafeBitCast(messageSend, to: DoubleMessage.self)
+        let sendPointDouble = unsafeBitCast(messageSend, to: PointDoubleMessage.self)
+        let sendObject = unsafeBitCast(messageSend, to: ObjectMessage.self)
+        let sendInteger = unsafeBitCast(messageSend, to: IntegerMessage.self)
+
+        // takeUnretainedValue throughout: `init` consumes the +1 from `alloc`, so taking
+        // that +1 as well would over-release the object once these temporaries die.
+        // Over-retaining instead leaks one object per gesture, which a test can afford.
+        let path = initializePath(
+            allocate(pathClass, NSSelectorFromString("alloc")).takeUnretainedValue(),
+            NSSelectorFromString("initForTouchAtPoint:offset:"),
+            gesture.start,
+            0
+        ).takeUnretainedValue()
+        sendDouble(path, NSSelectorFromString("pressDownAtOffset:"), 0)
+        for move in gesture.moves {
+            sendPointDouble(
+                path,
+                NSSelectorFromString("moveToPoint:atOffset:"),
+                move.point,
+                move.offset
+            )
+        }
+        sendDouble(path, NSSelectorFromString("liftUpAtOffset:"), gesture.liftOffset)
+
+        let record = initializeRecord(
+            allocate(recordClass, NSSelectorFromString("alloc")).takeUnretainedValue(),
+            NSSelectorFromString("initWithName:"),
+            name as NSString
+        ).takeUnretainedValue()
+        sendInteger(
+            record,
+            NSSelectorFromString("setTargetProcessID:"),
+            Int64(targetProcessID)
+        )
+        sendObject(record, NSSelectorFromString("addPointerEventPath:"), path)
+        return GestureRecord(record: record, path: path)
+    }
+
+    /// Blocks for the full duration of the gesture. Safe to call off the main thread so the
+    /// test can query the app mid-gesture.
+    nonisolated static func synthesize(_ record: GestureRecord) -> Bool {
+        guard let messageSend = dlsym(dlopen(nil, RTLD_NOW), "objc_msgSend") else {
+            return false
+        }
+        typealias SynthesizeMessage = @convention(c) (
+            AnyObject, Selector, UnsafeMutablePointer<AnyObject?>?
+        ) -> Bool
+        let synthesize = unsafeBitCast(messageSend, to: SynthesizeMessage.self)
+        var error: AnyObject?
+        return synthesize(
+            record.record,
+            NSSelectorFromString("synthesizeWithError:"),
+            &error
+        )
+    }
+
+    static func processID(of app: XCUIApplication) -> Int32 {
+        guard let messageSend = dlsym(dlopen(nil, RTLD_NOW), "objc_msgSend") else { return 0 }
+        typealias IntegerReturnMessage = @convention(c) (AnyObject, Selector) -> Int32
+        let readInteger = unsafeBitCast(messageSend, to: IntegerReturnMessage.self)
+        return readInteger(app, NSSelectorFromString("processID"))
+    }
+
+    static func openSiteNotes(in app: XCUIApplication) {
+        let card = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH[c] 'Site notes'")
+        ).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 15), "Site notes card not found")
+        card.tap()
+    }
+
+    static func selectTool(
+        _ name: String,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let expandToolbar = app.buttons["Expand toolbar"]
+        if expandToolbar.exists {
+            expandToolbar.tap()
+        }
+
+        let tool = app.buttons[name]
+        XCTAssertTrue(
+            tool.waitForExistence(timeout: 5),
+            "\(name) tool not found",
+            file: file,
+            line: line
+        )
+        tool.tap()
+    }
+
+    static func clearShapeDrawingArea(
+        in app: XCUIApplication,
+        window: XCUIElement,
+        selectionStart: CGVector,
+        selectionEnd: CGVector
+    ) {
+        selectTool("Select", in: app)
+        selectTool("Box", in: app)
+
+        window.coordinate(withNormalizedOffset: selectionStart).press(
+            forDuration: 0.05,
+            thenDragTo: window.coordinate(withNormalizedOffset: selectionEnd)
+        )
+
+        let deleteSelection = app.buttons["Delete selection"]
+        if deleteSelection.waitForExistence(timeout: 1) {
+            deleteSelection.tap()
+        }
+    }
+
+    static func shapeCount(
+        of element: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Int {
+        if let value = element.value as? String, let count = Int(value) {
+            return count
+        }
+        if let value = element.value as? NSNumber {
+            return value.intValue
+        }
+        XCTFail(
+            "shape count has unexpected value: \(String(describing: element.value))",
+            file: file,
+            line: line
+        )
+        return -1
+    }
+
+    static func accessibilityValue(
+        of element: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> String {
+        guard let value = element.value as? String else {
+            XCTFail(
+                "shape vertex summary has unexpected value: "
+                    + String(describing: element.value),
+                file: file,
+                line: line
+            )
+            return ""
+        }
+        return value
+    }
+
+    static func vertices(
+        from summary: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> [CGPoint] {
+        summary.split(separator: ";").compactMap { encodedPoint in
+            let coordinates = encodedPoint.split(separator: ",")
+            guard coordinates.count == 2,
+                  let x = Double(coordinates[0]),
+                  let y = Double(coordinates[1]) else {
+                XCTFail(
+                    "invalid shape vertex summary: \(summary)",
+                    file: file,
+                    line: line
+                )
+                return nil
+            }
+            return CGPoint(x: x, y: y)
+        }
+    }
+}
