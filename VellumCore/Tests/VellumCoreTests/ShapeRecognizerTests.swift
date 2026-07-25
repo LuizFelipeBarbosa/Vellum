@@ -49,8 +49,8 @@ struct ShapeRecognizerTests {
         #expect(ShapeRecognizer.recognize(points: points) == nil)
     }
 
-    @Test("An open V emits one corner between its endpoints")
-    func recognizesOpenV() throws {
+    @Test("An open V straightens to a line between its endpoints by default")
+    func straightensOpenV() throws {
         let truth = [
             CGPoint(x: 10, y: 10),
             CGPoint(x: 70, y: 80),
@@ -61,12 +61,12 @@ struct ShapeRecognizerTests {
             from: ShapeRecognizer.recognize(points: stroke)
         )
 
-        #expect(vertices.count == 3)
-        expectVertices(vertices, near: truth, tolerance: 4)
+        #expect(vertices.count == 2)
+        expectVertices(vertices, near: [truth[0], truth[2]], tolerance: 4)
     }
 
-    @Test("An open W emits three corners between its endpoints")
-    func recognizesOpenW() throws {
+    @Test("An open W straightens to a line between its endpoints by default")
+    func straightensOpenW() throws {
         let truth = [
             CGPoint(x: 10, y: 10),
             CGPoint(x: 50, y: 70),
@@ -77,6 +77,62 @@ struct ShapeRecognizerTests {
         let stroke = jittered(sampleChain(truth, spacing: 3), amplitude: 0.5, seed: 11)
         let vertices = try openPolylineVertices(
             from: ShapeRecognizer.recognize(points: stroke)
+        )
+
+        #expect(vertices.count == 2)
+        expectVertices(vertices, near: [truth[0], truth[4]], tolerance: 4)
+    }
+
+    @Test("A closed shape keeps its corners while open strokes straighten")
+    func straighteningLeavesClosedShapesAlone() throws {
+        let truth = [
+            CGPoint(x: 20, y: 20),
+            CGPoint(x: 140, y: 30),
+            CGPoint(x: 80, y: 130),
+        ]
+        let stroke = jitteredClosedPolygon(truth, amplitude: 0.6, seed: 12)
+        let vertices = try closedPolylineVertices(
+            from: ShapeRecognizer.recognize(points: stroke)
+        )
+
+        #expect(vertices.count == 3)
+        expectEachTruthVertexHasMatch(truth, in: vertices, tolerance: 5)
+    }
+
+    @Test("An open V emits one corner between its endpoints when straightening is off")
+    func recognizesOpenV() throws {
+        let truth = [
+            CGPoint(x: 10, y: 10),
+            CGPoint(x: 70, y: 80),
+            CGPoint(x: 135, y: 12),
+        ]
+        let stroke = jittered(sampleChain(truth, spacing: 3), amplitude: 0.6, seed: 10)
+        let vertices = try openPolylineVertices(
+            from: ShapeRecognizer.recognize(
+                points: stroke,
+                config: ShapeRecognizerConfig(straightensOpenPolylines: false)
+            )
+        )
+
+        #expect(vertices.count == 3)
+        expectVertices(vertices, near: truth, tolerance: 4)
+    }
+
+    @Test("An open W emits three corners between its endpoints when straightening is off")
+    func recognizesOpenW() throws {
+        let truth = [
+            CGPoint(x: 10, y: 10),
+            CGPoint(x: 50, y: 70),
+            CGPoint(x: 90, y: 10),
+            CGPoint(x: 130, y: 70),
+            CGPoint(x: 170, y: 10),
+        ]
+        let stroke = jittered(sampleChain(truth, spacing: 3), amplitude: 0.5, seed: 11)
+        let vertices = try openPolylineVertices(
+            from: ShapeRecognizer.recognize(
+                points: stroke,
+                config: ShapeRecognizerConfig(straightensOpenPolylines: false)
+            )
         )
 
         #expect(vertices.count == 5)

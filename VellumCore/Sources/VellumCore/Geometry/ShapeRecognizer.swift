@@ -24,6 +24,10 @@ public struct ShapeRecognizerConfig: Sendable {
     public var maxCorners: Int
     public var minPoints: Int
     public var minDiagonal: CGFloat
+    /// Collapse an open stroke to a straight line between its endpoints instead of keeping its
+    /// corners. Corner detection still gates the result: a stroke too corner-rich to be a shape
+    /// is rejected rather than straightened, so handwriting under a false dwell keeps its ink.
+    public var straightensOpenPolylines: Bool
 
     public static let `default` = ShapeRecognizerConfig()
 
@@ -39,7 +43,8 @@ public struct ShapeRecognizerConfig: Sendable {
         rightAngleSnapDegrees: CGFloat = 12,
         maxCorners: Int = 12,
         minPoints: Int = 8,
-        minDiagonal: CGFloat = 16
+        minDiagonal: CGFloat = 16,
+        straightensOpenPolylines: Bool = true
     ) {
         self.dwellTailTolerance = dwellTailTolerance
         self.resampleSpacing = resampleSpacing
@@ -53,6 +58,7 @@ public struct ShapeRecognizerConfig: Sendable {
         self.maxCorners = maxCorners
         self.minPoints = minPoints
         self.minDiagonal = minDiagonal
+        self.straightensOpenPolylines = straightensOpenPolylines
     }
 }
 
@@ -118,6 +124,10 @@ public enum ShapeRecognizer {
                   let first = simplified.first,
                   let last = simplified.last else {
                 return nil
+            }
+            if config.straightensOpenPolylines {
+                guard distance(first, last) > numericEpsilon else { return nil }
+                return .polyline(vertices: [first, last], isClosed: false)
             }
             return .polyline(
                 vertices: [first] + corners + [last],
