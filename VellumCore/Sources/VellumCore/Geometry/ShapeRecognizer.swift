@@ -28,14 +28,22 @@ public struct ShapeRecognizerConfig: Sendable {
     /// `circleAxisRatio` rounds a near-circular ellipse.
     public var squareAxisRatio: CGFloat
     /// Collapse an open stroke to a straight line between its endpoints instead of keeping its
-    /// corners. Corner detection still gates the result: a stroke too corner-rich to be a shape
-    /// is rejected rather than straightened, so handwriting under a false dwell keeps its ink.
+    /// corners. Only a stroke that was already near-straight qualifies: a mid-word pause can read
+    /// as a dwell, and flattening a cursive fragment to a chord is unrecoverable, so anything that
+    /// strays off that chord is rejected and keeps its ink. A deliberately drawn L or V strays far
+    /// enough to be rejected too, which is the price of never guessing wrong on handwriting.
     public var straightensOpenPolylines: Bool
     /// Corner ceiling for the straightening path only, deliberately far tighter than `maxCorners`
-    /// because straightening throws away everything between the endpoints. A mid-word pause can
-    /// read as a dwell, and flattening a cursive fragment to a chord is unrecoverable, so anything
-    /// this corner-rich is rejected and keeps its ink. Ignored when straightening is off.
+    /// because straightening throws away everything between the endpoints. It catches the dense,
+    /// low-amplitude scribble that hugs its chord closely enough to satisfy
+    /// `straightenedDeviationFraction`. Ignored when straightening is off.
     public var maxStraightenedCorners: Int
+    /// How far a stroke may stray from the line straightening would replace it with, as a fraction
+    /// of that line's length, with `lineDeviationTolerance` as the absolute floor. Looser than the
+    /// fraction `fitLine` demands of a corner-free stroke, because a stroke on this path has a real
+    /// corner to accommodate, yet far tighter than the humps of round handwriting. Ignored when
+    /// straightening is off.
+    public var straightenedDeviationFraction: CGFloat
 
     public static let `default` = ShapeRecognizerConfig()
 
@@ -54,7 +62,8 @@ public struct ShapeRecognizerConfig: Sendable {
         minDiagonal: CGFloat = 16,
         squareAxisRatio: CGFloat = 0.85,
         straightensOpenPolylines: Bool = true,
-        maxStraightenedCorners: Int = 4
+        maxStraightenedCorners: Int = 4,
+        straightenedDeviationFraction: CGFloat = 0.12
     ) {
         self.dwellTailTolerance = dwellTailTolerance
         self.resampleSpacing = resampleSpacing
@@ -71,6 +80,7 @@ public struct ShapeRecognizerConfig: Sendable {
         self.squareAxisRatio = squareAxisRatio
         self.straightensOpenPolylines = straightensOpenPolylines
         self.maxStraightenedCorners = maxStraightenedCorners
+        self.straightenedDeviationFraction = straightenedDeviationFraction
     }
 }
 
@@ -141,10 +151,12 @@ public enum ShapeRecognizer {
             if corners.isEmpty {
                 return fitLine(points: outline, config: config)
             }
-            // Straightening answers to its own tighter ceiling: keeping an L or a V's corners is
-            // cheap to undo, collapsing a word to a chord is not. Over the ceiling the stroke is
-            // rejected outright rather than falling back to an un-straightened polyline, because
-            // the reason it failed is that it does not look like a shape at all.
+            // Straightening answers to its own tighter ceiling and to a straightness gate of its
+            // own: collapsing a word to a chord is unrecoverable, so nothing that wanders off that
+            // chord is straightened, however few corners it turns out to carry. A stroke that
+            // fails either test is rejected outright rather than falling back to the polyline it
+            // was drawn as, because the reason it failed is that it does not look like a shape at
+            // all.
             let openStrokeCeiling = config.straightensOpenPolylines
                 ? max(0, config.maxStraightenedCorners)
                 : maximumCorners
@@ -154,7 +166,7 @@ public enum ShapeRecognizer {
                 return nil
             }
             if config.straightensOpenPolylines {
-                guard distance(first, last) > numericEpsilon else { return nil }
+                guard isStraightEnoughToCollapse(outline, config: config) else { return nil }
                 return .polyline(vertices: [first, last], isClosed: false)
             }
             return .polyline(
@@ -435,6 +447,36 @@ public enum ShapeRecognizer {
         let projectedFirst = project(first, ontoLineThrough: center, direction: snappedDirection)
         let projectedLast = project(last, ontoLineThrough: center, direction: snappedDirection)
         return .polyline(vertices: [projectedFirst, projectedLast], isClosed: false)
+    }
+
+    /// Whether a stroke sits close enough to the chord between its endpoints for that chord to
+    /// stand in for it, the judgement `fitLine` makes applied to the path that would otherwise
+    /// discard every corner. Read the uniformly sampled stroke rather than the simplified one:
+    /// simplification has already thrown away the detour this is here to notice.
+    private static func isStraightEnoughToCollapse(
+        _ points: [CGPoint],
+        config: ShapeRecognizerConfig
+    ) -> Bool {
+        guard let first = points.first, let last = points.last else { return false }
+
+        let chordLength = distance(first, last)
+        guard chordLength > numericEpsilon else { return false }
+
+        let direction = CGPoint(
+            x: (last.x - first.x) / chordLength,
+            y: (last.y - first.y) / chordLength
+        )
+        let maximumDeviation = points.reduce(CGFloat.zero) { currentMaximum, point in
+            let offsetX = point.x - first.x
+            let offsetY = point.y - first.y
+            let deviation = abs(offsetX * direction.y - offsetY * direction.x)
+            return max(currentMaximum, deviation)
+        }
+        let tolerance = max(
+            max(0, config.lineDeviationTolerance),
+            max(0, config.straightenedDeviationFraction) * chordLength
+        )
+        return maximumDeviation <= tolerance
     }
 
     /// RDP can make smooth high-curvature arcs look sharp. A corner must also be sharp at the

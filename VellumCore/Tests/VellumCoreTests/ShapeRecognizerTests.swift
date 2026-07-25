@@ -174,24 +174,25 @@ struct ShapeRecognizerTests {
         #expect(ShapeRecognizer.recognize(points: points) == nil)
     }
 
-    @Test("An open V straightens to a line between its endpoints by default")
-    func straightensOpenV() throws {
+    // This V used to straighten. Its apex stands 55% of the chord away from the line that would
+    // have replaced it, squarely in the range round handwriting occupies, so no gate loose enough
+    // to straighten it can leave a cursive fragment alone. Keeping the ink is the cheaper mistake.
+    @Test("An open V keeps its ink rather than straightening past its apex")
+    func keepsInkForOpenV() {
         let truth = [
             CGPoint(x: 10, y: 10),
             CGPoint(x: 70, y: 80),
             CGPoint(x: 135, y: 12),
         ]
         let stroke = jittered(sampleChain(truth, spacing: 3), amplitude: 0.6, seed: 10)
-        let vertices = try openPolylineVertices(
-            from: ShapeRecognizer.recognize(points: stroke)
-        )
 
-        #expect(vertices.count == 2)
-        expectVertices(vertices, near: [truth[0], truth[2]], tolerance: 4)
+        #expect(ShapeRecognizer.recognize(points: stroke) == nil)
     }
 
-    @Test("An open W straightens to a line between its endpoints by default")
-    func straightensOpenW() throws {
+    // Straightened until the V above stopped doing so, and rejected now for the same reason: its
+    // peaks stand 38% of the chord away.
+    @Test("An open W keeps its ink rather than straightening past its peaks")
+    func keepsInkForOpenW() {
         let truth = [
             CGPoint(x: 10, y: 10),
             CGPoint(x: 50, y: 70),
@@ -200,12 +201,43 @@ struct ShapeRecognizerTests {
             CGPoint(x: 170, y: 10),
         ]
         let stroke = jittered(sampleChain(truth, spacing: 3), amplitude: 0.5, seed: 11)
+
+        #expect(ShapeRecognizer.recognize(points: stroke) == nil)
+    }
+
+    @Test("A two-hump cursive fragment keeps its ink")
+    func keepsInkForTwoHumpCursive() {
+        let stroke = arches(count: 2, archWidth: 22, archHeight: 30)
+
+        #expect(ShapeRecognizer.recognize(points: stroke) == nil)
+    }
+
+    @Test("A wide three-hump cursive fragment keeps its ink")
+    func keepsInkForWideThreeHumpCursive() {
+        let stroke = arches(count: 3, archWidth: 50, archHeight: 25)
+
+        #expect(ShapeRecognizer.recognize(points: stroke) == nil)
+    }
+
+    @Test("A line drawn with ordinary hand wobble still straightens")
+    func straightensWobblyLine() throws {
+        let stroke = (0...120).map { index in
+            let fraction = CGFloat(index) / 120
+            return CGPoint(
+                x: 60 + 300 * fraction,
+                y: 200 + sin(fraction * 3 * .pi) * 3
+            )
+        }
         let vertices = try openPolylineVertices(
             from: ShapeRecognizer.recognize(points: stroke)
         )
 
         #expect(vertices.count == 2)
-        expectVertices(vertices, near: [truth[0], truth[4]], tolerance: 4)
+        #expect(abs(vertices[0].y - vertices[1].y) < 0.001)
+        #expect(distance(vertices[0], CGPoint(x: 60, y: 200)) < 4)
+        // Span rather than the far endpoint: at this sample density the last few points sit inside
+        // the dwell tolerance of one another and are stripped as a held tail.
+        #expect(vertices[1].x - vertices[0].x > 280)
     }
 
     @Test("An open stroke exactly at the straightening corner ceiling still straightens")
@@ -688,10 +720,34 @@ struct ShapeRecognizerTests {
     }
 
     /// An open saw-tooth carrying exactly `cornerCount` interior corners, each turn far past the
-    /// recognizer's corner angle threshold so the count is unambiguous.
+    /// recognizer's corner angle threshold so the count is unambiguous. Its teeth are shallow
+    /// enough to stay well inside the straightness gate, so what these fixtures test is the corner
+    /// ceiling and nothing else.
     private func zigzag(cornerCount: Int) -> [CGPoint] {
         (0...(cornerCount + 1)).map { index in
-            CGPoint(x: 10 + 40 * CGFloat(index), y: index.isMultiple(of: 2) ? 10 : 70)
+            CGPoint(x: 10 + 40 * CGFloat(index), y: index.isMultiple(of: 2) ? 10 : 26)
+        }
+    }
+
+    /// A row of upside-down-U humps on a baseline, the shape round handwriting makes and the one
+    /// straightening must never flatten.
+    private func arches(
+        count: Int,
+        archWidth: CGFloat,
+        archHeight: CGFloat,
+        startX: CGFloat = 60,
+        baseline: CGFloat = 200,
+        stepsPerArch: Int = 24
+    ) -> [CGPoint] {
+        (0..<count).flatMap { arch -> [CGPoint] in
+            let firstStep = arch == 0 ? 0 : 1
+            return (firstStep...stepsPerArch).map { step in
+                let fraction = CGFloat(step) / CGFloat(stepsPerArch)
+                return CGPoint(
+                    x: startX + (CGFloat(arch) + fraction) * archWidth,
+                    y: baseline - sin(fraction * .pi) * archHeight
+                )
+            }
         }
     }
 
