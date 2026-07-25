@@ -7,12 +7,23 @@ struct ShapeLineAdjusterTests {
     private let pivot = CGPoint(x: 40, y: 60)
     private let accuracy: CGFloat = 0.0001
 
+    @Test("The drag tolerance matches the one the recognizer snaps a fresh line with")
+    func dragToleranceMatchesRecognition() {
+        #expect(
+            LineAdjustConfig.default.axisSnapDegrees
+                == ShapeRecognizerConfig.default.axisAlignSnapDegrees
+        )
+    }
+
     @Test("Axis snapping respects tolerance in all four directions")
     func axisSnapToleranceInAllDirections() {
         let axisAngles: [CGFloat] = [0, 90, 180, 270]
+        // Derived from the configured tolerance so the boundary is what is under test, not the
+        // particular number of degrees.
+        let tolerance = LineAdjustConfig.default.axisSnapDegrees
 
         for axisAngle in axisAngles {
-            let inside = point(angleDegrees: axisAngle + 3.9, length: 100)
+            let inside = point(angleDegrees: axisAngle + tolerance - 0.1, length: 100)
             let insideResult = ShapeLineAdjuster.adjustedEndpoint(
                 pivot: pivot,
                 rawPoint: inside
@@ -23,7 +34,7 @@ struct ShapeLineAdjusterTests {
                     || insideResult.point.y == pivot.y
             )
 
-            let outside = point(angleDegrees: axisAngle + 4.1, length: 100)
+            let outside = point(angleDegrees: axisAngle + tolerance + 0.1, length: 100)
             let outsideResult = ShapeLineAdjuster.adjustedEndpoint(
                 pivot: pivot,
                 rawPoint: outside

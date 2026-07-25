@@ -36,6 +36,131 @@ struct ShapeRecognizerTests {
         }
     }
 
+    @Test("A line drawn slightly off an axis is pulled onto it")
+    func snapsNearAxisLinesToTheAxis() throws {
+        let nearHorizontal = try openPolylineVertices(
+            from: ShapeRecognizer.recognize(
+                points: jittered(
+                    sampleChain(
+                        [CGPoint(x: 20, y: 60), CGPoint(x: 180, y: 68)],
+                        spacing: 3
+                    ),
+                    amplitude: 0.5,
+                    seed: 40
+                )
+            )
+        )
+        #expect(nearHorizontal.count == 2)
+        #expect(abs(nearHorizontal[1].y - nearHorizontal[0].y) < 0.001)
+
+        let nearVertical = try openPolylineVertices(
+            from: ShapeRecognizer.recognize(
+                points: jittered(
+                    sampleChain(
+                        [CGPoint(x: 60, y: 20), CGPoint(x: 52, y: 180)],
+                        spacing: 3
+                    ),
+                    amplitude: 0.5,
+                    seed: 41
+                )
+            )
+        )
+        #expect(nearVertical.count == 2)
+        #expect(abs(nearVertical[1].x - nearVertical[0].x) < 0.001)
+    }
+
+    @Test("A line well off an axis keeps the angle it was drawn at")
+    func leavesOffAxisLinesAlone() throws {
+        let start = CGPoint(x: 20, y: 30)
+        let end = CGPoint(x: 20 + 140 * cos(CGFloat.pi / 6), y: 30 + 140 * sin(CGFloat.pi / 6))
+        let vertices = try openPolylineVertices(
+            from: ShapeRecognizer.recognize(
+                points: jittered(sampleChain([start, end], spacing: 3), amplitude: 0.5, seed: 42)
+            )
+        )
+
+        #expect(vertices.count == 2)
+        let angle = atan2(vertices[1].y - vertices[0].y, vertices[1].x - vertices[0].x)
+        #expect(abs(angle - .pi / 6) < 0.05)
+    }
+
+    @Test("A square left open at the seam still closes into a square")
+    func closesAGappedSquare() throws {
+        let truth = [
+            CGPoint(x: 40, y: 40),
+            CGPoint(x: 240, y: 40),
+            CGPoint(x: 240, y: 240),
+            CGPoint(x: 40, y: 240),
+        ]
+        let stroke = jitteredOpenLoop(truth, gap: 20, amplitude: 0.6, seed: 43)
+        let vertices = try closedPolylineVertices(
+            from: ShapeRecognizer.recognize(points: stroke)
+        )
+
+        #expect(vertices.count == 4)
+        expectRightAngles(vertices, tolerance: 0.001)
+        let sides = vertices.indices.map { index in
+            distance(vertices[index], vertices[(index + 1) % vertices.count])
+        }
+        for side in sides {
+            #expect(abs(side - sides[0]) < 0.001)
+        }
+    }
+
+    @Test("A square whose stroke runs past its own start still closes into a square")
+    func closesAnOvershotSquare() throws {
+        let truth = [
+            CGPoint(x: 40, y: 40),
+            CGPoint(x: 240, y: 40),
+            CGPoint(x: 240, y: 240),
+            CGPoint(x: 40, y: 240),
+        ]
+        // Carrying on 20pt past the start doubles the path back on itself; that reversal used to
+        // read as a fifth corner, which is what turned hand-drawn squares into pentagons.
+        let stroke = jittered(
+            sampleChain(truth + [CGPoint(x: 40, y: 20)], spacing: 3),
+            amplitude: 0.6,
+            seed: 46
+        )
+        let vertices = try closedPolylineVertices(
+            from: ShapeRecognizer.recognize(points: stroke)
+        )
+
+        #expect(vertices.count == 4)
+        expectRightAngles(vertices, tolerance: 0.001)
+    }
+
+    @Test("A gapped rectangle that is not square keeps its proportions")
+    func keepsAGappedRectangleRectangular() throws {
+        let truth = [
+            CGPoint(x: 40, y: 40),
+            CGPoint(x: 280, y: 40),
+            CGPoint(x: 280, y: 140),
+            CGPoint(x: 40, y: 140),
+        ]
+        let stroke = jitteredOpenLoop(truth, gap: 20, amplitude: 0.6, seed: 44)
+        let vertices = try closedPolylineVertices(
+            from: ShapeRecognizer.recognize(points: stroke)
+        )
+
+        #expect(vertices.count == 4)
+        expectRightAngles(vertices, tolerance: 0.001)
+        let width = distance(vertices[0], vertices[1])
+        let height = distance(vertices[1], vertices[2])
+        #expect(min(width, height) / max(width, height) < 0.6)
+    }
+
+    @Test("A pentagon left open at the seam is still a pentagon")
+    func keepsAGappedPentagonFiveSided() throws {
+        let truth = regularPolygon(center: CGPoint(x: 140, y: 140), radius: 100, vertexCount: 5)
+        let stroke = jitteredOpenLoop(truth, gap: 18, amplitude: 0.5, seed: 45)
+        let vertices = try closedPolylineVertices(
+            from: ShapeRecognizer.recognize(points: stroke)
+        )
+
+        #expect(vertices.count == 5)
+    }
+
     @Test("A smooth bowed stroke is not accepted as a line or polyline")
     func rejectsBowedArc() {
         let points = (0...48).map { index in
@@ -426,6 +551,30 @@ struct ShapeRecognizerTests {
             result.append(endpoint)
         }
         return result
+    }
+
+    /// A closed outline drawn the way a hand draws one: coming back around to `gap` points short
+    /// of where it started, rather than meeting the start exactly.
+    private func jitteredOpenLoop(
+        _ vertices: [CGPoint],
+        gap: CGFloat,
+        amplitude: CGFloat,
+        seed: UInt64
+    ) -> [CGPoint] {
+        guard let first = vertices.first, let last = vertices.last else { return [] }
+        let closingLength = distance(last, first)
+        guard closingLength > gap else { return [] }
+
+        let fraction = (closingLength - gap) / closingLength
+        let stop = CGPoint(
+            x: last.x + (first.x - last.x) * fraction,
+            y: last.y + (first.y - last.y) * fraction
+        )
+        return jittered(
+            sampleChain(vertices + [stop], spacing: 3),
+            amplitude: amplitude,
+            seed: seed
+        )
     }
 
     private func jitteredClosedPolygon(

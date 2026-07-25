@@ -24,6 +24,9 @@ public struct ShapeRecognizerConfig: Sendable {
     public var maxCorners: Int
     public var minPoints: Int
     public var minDiagonal: CGFloat
+    /// Side ratio at or above which a fitted rectangle is squared off, mirroring how
+    /// `circleAxisRatio` rounds a near-circular ellipse.
+    public var squareAxisRatio: CGFloat
     /// Collapse an open stroke to a straight line between its endpoints instead of keeping its
     /// corners. Corner detection still gates the result: a stroke too corner-rich to be a shape
     /// is rejected rather than straightened, so handwriting under a false dwell keeps its ink.
@@ -44,6 +47,7 @@ public struct ShapeRecognizerConfig: Sendable {
         maxCorners: Int = 12,
         minPoints: Int = 8,
         minDiagonal: CGFloat = 16,
+        squareAxisRatio: CGFloat = 0.85,
         straightensOpenPolylines: Bool = true
     ) {
         self.dwellTailTolerance = dwellTailTolerance
@@ -58,6 +62,7 @@ public struct ShapeRecognizerConfig: Sendable {
         self.maxCorners = maxCorners
         self.minPoints = minPoints
         self.minDiagonal = minDiagonal
+        self.squareAxisRatio = squareAxisRatio
         self.straightensOpenPolylines = straightensOpenPolylines
     }
 }
@@ -92,8 +97,13 @@ public enum ShapeRecognizer {
             pathLength: pathLength,
             boundingBoxDiagonal: bounds.diagonal
         )
+        // A hand-drawn outline usually carries on a little past where it started. That tail runs
+        // back along the path, and the reversal where it turns reads as an extra corner — which
+        // is what turned drawn squares into pentagons.
+        let outline = isClosed ? trimmedOvershoot(resampled) : resampled
+
         let epsilon = max(2.5, max(0, config.rdpEpsilonFraction) * bounds.diagonal)
-        var simplified = rdpSimplify(points: resampled, epsilon: epsilon)
+        var simplified = rdpSimplify(points: outline, epsilon: epsilon)
         if isClosed,
            simplified.count > 1,
            let first = simplified.first,
@@ -107,18 +117,22 @@ public enum ShapeRecognizer {
             isClosed: isClosed,
             thresholdDegrees: config.cornerAngleThresholdDegrees
         )
-        let corners = supportedCornerVertices(
-            cornerCandidates,
-            resampledPoints: resampled,
+        let corners = mergedNeighbouringCorners(
+            supportedCornerVertices(
+                cornerCandidates,
+                resampledPoints: outline,
+                isClosed: isClosed,
+                supportDistance: epsilon,
+                thresholdDegrees: config.cornerAngleThresholdDegrees
+            ),
             isClosed: isClosed,
-            supportDistance: epsilon,
-            thresholdDegrees: config.cornerAngleThresholdDegrees
+            radius: epsilon * 2
         )
         let maximumCorners = max(0, config.maxCorners)
 
         if !isClosed {
             if corners.isEmpty {
-                return fitLine(points: resampled, config: config)
+                return fitLine(points: outline, config: config)
             }
             guard corners.count <= maximumCorners,
                   let first = simplified.first,
@@ -144,7 +158,7 @@ public enum ShapeRecognizer {
         if corners.count >= 3 {
             return .polyline(vertices: corners, isClosed: true)
         }
-        return fitEllipse(points: resampled, config: config)
+        return fitEllipse(points: outline, config: config)
     }
 
     static func finitePoints(_ points: [CGPoint]) -> [CGPoint] {
@@ -200,13 +214,11 @@ public enum ShapeRecognizer {
         return result
     }
 
-    static func isClosedStroke(
-        points: [CGPoint],
+    /// How far apart a stroke's endpoints may be and still describe a closed outline.
+    static func closureTolerance(
         pathLength: CGFloat,
         boundingBoxDiagonal: CGFloat
-    ) -> Bool {
-        guard let first = points.first, let last = points.last else { return false }
-
+    ) -> CGFloat {
         let absoluteClosureDistance: CGFloat = 12
         let pathLengthFraction: CGFloat = 0.15
         let diagonalFraction: CGFloat = 0.3
@@ -214,7 +226,84 @@ public enum ShapeRecognizer {
             pathLengthFraction * pathLength,
             diagonalFraction * boundingBoxDiagonal
         )
-        return distance(first, last) <= max(absoluteClosureDistance, relativeThreshold)
+        return max(absoluteClosureDistance, relativeThreshold)
+    }
+
+    static func isClosedStroke(
+        points: [CGPoint],
+        pathLength: CGFloat,
+        boundingBoxDiagonal: CGFloat
+    ) -> Bool {
+        guard let first = points.first, let last = points.last else { return false }
+
+        return distance(first, last) <= closureTolerance(
+            pathLength: pathLength,
+            boundingBoxDiagonal: boundingBoxDiagonal
+        )
+    }
+
+    /// Cuts a closed outline at its closest approach to where it started, dropping any tail that
+    /// ran on past that point. Searches only the last `maximumTailFraction` of the path, so a
+    /// stroke that simply stops short of its start — the other way to close a shape by hand —
+    /// keeps every point it was drawn with.
+    static func trimmedOvershoot(
+        _ points: [CGPoint],
+        maximumTailFraction: CGFloat = 0.2
+    ) -> [CGPoint] {
+        guard points.count > 3, let start = points.first else { return points }
+
+        let maximumTail = polylineLength(points) * max(0, maximumTailFraction)
+        guard maximumTail > 0 else { return points }
+
+        var closestIndex = points.count - 1
+        var closestDistance = distance(points[closestIndex], start)
+        var tail: CGFloat = 0
+        var index = points.count - 1
+        while index > 1, tail <= maximumTail {
+            tail += distance(points[index], points[index - 1])
+            index -= 1
+            let candidate = distance(points[index], start)
+            if candidate < closestDistance {
+                closestDistance = candidate
+                closestIndex = index
+            }
+        }
+
+        guard closestIndex < points.count - 1 else { return points }
+        return Array(points[...closestIndex])
+    }
+
+    /// Collapses corners that sit within `radius` of one another into their midpoint, so a seam
+    /// landing just beside a real corner cannot inflate the corner count.
+    static func mergedNeighbouringCorners(
+        _ corners: [CGPoint],
+        isClosed: Bool,
+        radius: CGFloat
+    ) -> [CGPoint] {
+        let safeRadius = max(0, radius)
+        guard corners.count > 1, safeRadius > 0 else { return corners }
+
+        var merged: [CGPoint] = []
+        for corner in corners {
+            if let previous = merged.last, distance(previous, corner) <= safeRadius {
+                merged[merged.count - 1] = CGPoint(
+                    x: (previous.x + corner.x) / 2,
+                    y: (previous.y + corner.y) / 2
+                )
+                continue
+            }
+            merged.append(corner)
+        }
+
+        if isClosed,
+           merged.count > 2,
+           let first = merged.first,
+           let last = merged.last,
+           distance(first, last) <= safeRadius {
+            merged.removeLast()
+            merged[0] = CGPoint(x: (first.x + last.x) / 2, y: (first.y + last.y) / 2)
+        }
+        return merged
     }
 
     static func rdpSimplify(points: [CGPoint], epsilon: CGFloat) -> [CGPoint] {
@@ -322,8 +411,15 @@ public enum ShapeRecognizer {
         )
         guard maximumDeviation <= tolerance else { return nil }
 
-        let projectedFirst = project(first, ontoLineThrough: center, direction: direction)
-        let projectedLast = project(last, ontoLineThrough: center, direction: direction)
+        // Straightness is judged against the drawn direction; the drawn direction is then pulled
+        // onto an axis so a line meant to be horizontal or vertical actually is one.
+        let snappedAngle = snappedAxisAngle(
+            atan2(direction.y, direction.x),
+            toleranceDegrees: config.axisAlignSnapDegrees
+        )
+        let snappedDirection = CGPoint(x: cos(snappedAngle), y: sin(snappedAngle))
+        let projectedFirst = project(first, ontoLineThrough: center, direction: snappedDirection)
+        let projectedLast = project(last, ontoLineThrough: center, direction: snappedDirection)
         return .polyline(vertices: [projectedFirst, projectedLast], isClosed: false)
     }
 
@@ -442,6 +538,15 @@ public enum ShapeRecognizer {
             halfSecondary = max(halfSecondary, abs(dot(offset, secondaryAxis)))
         }
         guard halfPrimary > numericEpsilon, halfSecondary > numericEpsilon else { return nil }
+
+        // A rectangle drawn close enough to square becomes one, the same courtesy
+        // `circleAxisRatio` extends to a near-circular ellipse.
+        let sideRatio = min(halfPrimary, halfSecondary) / max(halfPrimary, halfSecondary)
+        if sideRatio >= max(0, min(1, config.squareAxisRatio)) {
+            let half = (halfPrimary + halfSecondary) / 2
+            halfPrimary = half
+            halfSecondary = half
+        }
 
         return corners.map { corner in
             let offset = CGPoint(x: corner.x - center.x, y: corner.y - center.y)

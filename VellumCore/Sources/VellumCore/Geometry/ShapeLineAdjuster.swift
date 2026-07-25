@@ -6,8 +6,10 @@ public struct LineAdjustConfig: Sendable {
 
     public static let `default` = LineAdjustConfig()
 
+    /// Matches `ShapeRecognizerConfig.axisAlignSnapDegrees` so a line snaps to an axis at the
+    /// same angle whether it was just recognized or is being dragged afterwards.
     public init(
-        axisSnapDegrees: CGFloat = 4,
+        axisSnapDegrees: CGFloat = 8,
         minimumLength: CGFloat = 4
     ) {
         self.axisSnapDegrees = axisSnapDegrees
