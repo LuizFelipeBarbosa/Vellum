@@ -183,7 +183,47 @@ final class CanvasSelectionController {
     }
 
     func setDragTranslation(_ translation: CGSize) {
-        dragTranslation = translation
+        dragTranslation = translationSnappedToPageGrid(translation)
+    }
+
+    /// Pulls a dragged selection onto the page lattice once it carries a shape, so a shape lands
+    /// on the paper the same way whether it was just drawn or moved here. Ink-only selections are
+    /// left alone: freehand strokes have nothing to align.
+    private func translationSnappedToPageGrid(_ translation: CGSize) -> CGSize {
+        guard let anchor = selectedShapesAnchor() else { return translation }
+
+        let dragged = CGPoint(
+            x: anchor.x + translation.width,
+            y: anchor.y + translation.height
+        )
+        guard let grid = snapGrid?(dragged) else { return translation }
+
+        let snapped = ShapeGridSnapper.snappedPoint(dragged, to: grid)
+        return CGSize(
+            width: snapped.x - anchor.x,
+            height: snapped.y - anchor.y
+        )
+    }
+
+    /// Minimum corner of what the selected shapes actually draw, or nil when none are selected.
+    /// Deliberately not `selectionBounds`: a line's frame is inflated to a minimum extent, so its
+    /// box sits several points above the line and would snap the line off the rule.
+    private func selectedShapesAnchor() -> CGPoint? {
+        guard let selection, let elementsStore else { return nil }
+
+        var drawn: CGRect?
+        for element in elementsStore.elements
+        where selection.elementIDs.contains(element.id) {
+            guard case .shape(let content) = element.content else { continue }
+            let box = ShapeGeometry.path(
+                for: content,
+                in: element.frame,
+                rotation: element.rotation
+            ).boundingBox
+            guard !box.isNull, !box.isInfinite else { continue }
+            drawn = drawn.map { $0.union(box) } ?? box
+        }
+        return drawn.map { CGPoint(x: $0.minX, y: $0.minY) }
     }
 
     func endMoveDrag() {

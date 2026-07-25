@@ -318,6 +318,67 @@ final class SelectionTransformTests: XCTestCase {
         XCTAssertEqual(corner.y, center.y - bounds.height, accuracy: 0.001)
     }
 
+    func testDraggingAShapeSnapsItToThePageLattice() throws {
+        // A horizontal line: its frame is inflated to a minimum extent, so the line itself sits
+        // at the middle of the frame, not at its top edge.
+        let line = makeLineShape(from: CGPoint(x: 30, y: 100), to: CGPoint(x: 150, y: 100))
+        let harness = makeHarness(strokes: [], elements: [line])
+        harness.controller.snapGrid = { _ in
+            ShapeSnapGrid(origin: .zero, spacing: 24, snapsX: true, snapsY: true)
+        }
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 200, y: 200))
+
+        // Dropping the line at y = 141 puts it 3pt from the rule at 144, inside the tolerance.
+        harness.controller.beginMoveDrag()
+        harness.controller.setDragTranslation(CGSize(width: 20, height: 41))
+
+        XCTAssertEqual(harness.controller.dragTranslation.height, 44, accuracy: 0.001)
+        XCTAssertEqual(harness.controller.dragTranslation.width, 18, accuracy: 0.001)
+
+        harness.controller.endMoveDrag()
+        let moved = try XCTUnwrap(harness.store.elements.first)
+        let drawn = ShapeGeometry.path(
+            for: try XCTUnwrap(shapeContent(of: moved)),
+            in: moved.frame,
+            rotation: moved.rotation
+        ).boundingBox
+        XCTAssertEqual(drawn.minY, 144, accuracy: 0.001)
+        XCTAssertEqual(drawn.minX, 48, accuracy: 0.001)
+    }
+
+    func testDraggingAShapeFarFromTheLatticeIsNotPulled() {
+        let line = makeLineShape(from: CGPoint(x: 30, y: 100), to: CGPoint(x: 150, y: 100))
+        let harness = makeHarness(strokes: [], elements: [line])
+        harness.controller.snapGrid = { _ in
+            ShapeSnapGrid(origin: .zero, spacing: 24, snapsX: true, snapsY: true)
+        }
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 200, y: 200))
+
+        // 132 sits midway between the rules at 120 and 144, so neither is within the 7.2pt
+        // tolerance and the line stays exactly where it was dropped.
+        harness.controller.beginMoveDrag()
+        harness.controller.setDragTranslation(CGSize(width: 0, height: 32))
+
+        XCTAssertEqual(harness.controller.dragTranslation.height, 32, accuracy: 0.001)
+    }
+
+    func testDraggingInkOnlyIsNeverSnapped() {
+        let harness = makeHarness(
+            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 50, y: 40)])],
+            elements: []
+        )
+        harness.controller.snapGrid = { _ in
+            ShapeSnapGrid(origin: .zero, spacing: 24, snapsX: true, snapsY: true)
+        }
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 100, y: 100))
+
+        harness.controller.beginMoveDrag()
+        harness.controller.setDragTranslation(CGSize(width: 27, height: 27))
+
+        XCTAssertEqual(harness.controller.dragTranslation.width, 27, accuracy: 0.001)
+        XCTAssertEqual(harness.controller.dragTranslation.height, 27, accuracy: 0.001)
+    }
+
     func testLiveTransformIsIdentityWithoutASelection() {
         let element = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
         let harness = makeHarness(strokes: [], elements: [element])
@@ -402,6 +463,26 @@ final class SelectionTransformTests: XCTestCase {
             frame: frame,
             rotation: rotation
         )
+    }
+
+    /// A line built the way the recognizer builds one, so its frame carries the same minimum
+    /// extent inflation a real horizontal line has.
+    private func makeLineShape(from start: CGPoint, to end: CGPoint) -> CanvasElement {
+        let built = ShapeElementBuilder.element(
+            from: .polyline(vertices: [start, end], isClosed: false),
+            strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+            strokeWidth: 4
+        )
+        return CanvasElement(
+            content: .shape(built.content),
+            frame: built.frame,
+            rotation: built.rotation
+        )
+    }
+
+    private func shapeContent(of element: CanvasElement) -> ShapeContent? {
+        guard case .shape(let content) = element.content else { return nil }
+        return content
     }
 
     private func makeShapeElement(

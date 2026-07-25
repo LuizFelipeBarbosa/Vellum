@@ -4,6 +4,9 @@ import XCTest
 /// a shape drawn corner by corner is the case `press(thenDragTo:)` cannot express at all.
 @MainActor
 final class ShapeRecognitionFlowUITests: XCTestCase {
+    /// Fraction along a line to grab it by — clear of the vertex handles at either end.
+    private static let grabPosition: CGFloat = 0.35
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -188,6 +191,130 @@ final class ShapeRecognitionFlowUITests: XCTestCase {
                 "radius handle \(index) is not reachable"
             )
         }
+    }
+
+    func testDraggingASelectedShapeSettlesItOnThePageLattice() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let window = try openClearedNote(in: app)
+        let shapeCountElement = app.otherElements["vellum-shape-element-count"]
+        XCTAssertTrue(shapeCountElement.waitForExistence(timeout: 10))
+        let shapeCountBefore = ShapeFlowTestHelpers.shapeCount(of: shapeCountElement)
+
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.52)).press(
+            forDuration: 0.05,
+            thenDragTo: window.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.62, dy: 0.52)
+            ),
+            withVelocity: .slow,
+            thenHoldForDuration: 1.0
+        )
+        let created = expectation(
+            for: NSPredicate(format: "value == %@", String(shapeCountBefore + 1)),
+            evaluatedWith: shapeCountElement
+        )
+        wait(for: [created], timeout: 5)
+
+        ShapeFlowTestHelpers.boxSelect(
+            in: app,
+            window: window,
+            around: CGRect(x: 200, y: 560, width: 500, height: 120)
+        )
+        let vertexHandles = app.otherElements["vellum-shape-vertex-handles"]
+        XCTAssertTrue(vertexHandles.waitForExistence(timeout: 5), "the line was not selected")
+        let summaryBefore = ShapeFlowTestHelpers.accessibilityValue(of: vertexHandles)
+        let before = ShapeFlowTestHelpers.vertices(from: summaryBefore)
+        XCTAssertEqual(before.count, 2)
+
+        // Content and window space differ by the canvas zoom; recover it from one line measured
+        // in both, so the drop lands a known distance from a rule instead of wherever it likes.
+        let firstEnd = try handleCenter(at: 0, in: app)
+        let secondEnd = try handleCenter(at: 1, in: app)
+        let contentWidth = before[1].x - before[0].x
+        XCTAssertGreaterThan(abs(contentWidth), 1)
+        let zoom = (secondEnd.x - firstEnd.x) / contentWidth
+        XCTAssertGreaterThan(zoom, 0.1)
+
+        // Aim three rows down and stop 3pt short: inside the tolerance, so it should settle.
+        let spacing: CGFloat = 24
+        let targetY = ((before[0].y / spacing).rounded(.down) + 3) * spacing
+        let contentDrop = targetY - before[0].y - 3
+        let grab = point(
+            pointAlongLine(from: firstEnd, to: secondEnd, fraction: Self.grabPosition),
+            in: window
+        )
+        let drop = CGPoint(x: grab.x, y: grab.y + contentDrop * zoom)
+        guard let record = ShapeFlowTestHelpers.makeGestureRecord(
+            named: "Drag selected line",
+            gesture: ShapeFlowTestHelpers.PointerGesture(
+                start: grab,
+                moves: (1...12).map { step in
+                    let fraction = CGFloat(step) / 12
+                    return (
+                        point: CGPoint(
+                            x: grab.x,
+                            y: grab.y + (drop.y - grab.y) * fraction
+                        ),
+                        offset: TimeInterval(step) * 0.04
+                    )
+                },
+                liftOffset: 0.6
+            ),
+            targetProcessID: ShapeFlowTestHelpers.processID(of: app)
+        ) else {
+            throw XCTSkip("XCTest synthesized pointer support is unavailable.")
+        }
+        XCTAssertTrue(ShapeFlowTestHelpers.synthesize(record), "failed to synthesize the drag")
+
+        let moved = expectation(
+            for: NSPredicate(format: "value != %@", summaryBefore),
+            evaluatedWith: vertexHandles
+        )
+        wait(for: [moved], timeout: 5)
+
+        let after = ShapeFlowTestHelpers.vertices(
+            from: ShapeFlowTestHelpers.accessibilityValue(of: vertexHandles)
+        )
+        XCTAssertEqual(after.count, 2)
+        XCTAssertEqual(
+            after[0].y,
+            targetY,
+            accuracy: 0.5,
+            "the dragged line did not settle onto the rule it was dropped beside"
+        )
+        XCTAssertEqual(after[1].y, after[0].y, accuracy: 0.5, "the line stopped being level")
+    }
+
+    private func pointAlongLine(
+        from start: CGPoint,
+        to end: CGPoint,
+        fraction: CGFloat
+    ) -> CGPoint {
+        CGPoint(
+            x: start.x + (end.x - start.x) * fraction,
+            y: start.y + (end.y - start.y) * fraction
+        )
+    }
+
+    private func handleCenter(at index: Int, in app: XCUIApplication) throws -> CGPoint {
+        let handle = app.descendants(matching: .any)
+            .matching(identifier: "vellum-shape-vertex-handle-\(index)")
+            .firstMatch
+        guard handle.waitForExistence(timeout: 5) else {
+            throw XCTSkip("shape vertex handle \(index) not found")
+        }
+        return CGPoint(x: handle.frame.midX, y: handle.frame.midY)
+    }
+
+    private func point(_ location: CGPoint, in window: XCUIElement) -> CGPoint {
+        window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(
+                CGVector(
+                    dx: location.x - window.frame.minX,
+                    dy: location.y - window.frame.minY
+                )
+            )
+            .screenPoint
     }
 
     private func openClearedNote(in app: XCUIApplication) throws -> XCUIElement {
