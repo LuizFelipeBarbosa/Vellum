@@ -353,6 +353,114 @@ final class NotePageRendererTests: XCTestCase {
         )
     }
 
+    func testThickShapeStrokeAtAPageBoundaryDrawsOnBothPages() throws {
+        let boundary = PageGeometry.a4.pageHeight
+        let strokeWidth: Double = 30
+        let element = makeShapeEndingAtFirstPageBoundary(strokeWidth: strokeWidth)
+        let content = makeContent(elements: [element], pageCount: 2)
+        let emptyContent = makeContent(pageCount: 2)
+
+        // The frame only touches the boundary, so the stroke's lower half is the whole
+        // of page two's content -- and CGRect.intersects is false for touching rects.
+        XCTAssertEqual(element.rotatedBoundingBox.maxY, boundary, accuracy: 0.001)
+        XCTAssertFalse(
+            element.rotatedBoundingBox.intersects(PageGeometry.a4.pageRect(index: 1))
+        )
+
+        let firstPage = try pixelBuffer(
+            for: render(pageIndex: 0, content: content, pointSize: fullRenderPointSize)
+        )
+        let firstReference = try pixelBuffer(
+            for: render(pageIndex: 0, content: emptyContent, pointSize: fullRenderPointSize)
+        )
+        let secondPage = try pixelBuffer(
+            for: render(pageIndex: 1, content: content, pointSize: fullRenderPointSize)
+        )
+        let secondReference = try pixelBuffer(
+            for: render(pageIndex: 1, content: emptyContent, pointSize: fullRenderPointSize)
+        )
+        let aboveBoundary = CGRect(x: 220, y: boundary - 16, width: 160, height: 12)
+        let belowBoundary = CGRect(x: 220, y: 2, width: 160, height: 8)
+
+        XCTAssertGreaterThan(
+            differingPixelCount(firstPage, firstReference, in: aboveBoundary),
+            0
+        )
+        XCTAssertGreaterThan(
+            differingPixelCount(secondPage, secondReference, in: belowBoundary),
+            0
+        )
+    }
+
+    func testRotatedShapeStrokeReachingTheNextPageDrawsThere() throws {
+        let boundary = PageGeometry.a4.pageHeight
+        let strokeWidth: Double = 30
+        let frame = CanvasRect(
+            x: 200,
+            y: Double(boundary) - 104,
+            width: 200,
+            height: 8
+        )
+        let element = CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0.5),
+                            CanvasPoint(x: 1, y: 0.5),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: strokeWidth
+                )
+            ),
+            frame: frame,
+            rotation: .pi / 2
+        )
+        let content = makeContent(elements: [element], pageCount: 2)
+        let emptyContent = makeContent(pageCount: 2)
+
+        // Rotation is what carries this shape down to the boundary: the unrotated frame
+        // stops far above it, so inflating anything else would miss page two.
+        XCTAssertEqual(element.rotatedBoundingBox.maxY, boundary, accuracy: 0.001)
+        XCTAssertLessThan(
+            cgRect(frame).maxY + CGFloat(strokeWidth) / 2,
+            boundary
+        )
+
+        let secondPage = try pixelBuffer(
+            for: render(pageIndex: 1, content: content, pointSize: fullRenderPointSize)
+        )
+        let secondReference = try pixelBuffer(
+            for: render(pageIndex: 1, content: emptyContent, pointSize: fullRenderPointSize)
+        )
+        let belowBoundary = CGRect(x: 294, y: 1, width: 12, height: 8)
+
+        XCTAssertGreaterThan(
+            differingPixelCount(secondPage, secondReference, in: belowBoundary),
+            0
+        )
+    }
+
+    func testExportCountsThePageAShapeStrokeReachesInto() throws {
+        let element = makeShapeEndingAtFirstPageBoundary(strokeWidth: 30)
+        let output = try NoteExporter.export(
+            content: makeContent(elements: [element]),
+            title: "Boundary shape",
+            format: .png
+        )
+        defer { try? FileManager.default.removeItem(at: output.directory) }
+
+        XCTAssertEqual(
+            element.rotatedBoundingBox.maxY,
+            PageGeometry.a4.pageHeight,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(output.urls.count, 2)
+        XCTAssertNotNil(UIImage(contentsOfFile: output.urls[1].path))
+    }
+
     func testShapeAndInkRenderTogetherInOverlappingRegion() throws {
         let shape = CanvasElement(
             content: .shape(
@@ -1264,6 +1372,35 @@ final class NotePageRendererTests: XCTestCase {
                 y: Double(center.y - 40),
                 width: 200,
                 height: 80
+            )
+        )
+    }
+
+    /// A thick horizontal line whose frame -- the recognizer's minimum-height frame for a
+    /// straight line -- ends exactly at the first page boundary, so only ink overhangs it.
+    private func makeShapeEndingAtFirstPageBoundary(
+        strokeWidth: Double
+    ) -> CanvasElement {
+        CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0.5),
+                            CanvasPoint(x: 1, y: 0.5),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: strokeWidth
+                )
+            ),
+            frame: CanvasRect(
+                x: 200,
+                y: Double(PageGeometry.a4.pageHeight)
+                    - ShapeElementBuilder.minimumFrameExtent,
+                width: 200,
+                height: ShapeElementBuilder.minimumFrameExtent
             )
         )
     }

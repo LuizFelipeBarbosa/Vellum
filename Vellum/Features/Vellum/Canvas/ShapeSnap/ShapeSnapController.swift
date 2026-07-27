@@ -45,7 +45,16 @@ final class ShapeSnapController {
     @ObservationIgnored private var isTrackingStroke = false
     @ObservationIgnored private var hasSnappedThisStroke = false
     @ObservationIgnored var pendingShapeToCommitOnLift: RecognizedShape?
-    @ObservationIgnored private var pendingCaptureBoundingBox: CGRect?
+    @ObservationIgnored private var pendingLiftSnap: PendingLiftSnap?
+
+    /// What the dwell hands to the deferred on-lift commit. The box and the stroke
+    /// count are sampled together, so they can never describe different moments —
+    /// the commit needs both to tell the ink it is replacing apart from the strokes
+    /// that were already on the page.
+    private struct PendingLiftSnap {
+        let captureBoundingBox: CGRect
+        let strokeCountBeforeInk: Int
+    }
 
     private struct LineAdjustState {
         let elementID: UUID
@@ -85,7 +94,7 @@ final class ShapeSnapController {
         hasSnappedThisStroke = false
         hasAbandonedCapture = false
         pendingShapeToCommitOnLift = nil
-        pendingCaptureBoundingBox = nil
+        pendingLiftSnap = nil
     }
 
     func strokeContinued(points: [TimedPoint]) {
@@ -214,7 +223,17 @@ final class ShapeSnapController {
             performMidStrokeSnap(shape: shape)
         case .snapOnLift:
             pendingShapeToCommitOnLift = shape
-            pendingCaptureBoundingBox = captureBoundingBox()
+            // Sample the stroke count HERE, with the pen still down: PencilKit cannot
+            // have appended this stroke yet, so every stroke past this index is ink
+            // from it. Sampling at the lift instead would be a coin toss — PencilKit
+            // does not promise to have committed the stroke by then, and whenever it
+            // has not, the last stroke is the user's PREVIOUS one.
+            pendingLiftSnap = captureBoundingBox().map {
+                PendingLiftSnap(
+                    captureBoundingBox: $0,
+                    strokeCountBeforeInk: canvasView.drawing.strokes.count
+                )
+            }
             (canvasView as? PagedCanvasView)?.haptics.playSnapToFit()
         }
     }
@@ -351,14 +370,14 @@ final class ShapeSnapController {
         if case .snapOnLift = policy,
            !cancelled,
            let shape = pendingShapeToCommitOnLift,
-           let captureBoundingBox = pendingCaptureBoundingBox,
+           let pendingLiftSnap,
            canvasReference?.canvasView != nil,
            let elementsStore,
            let config = activeInkConfig {
             DispatchQueue.main.async {
                 ShapeSnapController.commitShapeOnLift(
                     shape,
-                    captureBoundingBox: captureBoundingBox,
+                    pendingLiftSnap: pendingLiftSnap,
                     elementsStore: elementsStore,
                     config: config
                 )
@@ -429,32 +448,45 @@ final class ShapeSnapController {
     /// commit cannot be derailed by controller state that moved on in the meantime.
     private static func commitShapeOnLift(
         _ shape: RecognizedShape,
-        captureBoundingBox: CGRect,
+        pendingLiftSnap: PendingLiftSnap,
         elementsStore: CanvasElementsStore,
         config: InkToolConfig
     ) {
-        let strokeColor = Self.styledStrokeColor(for: config)
-        let strokeWidth = Self.styledStrokeWidth(for: config)
-        let builtElement = ShapeElementBuilder.element(
-            from: shape,
-            strokeColor: strokeColor,
-            strokeWidth: strokeWidth
-        )
-        let inflatedCaptureBoundingBox = captureBoundingBox.insetBy(
+        let inflatedCaptureBoundingBox = pendingLiftSnap.captureBoundingBox.insetBy(
             dx: -Self.captureBoundsInflation,
             dy: -Self.captureBoundsInflation
         )
 
         let liveSessionToken = elementsStore.beginLiveSession()
+        var didRemoveInkedStroke = false
         elementsStore.mutateDrawingLive { drawing in
-            guard let lastStrokeIndex = drawing.strokes.indices.last,
-                  drawing.strokes[lastStrokeIndex].renderBounds.intersects(
-                      inflatedCaptureBoundingBox
-                  ) else {
-                return
+            // Only strokes appended since the dwell can be this stroke's ink. Bounds
+            // alone cannot tell them apart from an older sketch drawn in the same
+            // place — and PencilKit may not have appended anything yet at all.
+            let currentStrokeCount = drawing.strokes.count
+            guard currentStrokeCount > pendingLiftSnap.strokeCountBeforeInk else { return }
+            let appendedStrokeRange = pendingLiftSnap.strokeCountBeforeInk..<currentStrokeCount
+            drawing.strokes = drawing.strokes.enumerated().compactMap { index, stroke in
+                if appendedStrokeRange.contains(index),
+                   stroke.renderBounds.intersects(inflatedCaptureBoundingBox) {
+                    didRemoveInkedStroke = true
+                    return nil
+                }
+                return stroke
             }
-            drawing.strokes.remove(at: lastStrokeIndex)
         }
+
+        // The snapped shape exists to stand in for the ink it replaces. Failing to find
+        // that ink means we cannot say what this shape is standing in for, so inserting
+        // it would leave the user's sketch AND a perfect copy of it stacked on the page.
+        // Drop the snap instead: what the user drew is still there, untouched.
+        guard didRemoveInkedStroke else { return }
+
+        let builtElement = ShapeElementBuilder.element(
+            from: shape,
+            strokeColor: Self.styledStrokeColor(for: config),
+            strokeWidth: Self.styledStrokeWidth(for: config)
+        )
         elementsStore.addElementLive(
             CanvasElement(
                 content: .shape(builtElement.content),
@@ -496,7 +528,7 @@ final class ShapeSnapController {
         hasSnappedThisStroke = false
         hasAbandonedCapture = false
         pendingShapeToCommitOnLift = nil
-        pendingCaptureBoundingBox = nil
+        pendingLiftSnap = nil
         lineAdjustState = nil
     }
 }

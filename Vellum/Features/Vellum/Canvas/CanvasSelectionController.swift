@@ -169,20 +169,40 @@ final class CanvasSelectionController {
         clearSelection()
     }
 
-    func beginMoveDrag() {
+    /// True between `beginMoveDrag` and `endMoveDrag`. Derived rather than stored: the snapshot is
+    /// exactly what a move puts up, and every path that drops a selection already clears it — a
+    /// separate flag would be one more piece of state a torn-down drag could leave behind, and a
+    /// stale one would lock handle drags out for good.
+    private var isMoveDragging: Bool {
+        strokesSnapshot != nil && !isHandleDragging
+    }
+
+    /// Takes the selection into a move drag. Returns false when it refuses the drag — there is
+    /// nothing movable, or a handle drag already owns the selection — so a caller driving a pan
+    /// can stop feeding translations into a move that never started.
+    @discardableResult
+    func beginMoveDrag() -> Bool {
+        // A handle drag got here first, which means it has the selected strokes hidden and holds
+        // the only copy of the drawing they came from. Hiding again would stash that already
+        // trimmed drawing as the restore point and the hidden strokes would be lost for good, so
+        // the drag in flight keeps the selection. The pinch path takes a move over legitimately
+        // by ending it before it starts its handle drag.
+        guard !isHandleDragging else { return false }
+
         guard let selection,
               let bounds = selectionBounds,
               bounds.width > 0,
               bounds.height > 0,
               let canvasView = canvasReference?.canvasView else {
             strokesSnapshot = nil
-            return
+            return false
         }
 
         resetHandleDrag()
         strokesSnapshot = snapshot(for: selection, in: bounds, canvasView: canvasView)
         hideSelectedStrokes()
         dragTranslation = .zero
+        return true
     }
 
     func setDragTranslation(_ translation: CGSize) {
@@ -230,6 +250,10 @@ final class CanvasSelectionController {
     }
 
     func endMoveDrag() {
+        // The mirror of the guard in `beginMoveDrag`: a handle drag owns the selection, and the
+        // pan this refused must not restore its hidden strokes or commit a translation under it.
+        guard !isHandleDragging else { return }
+
         restoreHiddenStrokes()
         guard let selection, let elementsStore else {
             strokesSnapshot = nil
@@ -272,6 +296,12 @@ final class CanvasSelectionController {
     }
 
     func beginHandleDrag() {
+        // A move drag owns the selection until it ends, for the same reason a handle drag does:
+        // the strokes are hidden and only the move holds the drawing they came from. `handlePinch`
+        // promotes a move into a handle drag by ending the move first, which is exactly what makes
+        // that takeover safe — anything arriving while the move is still in flight is ignored.
+        guard !isMoveDragging else { return }
+
         guard let selection,
               let bounds = selectionBounds,
               bounds.width > 0,
@@ -298,6 +328,11 @@ final class CanvasSelectionController {
     }
 
     func endHandleDrag() {
+        // No handle drag is in flight: either it was refused because a move owns the selection, or
+        // something already tore it down. Going further would restore strokes and drop a snapshot
+        // that now belong to whoever does own it.
+        guard isHandleDragging else { return }
+
         restoreHiddenStrokes()
         guard let selection,
               let elementsStore,
@@ -865,6 +900,14 @@ final class CanvasSelectionController {
     }
 
     private func hideSelectedStrokes() {
+        // `drawingBeforeHide` is the only copy of the drawing the hidden strokes still live in, so
+        // whoever hid first keeps it until it restores. Overwriting it with the already trimmed
+        // drawing would delete the selected indices a second time — from a drawing where those
+        // indices now address other strokes — and neither the canvas nor the undo baseline the
+        // following commit takes would still contain the originals. The drags guard each other at
+        // their entry points; this is the backstop that makes every other route survivable too.
+        guard drawingBeforeHide == nil else { return }
+
         guard let selection,
               !selection.strokeIndices.isEmpty,
               let canvasView = canvasReference?.canvasView else { return }

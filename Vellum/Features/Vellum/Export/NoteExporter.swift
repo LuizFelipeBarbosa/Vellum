@@ -69,7 +69,7 @@ enum NoteExporter {
         for element in content.elements {
             guard case .image(let imageContent) = element.content else { continue }
             let isInExportedRange = (0..<pageCount).contains { pageIndex in
-                element.rotatedBoundingBox.intersects(
+                element.drawnBoundingBox.intersects(
                     content.geometry.pageRect(index: pageIndex)
                 )
             }
@@ -118,8 +118,10 @@ enum NoteExporter {
         let drawingBounds = content.drawing.bounds
         let drawingBottom =
             (drawingBounds.isNull || drawingBounds.isEmpty) ? 0 : drawingBounds.maxY
+        // drawnBoundingBox, not effectiveBoundingBox: a shape whose stroke is the only
+        // content reaching the next page still needs that page to be exported.
         let elementsBottom = content.elements
-            .map { $0.effectiveBoundingBox.maxY }
+            .map { $0.drawnBoundingBox.maxY }
             .max() ?? 0
         return content.geometry.exportPageCount(
             forContentBottom: max(drawingBottom, elementsBottom),

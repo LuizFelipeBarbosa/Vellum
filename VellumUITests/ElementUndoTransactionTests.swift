@@ -550,6 +550,117 @@ final class ElementUndoTransactionTests: XCTestCase {
         withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
     }
 
+    // Two fingers can reach the two drag modes at once: one holds a resize handle, which stays
+    // grabbable for the whole handle drag, while the other pans — and with a selection up, any pan
+    // means "move". Both modes hide the selected strokes and stash the drawing they came from, and
+    // that stash is the only copy left. A second hide would stash the already trimmed drawing and
+    // cut the same indices out of it again, so the strokes would be gone from the canvas, missing
+    // from the undo baseline of the commit that follows, and then persisted that way.
+    func testAPanArrivingDuringAHandleDragCannotSwallowTheHiddenStrokes() {
+        let (store, undoManager) = makeStore()
+        let harness = makeSelectionController(for: store)
+        // Diagonal, so the selection box clears the 12pt floor `endHandleDrag` clamps its scale
+        // to: an untouched handle drag then really commits nothing.
+        let stroke = makeStroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 120, y: 120))
+        harness.canvasView.drawing = PKDrawing(strokes: [stroke])
+        selectEverything(with: harness.controller)
+        XCTAssertEqual(harness.controller.selection?.strokeIndices.count, 1)
+
+        harness.controller.beginHandleDrag()
+        XCTAssertTrue(harness.canvasView.drawing.strokes.isEmpty, "the handle drag hides the ink")
+
+        // The second finger's pan. The handle drag owns the hidden stroke, so the move is refused
+        // and the end it reports has nothing to restore or commit.
+        XCTAssertFalse(harness.controller.beginMoveDrag())
+        harness.controller.endMoveDrag()
+        XCTAssertTrue(harness.canvasView.drawing.strokes.isEmpty)
+        XCTAssertTrue(harness.controller.isHandleDragging)
+
+        harness.controller.endHandleDrag()
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1, "the hidden stroke came back")
+        XCTAssertEqual(harness.canvasView.drawing.strokes[0].renderBounds, stroke.renderBounds)
+        XCTAssertFalse(undoManager.canUndo, "neither drag moved anything")
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
+    // The same collision from the other side: the move got there first, so a handle drag starting
+    // on top of it is refused and the move stays undoable end to end.
+    func testAHandleDragArrivingDuringAMoveIsRefusedAndTheMoveStillUndoes() {
+        let (store, undoManager) = makeStore()
+        let harness = makeSelectionController(for: store)
+        harness.canvasView.drawing = PKDrawing(
+            strokes: [makeStroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 120, y: 120))]
+        )
+        selectEverything(with: harness.controller)
+
+        XCTAssertTrue(harness.controller.beginMoveDrag())
+        harness.controller.beginHandleDrag()
+        XCTAssertFalse(harness.controller.isHandleDragging, "the move keeps the selection")
+
+        // The refused handle drag still reports its own end, which must leave the move untouched.
+        harness.controller.endHandleDrag()
+        XCTAssertTrue(harness.canvasView.drawing.strokes.isEmpty, "the move still hides the ink")
+
+        harness.controller.setDragTranslation(CGSize(width: 30, height: 40))
+        harness.controller.endMoveDrag()
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1)
+        XCTAssertEqual(harness.canvasView.drawing.strokes[0].transform.tx, 30, accuracy: 0.001)
+        XCTAssertEqual(harness.canvasView.drawing.strokes[0].transform.ty, 40, accuracy: 0.001)
+        XCTAssertEqual(undoManager.undoActionName, "Move Selection")
+
+        undoManager.undo()
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1, "undo brought the ink back")
+        XCTAssertEqual(harness.canvasView.drawing.strokes[0].transform.tx, 0, accuracy: 0.001)
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
+    // How a second finger legitimately takes a move over: `handlePinch` ends the move first, so by
+    // the time the handle drag starts the strokes are back on the canvas and it hides them itself.
+    func testEndingAMoveBeforeAHandleDragHidesTheStrokeExactlyOnce() {
+        let (store, undoManager) = makeStore()
+        let harness = makeSelectionController(for: store)
+        harness.canvasView.drawing = PKDrawing(
+            strokes: [makeStroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 120, y: 120))]
+        )
+        selectEverything(with: harness.controller)
+        // In production the move and the transform commit on separate run-loop turns, so they are
+        // separate undo groups; group them explicitly here or groupsByEvent would coalesce them.
+        undoManager.groupsByEvent = false
+
+        undoManager.beginUndoGrouping()
+        XCTAssertTrue(harness.controller.beginMoveDrag())
+        harness.controller.setDragTranslation(CGSize(width: 30, height: 40))
+        harness.controller.endMoveDrag()
+        undoManager.endUndoGrouping()
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1)
+
+        undoManager.beginUndoGrouping()
+        harness.controller.beginHandleDrag()
+        XCTAssertTrue(harness.controller.isHandleDragging)
+        XCTAssertTrue(harness.canvasView.drawing.strokes.isEmpty)
+
+        harness.controller.setHandleTransform(scale: CGSize(width: 2, height: 2), rotation: 0)
+        harness.controller.endHandleDrag()
+        undoManager.endUndoGrouping()
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1)
+        XCTAssertEqual(harness.canvasView.drawing.strokes[0].transform.a, 2, accuracy: 0.001)
+
+        undoManager.undo()
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes[0].transform.a, 1, accuracy: 0.001)
+        XCTAssertEqual(harness.canvasView.drawing.strokes[0].transform.tx, 30, accuracy: 0.001)
+
+        undoManager.undo()
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1)
+        XCTAssertEqual(harness.canvasView.drawing.strokes[0].transform.tx, 0, accuracy: 0.001)
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
     private func makeStore() -> (CanvasElementsStore, UndoManager) {
         let store = CanvasElementsStore()
         let undoManager = UndoManager()
@@ -602,6 +713,13 @@ final class ElementUndoTransactionTests: XCTestCase {
         controller.endCapture()
     }
 
+    /// A boxed capture wide enough to take in everything the harness put on the canvas.
+    private func selectEverything(with controller: CanvasSelectionController) {
+        controller.beginCapture(at: CGPoint(x: -100, y: -100), mode: .boxed)
+        controller.extendCapture(to: CGPoint(x: 600, y: 600))
+        controller.endCapture()
+    }
+
     private func makeElement(text: String) -> CanvasElement {
         CanvasElement(
             content: .text(
@@ -642,10 +760,13 @@ final class ElementUndoTransactionTests: XCTestCase {
         )
     }
 
-    private func makeStroke() -> PKStroke {
+    private func makeStroke(
+        from start: CGPoint = CGPoint(x: 10, y: 12),
+        to end: CGPoint = CGPoint(x: 110, y: 12)
+    ) -> PKStroke {
         let points = [
             PKStrokePoint(
-                location: CGPoint(x: 10, y: 12),
+                location: start,
                 timeOffset: 0,
                 size: CGSize(width: 4, height: 4),
                 opacity: 1,
@@ -654,7 +775,7 @@ final class ElementUndoTransactionTests: XCTestCase {
                 altitude: .pi / 2
             ),
             PKStrokePoint(
-                location: CGPoint(x: 110, y: 12),
+                location: end,
                 timeOffset: 0.1,
                 size: CGSize(width: 4, height: 4),
                 opacity: 1,

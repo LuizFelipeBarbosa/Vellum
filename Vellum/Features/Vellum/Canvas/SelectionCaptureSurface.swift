@@ -165,9 +165,15 @@ struct SelectionCaptureSurface: UIViewRepresentable {
 #else
             allowsFingerCapture = false
 #endif
+            // Bounds count only while a selection actually owns them, since they are what the
+            // drag grabs: a move the controller would refuse must not swallow a drag the canvas
+            // could have scrolled with.
+            let selectionBounds = controller.selection == nil ? nil : controller.selectionBounds
             guard let intent = SelectionCapturePolicy.dragIntent(
                 pointer: pointer,
-                hasSelection: controller.selection != nil,
+                location: location,
+                selectionBounds: selectionBounds,
+                zoomScale: canvasView.zoomScale,
                 allowsFingerCapture: allowsFingerCapture
             ) else { return false }
 
@@ -209,14 +215,18 @@ struct SelectionCaptureSurface: UIViewRepresentable {
             switch gesture.state {
             case .began:
                 guard let dragStartLocation, let claimedDragIntent else { return }
-                activeDragIntent = claimedDragIntent
                 switch claimedDragIntent {
                 case .move:
-                    controller.beginMoveDrag()
+                    // The controller refuses a move while another drag owns the selection. Leaving
+                    // the intent unclaimed is what keeps this pan inert for the rest of the
+                    // gesture: `.changed` has nothing to translate and `.ended` nothing to commit.
+                    guard controller.beginMoveDrag() else { return }
+                    activeDragIntent = .move
                     // A pan only begins once the touch has already travelled, and the drag may
                     // end without ever reporting a change, so carry that first leg over now.
                     updateMoveTranslation(for: gesture)
                 case .capture:
+                    activeDragIntent = .capture
                     controller.beginCapture(at: dragStartLocation, mode: selectionMode)
                     if let canvasView = gesture.view as? PKCanvasView,
                        let location = contentLocation(of: gesture, in: canvasView) {
@@ -279,6 +289,13 @@ struct SelectionCaptureSurface: UIViewRepresentable {
                     invalidateAutoScroll(clearDragLocation: true)
                     panGestureRecognizer.isEnabled = false
                     panGestureRecognizer.isEnabled = true
+                    // Hand the move back here rather than waiting for the `.cancelled` that toggle
+                    // produces: the handle drag below refuses to start while a move is in flight,
+                    // and whether UIKit delivers that cancel before or after this line is not
+                    // something to depend on. `finishActiveDrag` is idempotent, so the cancel
+                    // arriving either way is a no-op. This commits the move — the selection keeps
+                    // the ground it covered and `beginHandleDrag` snapshots the refreshed bounds.
+                    finishActiveDrag()
                 }
                 controller.beginHandleDrag()
             case .changed:
@@ -298,9 +315,13 @@ struct SelectionCaptureSurface: UIViewRepresentable {
             guard gesture.state == .ended,
                   let canvasView = gesture.view as? PKCanvasView,
                   controller.selection != nil,
-                  let bounds = controller.selectionBounds,
-                  let location = contentLocation(of: gesture, in: canvasView),
-                  !bounds.contains(location) else { return }
+                  let location = contentLocation(of: gesture, in: canvasView) else { return }
+            // A selection can outlive its bounds — deleting the page an element sat on leaves
+            // exactly that — and then there is no outline on screen to tap outside of. Any tap
+            // drops it, so the selection is escapable rather than stuck where it cannot be seen.
+            let isOutsideSelection = controller.selectionBounds
+                .map { !$0.contains(location) } ?? true
+            guard isOutsideSelection else { return }
             controller.clearSelection()
         }
 

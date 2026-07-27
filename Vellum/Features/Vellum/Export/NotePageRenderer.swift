@@ -397,7 +397,7 @@ enum NotePageRenderer {
         in ctx: CGContext
     ) {
         let absoluteFrame = cgRect(element.frame)
-        guard element.rotatedBoundingBox.intersects(pageRect),
+        guard element.drawnBoundingBox.intersects(pageRect),
               let image = imagesByAssetPath[imageContent.assetPath],
               image.size.width > 0,
               image.size.height > 0 else {
@@ -438,7 +438,7 @@ enum NotePageRenderer {
         interfaceStyle: UIUserInterfaceStyle,
         in ctx: CGContext
     ) {
-        guard element.rotatedBoundingBox.intersects(pageRect) else { return }
+        guard element.drawnBoundingBox.intersects(pageRect) else { return }
 
         let path = ShapeGeometry.path(
             for: shapeContent,
@@ -470,7 +470,7 @@ enum NotePageRenderer {
         pageBounds: CGRect,
         in ctx: CGContext
     ) {
-        guard element.effectiveBoundingBox.intersects(pageRect) else { return }
+        guard element.drawnBoundingBox.intersects(pageRect) else { return }
 
         let grownFrame = growTextFrame(element.frame, textContent: textContent)
         let color = UIColor(
@@ -568,5 +568,24 @@ extension CanvasElement {
             textContent: textContent
         )
         return effectiveElement.rotatedBoundingBox
+    }
+
+    /// Bounds of everything a page render paints for this element. A shape's stroke straddles
+    /// its path by half the stroke width, so its ink reaches outside `effectiveBoundingBox`:
+    /// a thick shape whose frame stops at a page boundary still paints onto the next page.
+    /// Culling or counting pages against the un-inflated box truncates that overhang, since
+    /// every element is drawn clipped to the page it is drawn for.
+    ///
+    /// Half the stroke width is the exact outset: the renderer strokes with round caps and
+    /// joins, so no corner overshoots the way a miter join would.
+    var drawnBoundingBox: CGRect {
+        guard case .shape(let shapeContent) = content else { return effectiveBoundingBox }
+
+        let halfStrokeWidth = CGFloat(shapeContent.strokeWidth) / 2
+        // Inflating the rotated box (rather than the frame) is what keeps this exact for
+        // rotated shapes: outsetting by a disc commutes with the rotation.
+        return rotatedBoundingBox
+            .standardized
+            .insetBy(dx: -halfStrokeWidth, dy: -halfStrokeWidth)
     }
 }

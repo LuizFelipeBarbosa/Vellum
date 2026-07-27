@@ -95,7 +95,11 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         XCTAssertEqual(harness.undoManager.undoActionName, "Draw Shape")
     }
 
-    func testSnapOnLiftKeepsLastStrokeWhenCaptureBoundsDoNotMatch() async {
+    // A stroke that lands nowhere near the captured points is not the ink this snap
+    // recognized, so the commit has nothing to replace. Inserting the shape anyway would
+    // leave both on the page — the sketch plus a perfect copy of it — so the snap is
+    // dropped instead and the canvas keeps exactly what the user drew.
+    func testSnapOnLiftInsertsNoShapeWhenCaptureBoundsDoNotMatch() async {
         let harness = makeHarness(policy: .snapOnLift)
         let points = recognizableLinePoints()
 
@@ -118,7 +122,75 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
             harness.canvasView.drawing.strokes[0].renderBounds,
             equalTo: mismatchedStroke.renderBounds
         )
+        XCTAssertTrue(
+            shapeElements(in: harness.store).isEmpty,
+            "a shape with no ink to replace would just duplicate the geometry"
+        )
+        XCTAssertFalse(harness.undoManager.canUndo)
+    }
+
+    // Regression test for a data-loss bug: PencilKit does not promise to have appended
+    // the lifted stroke by the time the deferred commit runs, and when it has not, the
+    // last stroke on the canvas is the user's PREVIOUS one. Removing that would destroy
+    // ink the snap never touched — the worse because snap-on-lift is the fallback policy
+    // people reach for when mid-stroke snapping misbehaves.
+    func testSnapOnLiftKeepsThePreviousStrokeWhenTheInkHasNotLandedYet() async {
+        let harness = makeHarness(policy: .snapOnLift)
+        let points = recognizableLinePoints()
+        // An older sketch sitting right where the shape is being drawn: its bounds are
+        // inside the capture box, so only the stroke count can tell the two apart.
+        let existingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        harness.canvasView.drawing = PKDrawing(strokes: [existingStroke])
+
+        harness.controller.strokeBegan()
+        harness.controller.strokeContinued(
+            points: timedPoints(points, zoomScale: harness.canvasView.zoomScale)
+        )
+        harness.controller.dwellFired()
+
+        // The pen lifts, but PencilKit has not committed the new stroke yet.
+        harness.controller.strokeEnded(cancelled: false)
+        await drainMainQueue()
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1)
+        assertBounds(
+            harness.canvasView.drawing.strokes[0].renderBounds,
+            equalTo: existingStroke.renderBounds
+        )
+        XCTAssertTrue(
+            shapeElements(in: harness.store).isEmpty,
+            "with no ink of its own to replace, the snap has to stand down"
+        )
+        XCTAssertFalse(harness.undoManager.canUndo)
+    }
+
+    func testSnapOnLiftReplacesOnlyTheInkDrawnOverAnOlderSketch() async {
+        let harness = makeHarness(policy: .snapOnLift)
+        let points = recognizableLinePoints()
+        let existingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        harness.canvasView.drawing = PKDrawing(strokes: [existingStroke])
+
+        harness.controller.strokeBegan()
+        harness.controller.strokeContinued(
+            points: timedPoints(points, zoomScale: harness.canvasView.zoomScale)
+        )
+        harness.controller.dwellFired()
+
+        // Same geometry as the older stroke: the two are only distinguishable by order.
+        let matchingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        harness.canvasView.drawing = PKDrawing(
+            strokes: [existingStroke, matchingStroke]
+        )
+        harness.controller.strokeEnded(cancelled: false)
+        await drainMainQueue()
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1)
+        assertBounds(
+            harness.canvasView.drawing.strokes[0].renderBounds,
+            equalTo: existingStroke.renderBounds
+        )
         XCTAssertEqual(shapeElements(in: harness.store).count, 1)
+        XCTAssertEqual(harness.undoManager.undoActionName, "Draw Shape")
     }
 
     // Regression test for the same data-loss race as

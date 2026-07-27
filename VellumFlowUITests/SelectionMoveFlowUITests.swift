@@ -2,13 +2,26 @@ import XCTest
 
 @MainActor
 final class SelectionMoveFlowUITests: XCTestCase {
+    /// Mirrors `SelectionCapturePolicy.grabPadding` — this target does not link VellumCore, so
+    /// the number is repeated here. It is a screen measurement, which is also what a synthesized
+    /// gesture speaks, so every offset below is in screen points.
+    private let grabPadding: CGFloat = 22
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
 
-    /// A small shape has almost no room to grab inside its own bounds, so a drag starting
-    /// well outside the selection must still translate it instead of starting a new capture.
-    func testDraggingOutsideSelectionMovesIt() {
+    /// A snapped line is eight content points tall: there is no interior to aim at, and a drag
+    /// that had to begin inside the selection bounds could not move it at all. The grab area is
+    /// those bounds padded to a comfortable touch target, and this drives both of its edges —
+    /// a drag starting beside the line moves it, one starting well past the padding does not.
+    ///
+    /// What the far drag does instead is this run's answer, not hardware's: fingers may capture
+    /// in the simulator, so it starts a fresh capture. On a device — or under
+    /// `-vellum-force-pencil-only`, which this test deliberately does not pass — the same drag
+    /// falls through to the canvas and scrolls it. Both rest on the one claim asserted here:
+    /// a drag beginning outside the grab area does not belong to the selection.
+    func testDraggingBesideSmallSelectionMovesItButDraggingFarFromItDoesNot() {
         let app = XCUIApplication()
         app.launch()
 
@@ -42,14 +55,8 @@ final class SelectionMoveFlowUITests: XCTestCase {
         )
         wait(for: [snapped], timeout: 5)
 
-        ShapeFlowTestHelpers.selectTool("Select", in: app)
-        ShapeFlowTestHelpers.selectTool("Box", in: app)
-        window.coordinate(withNormalizedOffset: CGVector(dx: 0.26, dy: 0.54)).press(
-            forDuration: 0.05,
-            thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.62))
-        )
-
         let vertexHandles = app.otherElements["vellum-shape-vertex-handles"]
+        selectDrawnLine(in: app, window: window)
         XCTAssertTrue(
             vertexHandles.waitForExistence(timeout: 5),
             "shape vertex handles did not appear after boxed selection"
@@ -61,13 +68,70 @@ final class SelectionMoveFlowUITests: XCTestCase {
             return
         }
 
-        // Far below and to the right of both the selection and its action strip.
-        let outsideStart = window.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.68, dy: 0.70)
+        // The two vertex handles sit on the line's endpoints, so their spread on screen against
+        // the same two vertices in content space is whatever zoom the canvas is at. Offsetting
+        // from a handle's own center keeps the arithmetic in screen points throughout.
+        let firstHandle = vertexHandle(0, in: app)
+        let firstCenter = center(of: firstHandle)
+        let secondCenter = center(of: vertexHandle(1, in: app))
+        let screenSpan = hypot(secondCenter.x - firstCenter.x, secondCenter.y - firstCenter.y)
+        let contentSpan = hypot(
+            pointsBefore[1].x - pointsBefore[0].x,
+            pointsBefore[1].y - pointsBefore[0].y
         )
-        outsideStart.press(
+        guard screenSpan > 0, contentSpan > 0 else {
+            XCTFail("the selected line has no length to measure the canvas zoom with")
+            return
+        }
+        let zoomScale = screenSpan / contentSpan
+
+        // A shape's frame is inflated to at least eight content points, so the selection bounds
+        // reach only this far below the line — a handful of screen points, which is the whole
+        // reason the padding exists.
+        let boundsEdge = max(abs(pointsBefore[1].y - pointsBefore[0].y), 8) / 2 * zoomScale
+        let midpoint = CGPoint(
+            x: (firstCenter.x + secondCenter.x) / 2,
+            y: (firstCenter.y + secondCenter.y) / 2
+        )
+        let anchor = firstHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        func startBelowLine(by distance: CGFloat) -> XCUICoordinate {
+            anchor.withOffset(
+                CGVector(
+                    dx: midpoint.x - firstCenter.x,
+                    dy: midpoint.y - firstCenter.y + distance
+                )
+            )
+        }
+
+        // Three targets below the line: past any padding, and far enough that the capture this
+        // starts cannot reach back over the shape.
+        let farStart = startBelowLine(by: boundsEdge + grabPadding * 3)
+        farStart.press(
             forDuration: 0.05,
-            thenDragTo: outsideStart.withOffset(CGVector(dx: -70, dy: -60))
+            thenDragTo: farStart.withOffset(CGVector(dx: 60, dy: 40))
+        )
+        XCTAssertTrue(
+            vertexHandles.waitForNonExistence(timeout: 5),
+            "a drag well outside the grab area still belonged to the selection"
+        )
+
+        selectDrawnLine(in: app, window: window)
+        XCTAssertTrue(
+            vertexHandles.waitForExistence(timeout: 5),
+            "the line could not be selected again after the capture"
+        )
+        XCTAssertEqual(
+            ShapeFlowTestHelpers.accessibilityValue(of: vertexHandles),
+            summaryBefore,
+            "a drag well outside the grab area moved the selection"
+        )
+
+        // Halfway through the padding: outside the line's own bounds, where the drag used to
+        // start a capture over the selection it was reaching for, and inside the grab area.
+        let besideStart = startBelowLine(by: boundsEdge + grabPadding / 2)
+        besideStart.press(
+            forDuration: 0.05,
+            thenDragTo: besideStart.withOffset(CGVector(dx: -70, dy: -60))
         )
 
         let moved = expectation(
@@ -80,7 +144,7 @@ final class SelectionMoveFlowUITests: XCTestCase {
             from: ShapeFlowTestHelpers.accessibilityValue(of: vertexHandles)
         )
         guard pointsAfter.count == pointsBefore.count else {
-            XCTFail("a drag outside the selection replaced it instead of moving it")
+            XCTFail("a drag beside the selection replaced it instead of moving it")
             return
         }
 
@@ -96,5 +160,39 @@ final class SelectionMoveFlowUITests: XCTestCase {
             XCTAssertEqual(after.x - before.x, shift.dx, accuracy: 1)
             XCTAssertEqual(after.y - before.y, shift.dy, accuracy: 1)
         }
+    }
+
+    /// Boxes the drawn line with a rectangle that clears it on every side, so the selection this
+    /// makes is the same one however often it is remade.
+    private func selectDrawnLine(in app: XCUIApplication, window: XCUIElement) {
+        ShapeFlowTestHelpers.selectTool("Select", in: app)
+        ShapeFlowTestHelpers.selectTool("Box", in: app)
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.26, dy: 0.54)).press(
+            forDuration: 0.05,
+            thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.62))
+        )
+    }
+
+    private func vertexHandle(
+        _ index: Int,
+        in app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> XCUIElement {
+        let handle = app.descendants(matching: .any)
+            .matching(identifier: "vellum-shape-vertex-handle-\(index)")
+            .firstMatch
+        XCTAssertTrue(
+            handle.waitForExistence(timeout: 5),
+            "shape vertex handle \(index) not found",
+            file: file,
+            line: line
+        )
+        return handle
+    }
+
+    private func center(of element: XCUIElement) -> CGPoint {
+        let frame = element.frame
+        return CGPoint(x: frame.midX, y: frame.midY)
     }
 }
