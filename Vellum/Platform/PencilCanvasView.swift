@@ -60,6 +60,19 @@ final class PagedCanvasView: PKCanvasView {
     /// SwiftUI update is dropped, leaving the overlays stuck on a stale viewport.
     private(set) var isInLayoutDrivenChange = false
 
+    var topContentInset: CGFloat = 0 {
+        didSet {
+            guard oldValue != topContentInset else { return }
+            let wasRestingAtTop = abs(contentOffset.y + oldValue) <= 0.5
+            isInLayoutDrivenChange = true
+            defer { isInLayoutDrivenChange = false }
+            syncContentSize()
+            if wasRestingAtTop {
+                contentOffset.y = -topContentInset
+            }
+        }
+    }
+
     // Placeholder until PencilCanvasView supplies the note-specific content height.
     var contentHeightInContentSpace: CGFloat = PageGeometry.a4.pageHeight {
         didSet {
@@ -105,6 +118,7 @@ final class PagedCanvasView: PKCanvasView {
 
     func centerContentHorizontally() {
         let excess = max(0, bounds.width - contentSize.width)
+        contentInset.top = topContentInset
         contentInset.left = excess / 2
         contentInset.right = excess / 2
     }
@@ -144,7 +158,8 @@ final class PagedCanvasView: PKCanvasView {
             visibleCenterContentY: visibleCenterContentY,
             scale: target,
             viewportHeight: bounds.height,
-            contentHeight: contentHeightInContentSpace
+            contentHeight: contentHeightInContentSpace,
+            minimumOffsetY: -topContentInset
         )
         isAnimatingZoomSnap = true
         haptics.prepare()
@@ -209,6 +224,7 @@ final class PagedCanvasView: PKCanvasView {
     /// Layout-driven: recompute fit limits and snap only outside an active pinch.
     func updateZoomLimitsAndContentSize() {
         guard bounds.width > 0 else { return }
+        let isFirstLayout = lastFitScale == nil
         let fit = PageLayout.minZoom(forViewportWidth: bounds.width)
         let overviewFloor = PageLayout.overviewMinZoom(forViewportWidth: bounds.width)
         let wasAtFit = lastFitScale.map { abs(zoomScale - $0) < 0.001 } ?? false
@@ -226,6 +242,9 @@ final class PagedCanvasView: PKCanvasView {
         haptics.resetLimitLatch()
         lastFitScale = fit
         syncContentSize()
+        if isFirstLayout {
+            contentOffset.y = -topContentInset
+        }
     }
 }
 
@@ -245,6 +264,7 @@ struct PencilCanvasView: UIViewRepresentable {
     var isDrawingEnabled: Bool = true
     // Placeholder overridden by NoteScreenView from NotePageState.
     var contentHeight: CGFloat = PageGeometry.a4.pageHeight
+    var topContentInset: CGFloat = 0
     var onViewportChanged: ((CanvasViewport) -> Void)? = nil
     var onExternalDrawingChange: (() -> Void)? = nil
     var onPencilSqueeze: ((PencilSqueezePhase) -> Void)? = nil
@@ -267,6 +287,7 @@ struct PencilCanvasView: UIViewRepresentable {
         let canvasView: PKCanvasView = PagedCanvasView()
         canvasView.contentInsetAdjustmentBehavior = .never
         (canvasView as? PagedCanvasView)?.contentHeightInContentSpace = contentHeight
+        (canvasView as? PagedCanvasView)?.topContentInset = topContentInset
         canvasView.delegate = context.coordinator
 #if targetEnvironment(simulator)
         #if DEBUG
@@ -339,6 +360,7 @@ struct PencilCanvasView: UIViewRepresentable {
         canvasView.isOpaque = !isTransparent
         canvasView.drawingGestureRecognizer.isEnabled = isDrawingEnabled
         (canvasView as? PagedCanvasView)?.contentHeightInContentSpace = contentHeight
+        (canvasView as? PagedCanvasView)?.topContentInset = topContentInset
 
         if let tool, !Self.toolsMatch(canvasView.tool, tool) {
             canvasView.tool = tool
