@@ -18,6 +18,9 @@ struct NoteScreenView: View {
     @State private var lastNonNilTool: (any PKTool)?
     @State private var canvasReference = NoteCanvasReference()
     @State private var selectionController = CanvasSelectionController()
+    /// The tool a shape tap set aside, restored when that selection ends.
+    @State private var toolBorrowedByShapeTap: ToolID?
+    @State private var shapeSnapController = ShapeSnapController()
     @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
     @State private var canvasSize: CGSize = .zero
     @State private var pageState = NotePageState()
@@ -91,6 +94,7 @@ struct NoteScreenView: View {
                 app: app,
                 canvasReference: canvasReference,
                 selectionController: selectionController,
+                shapeSnapController: shapeSnapController,
                 pageState: pageState,
                 selectedTool: $selectedTool,
                 cacheCurrentTool: cacheCurrentTool,
@@ -106,6 +110,16 @@ struct NoteScreenView: View {
                 cacheCurrentTool: cacheCurrentTool
             )
         )
+        .onChange(of: selectionController.selection != nil) { _, hasSelection in
+            // A shape tap borrows the Select tool so the shape edits the one way shapes edit.
+            // Once the selection ends the tool goes back, so selecting a shape never costs the
+            // pen you were drawing with. If the tool has moved on already, the user chose it.
+            guard !hasSelection, let borrowedFrom = toolBorrowedByShapeTap else { return }
+            toolBorrowedByShapeTap = nil
+            if selectedTool == .select {
+                selectedTool = borrowedFrom
+            }
+        }
         .modifier(
             NoteScreenCanvasContentChangeObservers(
                 model: model,
@@ -245,6 +259,29 @@ struct NoteScreenView: View {
 
                 ImageElementsLayer(
                     store: model.canvasElements,
+                    selectionController: selectionController,
+                    viewport: canvasViewport
+                )
+                .frame(
+                    width: PageLayout.contentWidth,
+                    height: pageState.contentHeight,
+                    alignment: .topLeading
+                )
+                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
+                .offset(
+                    x: -canvasViewport.contentOffset.x,
+                    y: -canvasViewport.contentOffset.y
+                )
+                .frame(
+                    width: geometry.size.width,
+                    height: geometry.size.height,
+                    alignment: .topLeading
+                )
+                .clipped()
+
+                ShapeElementsLayer(
+                    store: model.canvasElements,
+                    selectionController: selectionController,
                     viewport: canvasViewport
                 )
                 .frame(
@@ -316,6 +353,45 @@ struct NoteScreenView: View {
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
 
+                ShapeSnapSurface(
+                    controller: shapeSnapController,
+                    isEnabled: selectedTool.isInkTool,
+                    inkConfig: selectedTool.inkConfigKeyPath.map {
+                        app.toolPreferences.preferences[keyPath: $0]
+                    },
+                    isDrawingEnabled: selectedTool.usesDrawingGesture
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .allowsHitTesting(false)
+
+                ShapeEraserSurface(
+                    canvasReference: canvasReference,
+                    elementsStore: model.canvasElements,
+                    eraserConfig: app.toolPreferences.preferences.eraser,
+                    isEnabled: selectedTool == .eraser
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .allowsHitTesting(false)
+
+                ShapeTapSelectionSurface(
+                    canvasReference: canvasReference,
+                    elementsStore: model.canvasElements,
+                    selectionController: selectionController,
+                    // Only the ink tools borrow a tap for shape selection. While Select is
+                    // already active its capture surface owns taps, including tapping away to
+                    // deselect, and two tap handlers on one canvas would race; the eraser and
+                    // Text each answer their own taps instead.
+                    isEnabled: selectedTool.isInkTool,
+                    onShapeSelected: {
+                        if selectedTool != .select {
+                            toolBorrowedByShapeTap = selectedTool
+                        }
+                        selectedTool = .select
+                    }
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .allowsHitTesting(false)
+
                 TextElementsLayer(
                     store: model.canvasElements,
                     textDefaults: app.toolPreferences.preferences.text,
@@ -342,7 +418,9 @@ struct NoteScreenView: View {
                 SelectionOverlayView(
                     controller: selectionController,
                     selectionMode: app.toolPreferences.preferences.selection.mode,
-                    isActive: selectedTool == .select
+                    isActive: selectionController.selection != nil
+                        || selectedTool == .select,
+                    isSelectToolActive: selectedTool == .select
                 )
                 .frame(
                     width: PageLayout.contentWidth,
@@ -361,8 +439,9 @@ struct NoteScreenView: View {
                 )
                 .clipped()
 
-                if selectedTool == .select,
-                   selectionController.selection != nil,
+                // Not gated on the Select tool: tapping a shape selects it while an ink tool is
+                // active, and that is exactly when the actions need to be reachable.
+                if selectionController.selection != nil,
                    selectionController.strokesSnapshot == nil,
                    selectionController.dragTranslation == .zero,
                    let bounds = selectionController.selectionBounds {
@@ -856,6 +935,7 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
     let app: VellumAppModel
     let canvasReference: NoteCanvasReference
     let selectionController: CanvasSelectionController
+    let shapeSnapController: ShapeSnapController
     let pageState: NotePageState
     @Binding var selectedTool: ToolID
     let cacheCurrentTool: () -> Void
@@ -870,6 +950,8 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                 model.canvasElements.canvasReference = canvasReference
                 selectionController.canvasReference = canvasReference
                 selectionController.elementsStore = model.canvasElements
+                shapeSnapController.canvasReference = canvasReference
+                shapeSnapController.elementsStore = model.canvasElements
                 model.canvasElements.onSnapshotApplied = { [weak selectionController] in
                     selectionController?.externalDrawingDidChange()
                 }
@@ -884,6 +966,22 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                         scrollCanvas(index)
                     }
                 }
+                let resolveSnapGrid = { [weak model, weak pageState] (point: CGPoint) -> ShapeSnapGrid? in
+                    guard let model, let pageState, let note = model.note else { return nil }
+                    let geometry = pageState.pageGeometry
+                    let pageIndex = geometry.pageIndex(
+                        forContentY: point.y,
+                        pageCount: pageState.pageCount
+                    )
+                    // A PDF page draws no pattern, so there is no lattice to align to there.
+                    guard !model.pdfBands.contains(pageIndex) else { return nil }
+                    return ShapeGridSnapper.grid(
+                        for: note.backgroundStyle,
+                        pageRect: geometry.pageRect(index: pageIndex)
+                    )
+                }
+                selectionController.snapGrid = resolveSnapGrid
+                shapeSnapController.snapGrid = resolveSnapGrid
                 selectionController.persistImageData = { [weak model] data in
                     await model?.persistPastedImageData(data)
                 }
@@ -922,7 +1020,7 @@ private struct NoteScreenPrimaryChangeObservers: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: selectedTool) { _, newTool in
-                selectionController.clearSelection()
+                selectionController.toolChanged()
                 app.toolPreferences.update { preferences in
                     preferences.lastSelectedTool = newTool
                 }

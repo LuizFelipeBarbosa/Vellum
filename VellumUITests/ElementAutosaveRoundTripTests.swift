@@ -82,6 +82,85 @@ final class ElementAutosaveRoundTripTests: XCTestCase {
         }
     }
 
+    func testShapeElementsRoundTripThroughAutosavePath() async throws {
+        let rootDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: rootDirectory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+        let container = AppContainer.live(rootDirectory: rootDirectory)
+        let note = try await container.notes.createNote(title: "Shape round trip")
+        let model = NoteScreenModel(
+            noteID: note.id,
+            container: container,
+            onNoteChanged: { _ in }
+        )
+        await model.load()
+
+        let polylineElement = CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0.2),
+                            CanvasPoint(x: 0.5, y: 1),
+                            CanvasPoint(x: 1, y: 0),
+                        ],
+                        isClosed: true
+                    ),
+                    strokeColor: CodableColor(
+                        red: 0.2,
+                        green: 0.4,
+                        blue: 0.6,
+                        alpha: 0.8
+                    ),
+                    strokeWidth: 7
+                )
+            ),
+            frame: CanvasRect(x: 10, y: 20, width: 180, height: 120),
+            rotation: 0.25
+        )
+        let ellipseElement = CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .ellipse,
+                    strokeColor: CodableColor(red: 0.7, green: 0.3, blue: 0.1),
+                    strokeWidth: 5
+                )
+            ),
+            frame: CanvasRect(x: 240, y: 80, width: 160, height: 100),
+            rotation: .pi / 6
+        )
+
+        model.canvasElements.addElement(polylineElement)
+        model.canvasElements.addElement(ellipseElement)
+        await model.flushPendingSave()
+
+        let freshRepository = FileNoteRepository(rootDirectory: rootDirectory)
+        let reloadedNote = try await freshRepository.loadNote(id: note.id)
+        let reloadedElements = try XCTUnwrap(reloadedNote.pages.first?.elements)
+
+        XCTAssertEqual(reloadedElements.count, 2)
+        for (reloaded, original) in zip(
+            reloadedElements,
+            [polylineElement, ellipseElement]
+        ) {
+            XCTAssertEqual(reloaded.id, original.id)
+            XCTAssertEqual(reloaded.content, original.content)
+            XCTAssertEqual(reloaded.frame, original.frame)
+            XCTAssertEqual(reloaded.rotation, original.rotation)
+            // The repository's ISO8601 encoding truncates dates to milliseconds.
+            XCTAssertEqual(
+                reloaded.createdAt.timeIntervalSinceReferenceDate,
+                original.createdAt.timeIntervalSinceReferenceDate,
+                accuracy: 0.001
+            )
+        }
+    }
+
     func testHydrateDoesNotNotifyOrMarkModelEdited() async throws {
         let rootDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

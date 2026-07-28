@@ -60,6 +60,7 @@ public struct CanvasElement: Identifiable, Codable, Equatable, Sendable {
     public enum Content: Equatable, Sendable {
         case text(TextBoxContent)
         case image(ImageContent)
+        case shape(ShapeContent)
         case unknown(UnknownContent)
     }
 
@@ -92,13 +93,14 @@ public struct CanvasElement: Identifiable, Codable, Equatable, Sendable {
             content = .text(try container.decode(TextBoxContent.self, forKey: .text))
         case "image":
             content = .image(try container.decode(ImageContent.self, forKey: .image))
+        case "shape":
+            do {
+                content = .shape(try container.decode(ShapeContent.self, forKey: .shape))
+            } catch {
+                content = try Self.decodeUnknownContent(kind: kind, from: decoder)
+            }
         default:
-            let dynamicContainer = try decoder.container(keyedBy: AnyCodingKey.self)
-            let payload = try dynamicContainer.decodeIfPresent(
-                JSONValue.self,
-                forKey: AnyCodingKey(kind)
-            ) ?? .null
-            content = .unknown(UnknownContent(kind: kind, payload: payload))
+            content = try Self.decodeUnknownContent(kind: kind, from: decoder)
         }
         frame = try container.decode(CanvasRect.self, forKey: .frame)
         rotation = try container.decode(Double.self, forKey: .rotation)
@@ -115,6 +117,9 @@ public struct CanvasElement: Identifiable, Codable, Equatable, Sendable {
         case .image(let image):
             try container.encode("image", forKey: .kind)
             try container.encode(image, forKey: .image)
+        case .shape(let shape):
+            try container.encode("shape", forKey: .kind)
+            try container.encode(shape, forKey: .shape)
         case .unknown(let unknown):
             try container.encode(unknown.kind, forKey: .kind)
             if unknown.payload != .null {
@@ -127,11 +132,21 @@ public struct CanvasElement: Identifiable, Codable, Equatable, Sendable {
         try container.encode(createdAt, forKey: .createdAt)
     }
 
+    private static func decodeUnknownContent(kind: String, from decoder: Decoder) throws -> Content {
+        let dynamicContainer = try decoder.container(keyedBy: AnyCodingKey.self)
+        let payload = try dynamicContainer.decodeIfPresent(
+            JSONValue.self,
+            forKey: AnyCodingKey(kind)
+        ) ?? .null
+        return .unknown(UnknownContent(kind: kind, payload: payload))
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case kind
         case text
         case image
+        case shape
         case frame
         case rotation
         case createdAt

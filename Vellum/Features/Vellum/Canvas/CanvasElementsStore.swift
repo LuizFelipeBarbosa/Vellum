@@ -7,7 +7,7 @@ import VellumCore
 @MainActor
 @Observable
 final class CanvasElementsStore {
-    private struct Snapshot: Equatable {
+    fileprivate struct Snapshot: Equatable {
         let drawingData: Data?
         let elements: [CanvasElement]
         let pages: [NotePage]?
@@ -57,6 +57,11 @@ final class CanvasElementsStore {
 
     private var isInTransaction = false
 
+    /// Opaque full-state token (drawing + elements + pages) captured at session start.
+    struct LiveSessionToken {
+        fileprivate let before: Snapshot
+    }
+
     func hydrate(_ elements: [CanvasElement]) {
         self.elements = elements
     }
@@ -87,6 +92,52 @@ final class CanvasElementsStore {
         guard let index = elements.firstIndex(where: { $0.id == element.id }) else { return }
         elements[index] = element
         onElementsChanged?(elements)
+    }
+
+    /// Begin a live session that may mutate BOTH the drawing and elements without
+    /// registering undo. Pair with `commitLiveSession`.
+    func beginLiveSession() -> LiveSessionToken {
+        LiveSessionToken(before: snapshot())
+    }
+
+    /// Live drawing write (no undo registration). Must NOT be called inside performTransaction.
+    /// Brackets the write with the coordinator's programmatic-change guards.
+    func mutateDrawingLive(_ mutate: (inout PKDrawing) -> Void) {
+        guard !isInTransaction else {
+            assertionFailure("mutateDrawingLive must not be called inside performTransaction")
+            return
+        }
+        guard let canvasView = canvasReference?.canvasView else { return }
+
+        let coordinator = canvasReference?.coordinator
+        coordinator?.beginProgrammaticChange()
+        var drawing = canvasView.drawing
+        mutate(&drawing)
+        canvasView.drawing = drawing
+        coordinator?.endProgrammaticChange(canvasView)
+        onElementsChanged?(elements)
+    }
+
+    /// Append without undo registration; fires onElementsChanged.
+    func addElementLive(_ element: CanvasElement) {
+        elements.append(element)
+        onElementsChanged?(elements)
+    }
+
+    /// Register exactly ONE undo step covering everything applied since the token was taken.
+    /// No-op when nothing changed.
+    func commitLiveSession(_ token: LiveSessionToken, label: String) {
+        let after = snapshot()
+        guard token.before != after else { return }
+        guard let undoManager = undoManagerOverride ?? canvasReference?.canvasView?.undoManager else {
+            return
+        }
+        registerUndo(
+            on: undoManager,
+            applying: token.before,
+            inverse: after,
+            label: label
+        )
     }
 
     /// Remove an element WITHOUT undo registration — pairs with registerEditingSessionUndo.
@@ -229,6 +280,8 @@ final class CanvasElementsStore {
             "Text Box"
         case .image:
             "Image"
+        case .shape:
+            "Shape"
         case .unknown:
             "Object"
         }

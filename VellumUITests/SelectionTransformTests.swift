@@ -84,6 +84,66 @@ final class SelectionTransformTests: XCTestCase {
         assertTransform(actual, equals: expected)
     }
 
+    func testShapeHandleTransformScalesFrameStrokeWidthAndRotation() throws {
+        let originalRotation = 0.2
+        let originalStrokeWidth = 6.0
+        let element = makeShapeElement(
+            frame: CanvasRect(x: 50, y: 40, width: 40, height: 20),
+            rotation: originalRotation,
+            strokeWidth: originalStrokeWidth
+        )
+        let harness = makeHarness(strokes: [], elements: [element])
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 150, y: 120))
+        let scale = CGSize(width: 2, height: 1.5)
+        let appliedRotation = Double.pi / 4
+        let originalCenter = CGPoint(
+            x: element.frame.x + element.frame.width / 2,
+            y: element.frame.y + element.frame.height / 2
+        )
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: scale,
+            rotation: appliedRotation
+        )
+        harness.controller.endHandleDrag()
+
+        let transformed = try XCTUnwrap(harness.store.elements.first)
+        XCTAssertEqual(
+            transformed.frame.width,
+            element.frame.width * Double(scale.width),
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformed.frame.height,
+            element.frame.height * Double(scale.height),
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformed.frame.x,
+            Double(originalCenter.x) - transformed.frame.width / 2,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformed.frame.y,
+            Double(originalCenter.y) - transformed.frame.height / 2,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformed.rotation,
+            originalRotation + appliedRotation,
+            accuracy: 0.000_001
+        )
+        guard case .shape(let shape) = transformed.content else {
+            return XCTFail("Expected a shape element")
+        }
+        XCTAssertEqual(
+            shape.strokeWidth,
+            originalStrokeWidth * Double(min(scale.width, scale.height)),
+            accuracy: 0.000_001
+        )
+    }
+
     func testMixedHandleTransformIsExactlyOneUndoStep() throws {
         let element = makeElement(
             frame: CanvasRect(x: 65, y: 20, width: 32, height: 28),
@@ -179,6 +239,156 @@ final class SelectionTransformTests: XCTestCase {
         XCTAssertEqual(restyled.path.creationDate, stroke.path.creationDate)
     }
 
+    func testShapeRestyleAppliesColorAndWidthIndependently() throws {
+        let originalColor = CodableColor(red: 0.1, green: 0.2, blue: 0.3)
+        var element = makeShapeElement(
+            frame: CanvasRect(x: 30, y: 30, width: 80, height: 60),
+            strokeWidth: 6
+        )
+        guard case .shape(var originalShape) = element.content else {
+            return XCTFail("Expected a shape element")
+        }
+        originalShape.strokeColor = originalColor
+        element.content = .shape(originalShape)
+        let harness = makeHarness(strokes: [], elements: [element])
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 150, y: 120))
+
+        harness.controller.restyleSelection(color: nil, strokeWidth: 11)
+
+        let widthRestyled = try XCTUnwrap(harness.store.elements.first)
+        guard case .shape(let widthRestyledShape) = widthRestyled.content else {
+            return XCTFail("Expected a shape element")
+        }
+        XCTAssertEqual(widthRestyledShape.strokeColor, originalColor)
+        XCTAssertEqual(widthRestyledShape.strokeWidth, 11)
+
+        let updatedColor = CodableColor(red: 0.7, green: 0.5, blue: 0.2)
+        harness.controller.restyleSelection(color: updatedColor, strokeWidth: nil)
+
+        let colorRestyled = try XCTUnwrap(harness.store.elements.first)
+        guard case .shape(let colorRestyledShape) = colorRestyled.content else {
+            return XCTFail("Expected a shape element")
+        }
+        XCTAssertEqual(colorRestyledShape.strokeColor, updatedColor)
+        XCTAssertEqual(colorRestyledShape.strokeWidth, 11)
+    }
+
+    func testLiveTransformFollowsAMoveDragForSelectedElementsOnly() throws {
+        let selected = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
+        let untouched = makeShapeElement(
+            frame: CanvasRect(x: 300, y: 300, width: 60, height: 40)
+        )
+        let harness = makeHarness(strokes: [], elements: [selected, untouched])
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 120))
+
+        harness.controller.beginMoveDrag()
+        harness.controller.setDragTranslation(CGSize(width: 35, height: -18))
+
+        assertTransform(
+            harness.controller.liveTransform(forElementWith: selected.id),
+            equals: CGAffineTransform(translationX: 35, y: -18)
+        )
+        assertTransform(
+            harness.controller.liveTransform(forElementWith: untouched.id),
+            equals: .identity
+        )
+    }
+
+    func testLiveTransformScalesAboutTheSelectionCenterDuringAHandleDrag() throws {
+        let element = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
+        let harness = makeHarness(strokes: [], elements: [element])
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 120))
+        let bounds = try XCTUnwrap(harness.controller.selectionBounds)
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: CGSize(width: 2, height: 2),
+            rotation: 0
+        )
+
+        // The preview must pin the same center the commit does, or the shape would jump on drop.
+        let transform = harness.controller.liveTransform(forElementWith: element.id)
+        let movedCenter = center.applying(transform)
+        XCTAssertEqual(movedCenter.x, center.x, accuracy: 0.001)
+        XCTAssertEqual(movedCenter.y, center.y, accuracy: 0.001)
+
+        let corner = CGPoint(x: bounds.minX, y: bounds.minY).applying(transform)
+        XCTAssertEqual(corner.x, center.x - bounds.width, accuracy: 0.001)
+        XCTAssertEqual(corner.y, center.y - bounds.height, accuracy: 0.001)
+    }
+
+    func testDraggingAShapeSnapsItToThePageLattice() throws {
+        // A horizontal line: its frame is inflated to a minimum extent, so the line itself sits
+        // at the middle of the frame, not at its top edge.
+        let line = makeLineShape(from: CGPoint(x: 30, y: 100), to: CGPoint(x: 150, y: 100))
+        let harness = makeHarness(strokes: [], elements: [line])
+        harness.controller.snapGrid = { _ in
+            ShapeSnapGrid(origin: .zero, spacing: 24, snapsX: true, snapsY: true)
+        }
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 200, y: 200))
+
+        // Dropping the line at y = 141 puts it 3pt from the rule at 144, inside the tolerance.
+        harness.controller.beginMoveDrag()
+        harness.controller.setDragTranslation(CGSize(width: 20, height: 41))
+
+        XCTAssertEqual(harness.controller.dragTranslation.height, 44, accuracy: 0.001)
+        XCTAssertEqual(harness.controller.dragTranslation.width, 18, accuracy: 0.001)
+
+        harness.controller.endMoveDrag()
+        let moved = try XCTUnwrap(harness.store.elements.first)
+        let drawn = ShapeGeometry.path(
+            for: try XCTUnwrap(shapeContent(of: moved)),
+            in: moved.frame,
+            rotation: moved.rotation
+        ).boundingBox
+        XCTAssertEqual(drawn.minY, 144, accuracy: 0.001)
+        XCTAssertEqual(drawn.minX, 48, accuracy: 0.001)
+    }
+
+    func testDraggingAShapeFarFromTheLatticeIsNotPulled() {
+        let line = makeLineShape(from: CGPoint(x: 30, y: 100), to: CGPoint(x: 150, y: 100))
+        let harness = makeHarness(strokes: [], elements: [line])
+        harness.controller.snapGrid = { _ in
+            ShapeSnapGrid(origin: .zero, spacing: 24, snapsX: true, snapsY: true)
+        }
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 200, y: 200))
+
+        // 132 sits midway between the rules at 120 and 144, so neither is within the 7.2pt
+        // tolerance and the line stays exactly where it was dropped.
+        harness.controller.beginMoveDrag()
+        harness.controller.setDragTranslation(CGSize(width: 0, height: 32))
+
+        XCTAssertEqual(harness.controller.dragTranslation.height, 32, accuracy: 0.001)
+    }
+
+    func testDraggingInkOnlyIsNeverSnapped() {
+        let harness = makeHarness(
+            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 50, y: 40)])],
+            elements: []
+        )
+        harness.controller.snapGrid = { _ in
+            ShapeSnapGrid(origin: .zero, spacing: 24, snapsX: true, snapsY: true)
+        }
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 100, y: 100))
+
+        harness.controller.beginMoveDrag()
+        harness.controller.setDragTranslation(CGSize(width: 27, height: 27))
+
+        XCTAssertEqual(harness.controller.dragTranslation.width, 27, accuracy: 0.001)
+        XCTAssertEqual(harness.controller.dragTranslation.height, 27, accuracy: 0.001)
+    }
+
+    func testLiveTransformIsIdentityWithoutASelection() {
+        let element = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
+        let harness = makeHarness(strokes: [], elements: [element])
+
+        assertTransform(
+            harness.controller.liveTransform(forElementWith: element.id),
+            equals: .identity
+        )
+    }
+
     private func select(
         in harness: Harness,
         from start: CGPoint,
@@ -248,6 +458,50 @@ final class SelectionTransformTests: XCTestCase {
                     text: "Selected",
                     fontSize: 18,
                     color: CodableColor(red: 0, green: 0, blue: 0)
+                )
+            ),
+            frame: frame,
+            rotation: rotation
+        )
+    }
+
+    /// A line built the way the recognizer builds one, so its frame carries the same minimum
+    /// extent inflation a real horizontal line has.
+    private func makeLineShape(from start: CGPoint, to end: CGPoint) -> CanvasElement {
+        let built = ShapeElementBuilder.element(
+            from: .polyline(vertices: [start, end], isClosed: false),
+            strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+            strokeWidth: 4
+        )
+        return CanvasElement(
+            content: .shape(built.content),
+            frame: built.frame,
+            rotation: built.rotation
+        )
+    }
+
+    private func shapeContent(of element: CanvasElement) -> ShapeContent? {
+        guard case .shape(let content) = element.content else { return nil }
+        return content
+    }
+
+    private func makeShapeElement(
+        frame: CanvasRect,
+        rotation: Double = 0,
+        strokeWidth: Double = 6
+    ) -> CanvasElement {
+        CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0),
+                            CanvasPoint(x: 1, y: 1),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: strokeWidth
                 )
             ),
             frame: frame,

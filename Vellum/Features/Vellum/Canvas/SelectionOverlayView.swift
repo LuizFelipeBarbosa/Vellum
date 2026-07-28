@@ -1,11 +1,14 @@
 import SwiftUI
+import VellumCore
 
 struct SelectionOverlayView: View {
     let controller: CanvasSelectionController
     let selectionMode: SelectionMode
     let isActive: Bool
+    let isSelectToolActive: Bool
 
     @State private var activeHandle: SelectionHandle?
+    @State private var activeVertexIndex: Int?
 
     private static let coordinateSpaceName = "vellum-selection-overlay"
 
@@ -28,7 +31,23 @@ struct SelectionOverlayView: View {
                             if controller.capturePath == nil,
                                controller.strokesSnapshot == nil
                                 || controller.isHandleDragging {
-                                selectionHandles(in: bounds)
+                                let shape = controller.vertexEditableElement()
+
+                                if !controller.isVertexDragging {
+                                    // A shape carries its own handles, which sit on the curve or
+                                    // the vertices — right where the frame's resize handles would
+                                    // be. Showing both stacks two grabbable targets on the same
+                                    // point, so the frame's give way and only rotation remains.
+                                    selectionHandles(
+                                        in: bounds,
+                                        includesResizeHandles: shape == nil
+                                            || controller.isHandleDragging
+                                    )
+                                }
+
+                                if !controller.isHandleDragging, let shape {
+                                    vertexHandles(for: shape)
+                                }
                             }
                         }
 
@@ -52,9 +71,13 @@ struct SelectionOverlayView: View {
     }
 
     private var captureSurface: some View {
-        SelectionCaptureSurface(controller: controller, selectionMode: selectionMode)
-            .allowsHitTesting(false)
-            .accessibilityLabel("Canvas selection area")
+        SelectionCaptureSurface(
+            controller: controller,
+            selectionMode: selectionMode,
+            isEnabled: isSelectToolActive
+        )
+        .allowsHitTesting(false)
+        .accessibilityLabel("Canvas selection area")
     }
 
     @ViewBuilder
@@ -106,7 +129,10 @@ struct SelectionOverlayView: View {
         }
     }
 
-    private func selectionHandles(in bounds: CGRect) -> some View {
+    private func selectionHandles(
+        in bounds: CGRect,
+        includesResizeHandles: Bool
+    ) -> some View {
         ZStack(alignment: .topLeading) {
             Path { path in
                 path.move(to: livePoint(for: .top, in: bounds))
@@ -115,7 +141,7 @@ struct SelectionOverlayView: View {
             .stroke(VellumTheme.accentDark, lineWidth: 1.5)
             .allowsHitTesting(false)
 
-            ForEach(SelectionHandle.resizeHandles) { handle in
+            ForEach(includesResizeHandles ? SelectionHandle.resizeHandles : []) { handle in
                 Rectangle()
                     .fill(VellumTheme.popover)
                     .frame(width: 10, height: 10)
@@ -143,6 +169,83 @@ struct SelectionOverlayView: View {
                 .gesture(handleGesture(.rotation, bounds: bounds))
                 .accessibilityLabel(SelectionHandle.rotation.accessibilityLabel)
         }
+    }
+
+    private func vertexHandles(for element: CanvasElement) -> some View {
+        let vertices = controller.vertexEditHandles(for: element)
+
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(vertices.enumerated()), id: \.offset) { index, vertex in
+                Circle()
+                    .fill(VellumTheme.accentDark)
+                    .frame(width: 9, height: 9)
+                    .overlay {
+                        Circle()
+                            .stroke(VellumTheme.popover, lineWidth: 1.5)
+                    }
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+                    .position(vertex)
+                    .gesture(
+                        vertexGesture(
+                            elementID: element.id,
+                            vertexIndex: index
+                        )
+                    )
+                    .accessibilityLabel("Shape vertex handle")
+                    .accessibilityIdentifier("vellum-shape-vertex-handle-\(index)")
+            }
+        }
+        // Swapping the selected shape under an in-flight drag cancels the gesture, and the
+        // handles going away does the same; either way `.onEnded` never runs.
+        .onChange(of: element.id) { _, _ in
+            releaseStrandedVertexDrag()
+        }
+        .onDisappear {
+            releaseStrandedVertexDrag()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Shape vertex handles")
+        .accessibilityIdentifier("vellum-shape-vertex-handles")
+        .accessibilityValue(vertexSummary(vertices))
+    }
+
+    private func vertexGesture(
+        elementID: UUID,
+        vertexIndex: Int
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.coordinateSpaceName))
+            .onChanged { value in
+                // A cancelled gesture never reports `.onEnded`, so `activeVertexIndex` can
+                // outlive its drag. Rather than dead-end every other handle, let a fresh touch
+                // take the drag over — `beginVertexDrag` drops whatever was still in flight.
+                if activeVertexIndex != vertexIndex {
+                    activeVertexIndex = vertexIndex
+                    controller.beginVertexDrag(
+                        elementID: elementID,
+                        vertexIndex: vertexIndex
+                    )
+                }
+                controller.setVertexPosition(value.location)
+            }
+            .onEnded { _ in
+                guard activeVertexIndex == vertexIndex else { return }
+                controller.endVertexDrag()
+                activeVertexIndex = nil
+            }
+    }
+
+    /// Lets go of a drag SwiftUI cancelled: without this the stale index blocks every other
+    /// handle and the controller stays in its dragging state, which hides the rotation handle
+    /// for good. `endVertexDrag` commits whatever the drag already wrote and is a no-op when
+    /// no drag is in flight.
+    private func releaseStrandedVertexDrag() {
+        activeVertexIndex = nil
+        controller.endVertexDrag()
+    }
+
+    private func vertexSummary(_ vertices: [CGPoint]) -> String {
+        vertices.map { "\($0.x),\($0.y)" }.joined(separator: ";")
     }
 
     private func handleGesture(

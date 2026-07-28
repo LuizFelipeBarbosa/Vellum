@@ -21,16 +21,24 @@ final class CanvasSelectionController {
     private(set) var handleScale = CGSize(width: 1, height: 1)
     private(set) var handleRotation: Double = 0
     private(set) var isHandleDragging = false
+    private(set) var isVertexDragging = false
     weak var canvasReference: NoteCanvasReference?
     weak var elementsStore: CanvasElementsStore?
     var persistImageData: ((Data) async -> String?)?
     var onOperationFailed: ((String) -> Void)?
+    /// Alignment lattice for a content-space point, or nil where there is nothing to align to.
+    /// Supplied by the note screen, which is what knows the page background.
+    var snapGrid: ((CGPoint) -> ShapeSnapGrid?)?
 
     private var captureStart: CGPoint?
     private var captureMode: SelectionMode?
     private var captureRect: CGRect?
     private var handleDragBounds: CGRect?
     private var drawingBeforeHide: PKDrawing?
+    private var keepsSelectionThroughNextToolChange = false
+    private var vertexDragBaseline: [CanvasElement]?
+    private var vertexDragElementID: UUID?
+    private var vertexDragIndex: Int?
 
     func beginCapture(at point: CGPoint, mode: SelectionMode) {
         selection = nil
@@ -116,6 +124,9 @@ final class CanvasSelectionController {
 
     func clearSelection() {
         restoreHiddenStrokes()
+        // The exemption below belongs to the selection a shape tap just made, so it dies with
+        // that selection: an unrelated later tool change must never inherit it.
+        keepsSelectionThroughNextToolChange = false
         selection = nil
         selectionBounds = nil
         capturePath = nil
@@ -127,27 +138,122 @@ final class CanvasSelectionController {
         captureRect = nil
     }
 
-    func beginMoveDrag() {
+    /// Selects one element. `survivesNextToolChange` is for selecting by tapping a shape, which
+    /// also switches to the Select tool: without it the tool change would clear the selection the
+    /// tap just made.
+    func selectElement(id: UUID, survivesNextToolChange: Bool = false) {
+        restoreHiddenStrokes()
+        keepsSelectionThroughNextToolChange = survivesNextToolChange
+        let selection = Selection(
+            strokeIndices: IndexSet(),
+            elementIDs: [id]
+        )
+        self.selection = selection
+        selectionBounds = bounds(for: selection)
+        capturePath = nil
+        dragTranslation = .zero
+        strokesSnapshot = nil
+        resetHandleDrag()
+        captureStart = nil
+        captureMode = nil
+        captureRect = nil
+    }
+
+    /// Switching tools drops the selection, except the one a shape tap just made on its way into
+    /// the Select tool.
+    func toolChanged() {
+        guard !keepsSelectionThroughNextToolChange else {
+            keepsSelectionThroughNextToolChange = false
+            return
+        }
+        clearSelection()
+    }
+
+    /// True between `beginMoveDrag` and `endMoveDrag`. Derived rather than stored: the snapshot is
+    /// exactly what a move puts up, and every path that drops a selection already clears it — a
+    /// separate flag would be one more piece of state a torn-down drag could leave behind, and a
+    /// stale one would lock handle drags out for good.
+    private var isMoveDragging: Bool {
+        strokesSnapshot != nil && !isHandleDragging
+    }
+
+    /// Takes the selection into a move drag. Returns false when it refuses the drag — there is
+    /// nothing movable, or a handle drag already owns the selection — so a caller driving a pan
+    /// can stop feeding translations into a move that never started.
+    @discardableResult
+    func beginMoveDrag() -> Bool {
+        // A handle drag got here first, which means it has the selected strokes hidden and holds
+        // the only copy of the drawing they came from. Hiding again would stash that already
+        // trimmed drawing as the restore point and the hidden strokes would be lost for good, so
+        // the drag in flight keeps the selection. The pinch path takes a move over legitimately
+        // by ending it before it starts its handle drag.
+        guard !isHandleDragging else { return false }
+
         guard let selection,
               let bounds = selectionBounds,
               bounds.width > 0,
               bounds.height > 0,
               let canvasView = canvasReference?.canvasView else {
             strokesSnapshot = nil
-            return
+            return false
         }
 
         resetHandleDrag()
         strokesSnapshot = snapshot(for: selection, in: bounds, canvasView: canvasView)
         hideSelectedStrokes()
         dragTranslation = .zero
+        return true
     }
 
     func setDragTranslation(_ translation: CGSize) {
-        dragTranslation = translation
+        dragTranslation = translationSnappedToPageGrid(translation)
+    }
+
+    /// Pulls a dragged selection onto the page lattice once it carries a shape, so a shape lands
+    /// on the paper the same way whether it was just drawn or moved here. Ink-only selections are
+    /// left alone: freehand strokes have nothing to align.
+    private func translationSnappedToPageGrid(_ translation: CGSize) -> CGSize {
+        guard let anchor = selectedShapesAnchor() else { return translation }
+
+        let dragged = CGPoint(
+            x: anchor.x + translation.width,
+            y: anchor.y + translation.height
+        )
+        guard let grid = snapGrid?(dragged) else { return translation }
+
+        let snapped = ShapeGridSnapper.snappedPoint(dragged, to: grid)
+        return CGSize(
+            width: snapped.x - anchor.x,
+            height: snapped.y - anchor.y
+        )
+    }
+
+    /// Minimum corner of what the selected shapes actually draw, or nil when none are selected.
+    /// Deliberately not `selectionBounds`: a line's frame is inflated to a minimum extent, so its
+    /// box sits several points above the line and would snap the line off the rule.
+    private func selectedShapesAnchor() -> CGPoint? {
+        guard let selection, let elementsStore else { return nil }
+
+        var drawn: CGRect?
+        for element in elementsStore.elements
+        where selection.elementIDs.contains(element.id) {
+            guard case .shape(let content) = element.content else { continue }
+            let box = ShapeGeometry.path(
+                for: content,
+                in: element.frame,
+                rotation: element.rotation
+            ).boundingBox
+            guard !box.isNull, !box.isInfinite else { continue }
+            drawn = drawn.map { $0.union(box) } ?? box
+        }
+        return drawn.map { CGPoint(x: $0.minX, y: $0.minY) }
     }
 
     func endMoveDrag() {
+        // The mirror of the guard in `beginMoveDrag`: a handle drag owns the selection, and the
+        // pan this refused must not restore its hidden strokes or commit a translation under it.
+        guard !isHandleDragging else { return }
+
         restoreHiddenStrokes()
         guard let selection, let elementsStore else {
             strokesSnapshot = nil
@@ -190,6 +296,12 @@ final class CanvasSelectionController {
     }
 
     func beginHandleDrag() {
+        // A move drag owns the selection until it ends, for the same reason a handle drag does:
+        // the strokes are hidden and only the move holds the drawing they came from. `handlePinch`
+        // promotes a move into a handle drag by ending the move first, which is exactly what makes
+        // that takeover safe — anything arriving while the move is still in flight is ignored.
+        guard !isMoveDragging else { return }
+
         guard let selection,
               let bounds = selectionBounds,
               bounds.width > 0,
@@ -216,6 +328,11 @@ final class CanvasSelectionController {
     }
 
     func endHandleDrag() {
+        // No handle drag is in flight: either it was refused because a move owns the selection, or
+        // something already tore it down. Going further would restore strokes and drop a snapshot
+        // that now belong to whoever does own it.
+        guard isHandleDragging else { return }
+
         restoreHiddenStrokes()
         guard let selection,
               let elementsStore,
@@ -276,6 +393,9 @@ final class CanvasSelectionController {
                 if case .text(var text) = element.content {
                     text.fontSize *= Double(min(scale.width, scale.height))
                     element.content = .text(text)
+                } else if case .shape(var shape) = element.content {
+                    shape.strokeWidth *= Double(min(scale.width, scale.height))
+                    element.content = .shape(shape)
                 }
                 elementsStore.updateElement(element)
             }
@@ -285,6 +405,159 @@ final class CanvasSelectionController {
         selectionBounds = bounds(for: selection)
         strokesSnapshot = nil
         resetHandleDrag()
+    }
+
+    /// Content-space preview transform for an element while a selection drag is in flight, so
+    /// element layers follow the selection box instead of sitting still until the drop. Selected
+    /// strokes get the same preview from `strokesSnapshot`; elements need no snapshot because
+    /// their layer can simply be transformed in place. Identity for anything not being dragged.
+    func liveTransform(forElementWith id: UUID) -> CGAffineTransform {
+        guard let selection, selection.elementIDs.contains(id) else { return .identity }
+
+        guard isHandleDragging else {
+            return CGAffineTransform(
+                translationX: dragTranslation.width,
+                y: dragTranslation.height
+            )
+        }
+        guard let bounds = selectionBounds else { return .identity }
+
+        // Same composition as endHandleDrag, using the raw handle scale so the preview matches
+        // the stroke snapshot; endHandleDrag clamps only when it commits.
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        return CGAffineTransform(translationX: -center.x, y: -center.y)
+            .concatenating(
+                CGAffineTransform(scaleX: handleScale.width, y: handleScale.height)
+            )
+            .concatenating(CGAffineTransform(rotationAngle: handleRotation))
+            .concatenating(CGAffineTransform(translationX: center.x, y: center.y))
+    }
+
+    /// The single selected `.shape` polyline element eligible for vertex editing, or nil.
+    /// Requires exactly one selected element, zero selected strokes, and polyline geometry.
+    func vertexEditableElement() -> CanvasElement? {
+        guard let selection,
+              selection.strokeIndices.isEmpty,
+              selection.elementIDs.count == 1,
+              let elementID = selection.elementIDs.first,
+              let element = elementsStore?.elements.first(where: { $0.id == elementID }),
+              case .shape = element.content else {
+            return nil
+        }
+        return element
+    }
+
+    /// Where the on-shape edit handles belong, in content space: one per vertex for a polyline,
+    /// one per axis end for an ellipse — which has no vertices to grab but is still draggable
+    /// by its own curve rather than by a box around it.
+    func vertexEditHandles(for element: CanvasElement) -> [CGPoint] {
+        guard case .shape(let shape) = element.content else { return [] }
+
+        switch shape.geometry {
+        case .polyline:
+            return ShapeVertexEditor.absoluteVertices(
+                content: shape,
+                frame: element.frame,
+                rotation: element.rotation
+            )
+        case .ellipse:
+            return ShapeEllipseEditor.radiusHandles(
+                frame: element.frame,
+                rotation: element.rotation
+            )
+        }
+    }
+
+    func beginVertexDrag(elementID: UUID, vertexIndex: Int) {
+        guard let elementsStore,
+              let element = elementsStore.elements.first(where: { $0.id == elementID }),
+              case .shape = element.content else {
+            resetVertexDrag()
+            return
+        }
+
+        // Ownership of a two-finger vertex drag alternates between the handles, and every takeover
+        // arrives here. Re-snapshotting would take the baseline from elements this same gesture has
+        // already moved, leaving everything before the last takeover outside "Edit Shape"; holding
+        // the pre-edit snapshot until `endVertexDrag` clears it keeps the whole gesture undoable as
+        // one step. A takeover therefore only retargets which vertex the samples move.
+        if vertexDragBaseline == nil {
+            vertexDragBaseline = elementsStore.elements
+        }
+        vertexDragElementID = elementID
+        vertexDragIndex = vertexIndex
+        isVertexDragging = true
+    }
+
+    func setVertexPosition(_ contentPoint: CGPoint) {
+        guard isVertexDragging else { return }
+        guard let elementID = vertexDragElementID,
+              let vertexIndex = vertexDragIndex,
+              let elementsStore else {
+            resetVertexDrag()
+            return
+        }
+        // The element the drag started on is gone or is no longer a shape, so something outside
+        // this gesture rewrote the store. The baseline predates that rewrite and would fold it
+        // into "Edit Shape", so this session is abandoned rather than finished.
+        guard var element = elementsStore.elements.first(where: { $0.id == elementID }),
+              case .shape(let shape) = element.content else {
+            resetVertexDrag()
+            return
+        }
+
+        // Editing lands on the paper's lattice for the same reason drawing does.
+        let target = ShapeGridSnapper.snappedPoint(
+            contentPoint,
+            to: snapGrid?(contentPoint)
+        )
+
+        // A sample the editors can't convert is dropped, not fatal to the drag: earlier samples
+        // were already applied live, so tearing the session down here would strand them with no
+        // baseline and leave the reshaped element non-undoable.
+        switch shape.geometry {
+        case .polyline:
+            guard let moved = ShapeVertexEditor.movingVertex(
+                at: vertexIndex,
+                to: target,
+                content: shape,
+                frame: element.frame,
+                rotation: element.rotation
+            ) else {
+                return
+            }
+            element.content = .shape(moved.content)
+            element.frame = moved.frame
+        case .ellipse:
+            guard let resized = ShapeEllipseEditor.resizing(
+                handleIndex: vertexIndex,
+                to: target,
+                frame: element.frame,
+                rotation: element.rotation
+            ) else {
+                return
+            }
+            element.frame = resized
+        }
+        elementsStore.updateElementLive(element)
+
+        if let selection = self.selection {
+            self.selection = selection
+            selectionBounds = bounds(for: selection)
+        }
+    }
+
+    func endVertexDrag() {
+        defer { resetVertexDrag() }
+        guard isVertexDragging,
+              let vertexDragBaseline,
+              let elementsStore else {
+            return
+        }
+        elementsStore.registerEditingSessionUndo(
+            from: vertexDragBaseline,
+            label: "Edit Shape"
+        )
     }
 
     func restyleSelection(color: CodableColor?, strokeWidth: Double?) {
@@ -327,13 +600,42 @@ final class CanvasSelectionController {
                 drawing = PKDrawing(strokes: strokes)
             }
 
-            guard let color else { return }
-            for elementID in selection.elementIDs {
-                guard var element = elementsStore.elements.first(where: { $0.id == elementID }),
-                      case .text(var text) = element.content else { continue }
-                text.color = color
-                element.content = .text(text)
-                elementsStore.updateElement(element)
+            if color != nil || strokeWidth != nil {
+                for elementID in selection.elementIDs {
+                    guard var element = elementsStore.elements.first(
+                        where: { $0.id == elementID }
+                    ) else { continue }
+
+                    var didChange = false
+                    switch element.content {
+                    case .text(var text):
+                        if let color, text.color != color {
+                            text.color = color
+                            element.content = .text(text)
+                            didChange = true
+                        }
+                    case .shape(var shape):
+                        if let color, shape.strokeColor != color {
+                            shape.strokeColor = color
+                            didChange = true
+                        }
+                        if let strokeWidth,
+                           strokeWidth > 0,
+                           shape.strokeWidth != strokeWidth {
+                            shape.strokeWidth = strokeWidth
+                            didChange = true
+                        }
+                        if didChange {
+                            element.content = .shape(shape)
+                        }
+                    case .image, .unknown:
+                        continue
+                    }
+
+                    if didChange {
+                        elementsStore.updateElement(element)
+                    }
+                }
             }
         }
 
@@ -598,6 +900,14 @@ final class CanvasSelectionController {
     }
 
     private func hideSelectedStrokes() {
+        // `drawingBeforeHide` is the only copy of the drawing the hidden strokes still live in, so
+        // whoever hid first keeps it until it restores. Overwriting it with the already trimmed
+        // drawing would delete the selected indices a second time — from a drawing where those
+        // indices now address other strokes — and neither the canvas nor the undo baseline the
+        // following commit takes would still contain the originals. The drags guard each other at
+        // their entry points; this is the backstop that makes every other route survivable too.
+        guard drawingBeforeHide == nil else { return }
+
         guard let selection,
               !selection.strokeIndices.isEmpty,
               let canvasView = canvasReference?.canvasView else { return }
@@ -654,6 +964,13 @@ final class CanvasSelectionController {
         handleRotation = 0
         isHandleDragging = false
         handleDragBounds = nil
+    }
+
+    private func resetVertexDrag() {
+        isVertexDragging = false
+        vertexDragBaseline = nil
+        vertexDragElementID = nil
+        vertexDragIndex = nil
     }
 
     private static func copy(_ stroke: PKStroke, translatedBy translation: CGSize) -> PKStroke {

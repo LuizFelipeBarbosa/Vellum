@@ -8,9 +8,14 @@ import VellumCore
 struct SelectionCaptureSurface: UIViewRepresentable {
     let controller: CanvasSelectionController
     let selectionMode: SelectionMode
+    let isEnabled: Bool
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(controller: controller, selectionMode: selectionMode)
+        Coordinator(
+            controller: controller,
+            selectionMode: selectionMode,
+            isEnabled: isEnabled
+        )
     }
 
     func makeUIView(context: Context) -> UIView {
@@ -24,6 +29,7 @@ struct SelectionCaptureSurface: UIViewRepresentable {
     func updateUIView(_ view: UIView, context: Context) {
         context.coordinator.controller = controller
         context.coordinator.selectionMode = selectionMode
+        context.coordinator.isEnabled = isEnabled
         context.coordinator.syncInstallation()
     }
 
@@ -35,21 +41,43 @@ struct SelectionCaptureSurface: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var controller: CanvasSelectionController
         var selectionMode: SelectionMode
+        var isEnabled: Bool {
+            didSet {
+                guard oldValue, !isEnabled else { return }
+                invalidateAutoScroll(clearDragLocation: true)
+                // `syncInstallation` is about to disable the pan recognizer, and the `.cancelled`
+                // that produces arrives with no active intent left to act on. Hand the drag back
+                // here instead, or a move leaves its strokes hidden behind a transient drawing
+                // override that nothing clears.
+                finishActiveDrag()
+                claimedDragIntent = nil
+                dragStartLocation = nil
+                resetPinchClaimDecision()
+            }
+        }
         let panGestureRecognizer = UIPanGestureRecognizer()
         let tapGestureRecognizer = UITapGestureRecognizer()
         let pinchGestureRecognizer = UIPinchGestureRecognizer()
         weak var installedCanvas: PKCanvasView?
 
-        private var dragKind: DragKind?
+        /// Decided when the pan recognizer claims a touch; promoted to `activeDragIntent`
+        /// once the pan actually begins.
+        private var claimedDragIntent: SelectionDragIntent?
+        private var activeDragIntent: SelectionDragIntent?
         private var dragStartLocation: CGPoint?
         private var pinchClaimDecision: Bool?
         private weak var pinchDecisionTouch: UITouch?
         private var autoScrollDisplayLink: CADisplayLink?
         private var lastDragScreenLocation: CGPoint?
 
-        init(controller: CanvasSelectionController, selectionMode: SelectionMode) {
+        init(
+            controller: CanvasSelectionController,
+            selectionMode: SelectionMode,
+            isEnabled: Bool
+        ) {
             self.controller = controller
             self.selectionMode = selectionMode
+            self.isEnabled = isEnabled
             super.init()
 
             panGestureRecognizer.maximumNumberOfTouches = 1
@@ -61,6 +89,10 @@ struct SelectionCaptureSurface: UIViewRepresentable {
         }
 
         func syncInstallation() {
+            panGestureRecognizer.isEnabled = isEnabled
+            tapGestureRecognizer.isEnabled = isEnabled
+            pinchGestureRecognizer.isEnabled = isEnabled
+
             guard let canvasView = controller.canvasReference?.canvasView,
                   canvasView !== installedCanvas else { return }
 
@@ -116,12 +148,16 @@ struct SelectionCaptureSurface: UIViewRepresentable {
 
             guard gestureRecognizer === panGestureRecognizer else { return true }
 
+            // UIKit enforces maximumNumberOfTouches after this delegate call, so a rejected
+            // second touch must not replace the anchor of the drag already in progress.
+            guard panGestureRecognizer.state != .began,
+                  panGestureRecognizer.state != .changed else { return false }
+
             dragStartLocation = nil
+            claimedDragIntent = nil
             guard let canvasView = installedCanvas,
                   let location = contentLocation(of: touch, in: canvasView) else { return false }
             let pointer: CapturePointerKind = touch.type == .pencil ? .pencil : .finger
-            let insideSelection = controller.selection != nil
-                && controller.selectionBounds?.contains(location) == true
             let allowsFingerCapture: Bool
 #if targetEnvironment(simulator)
             #if DEBUG
@@ -134,15 +170,21 @@ struct SelectionCaptureSurface: UIViewRepresentable {
 #else
             allowsFingerCapture = false
 #endif
-            let isAllowed = SelectionCapturePolicy.allowsDrag(
+            // Bounds count only while a selection actually owns them, since they are what the
+            // drag grabs: a move the controller would refuse must not swallow a drag the canvas
+            // could have scrolled with.
+            let selectionBounds = controller.selection == nil ? nil : controller.selectionBounds
+            guard let intent = SelectionCapturePolicy.dragIntent(
                 pointer: pointer,
-                insideSelection: insideSelection,
+                location: location,
+                selectionBounds: selectionBounds,
+                zoomScale: canvasView.zoomScale,
                 allowsFingerCapture: allowsFingerCapture
-            )
-            if isAllowed {
-                dragStartLocation = location
-            }
-            return isAllowed
+            ) else { return false }
+
+            dragStartLocation = location
+            claimedDragIntent = intent
+            return true
         }
 
         func gestureRecognizer(
@@ -177,30 +219,30 @@ struct SelectionCaptureSurface: UIViewRepresentable {
         @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
             switch gesture.state {
             case .began:
-                guard let dragStartLocation else { return }
-                let startsInsideSelection = controller.selection != nil
-                    && controller.selectionBounds?.contains(dragStartLocation) == true
-                if startsInsideSelection {
-                    dragKind = .move
-                    controller.beginMoveDrag()
-                } else {
-                    dragKind = .capture
+                guard let dragStartLocation, let claimedDragIntent else { return }
+                switch claimedDragIntent {
+                case .move:
+                    // The controller refuses a move while another drag owns the selection. Leaving
+                    // the intent unclaimed is what keeps this pan inert for the rest of the
+                    // gesture: `.changed` has nothing to translate and `.ended` nothing to commit.
+                    guard controller.beginMoveDrag() else { return }
+                    activeDragIntent = .move
+                    // A pan only begins once the touch has already travelled, and the drag may
+                    // end without ever reporting a change, so carry that first leg over now.
+                    updateMoveTranslation(for: gesture)
+                case .capture:
+                    activeDragIntent = .capture
                     controller.beginCapture(at: dragStartLocation, mode: selectionMode)
+                    if let canvasView = gesture.view as? PKCanvasView,
+                       let location = contentLocation(of: gesture, in: canvasView) {
+                        controller.extendCapture(to: location)
+                    }
                 }
             case .changed:
                 guard let canvasView = gesture.view as? PKCanvasView else { return }
-                switch dragKind {
+                switch activeDragIntent {
                 case .move:
-                    guard let dragStartLocation,
-                          let location = contentLocation(of: gesture, in: canvasView) else {
-                        return
-                    }
-                    controller.setDragTranslation(
-                        CGSize(
-                            width: location.x - dragStartLocation.x,
-                            height: location.y - dragStartLocation.y
-                        )
-                    )
+                    updateMoveTranslation(for: gesture)
                     updateAutoScroll(for: gesture, in: canvasView)
                 case .capture:
                     guard let location = contentLocation(of: gesture, in: canvasView)
@@ -210,29 +252,55 @@ struct SelectionCaptureSurface: UIViewRepresentable {
                     break
                 }
             case .ended, .cancelled, .failed:
-                switch dragKind {
-                case .move:
-                    controller.endMoveDrag()
-                case .capture:
-                    controller.endCapture()
-                case nil:
-                    break
-                }
+                finishActiveDrag()
                 invalidateAutoScroll(clearDragLocation: true)
-                dragKind = nil
+                claimedDragIntent = nil
                 dragStartLocation = nil
             default:
                 break
             }
         }
 
+        /// Hands an in-flight drag back to the controller. Idempotent, so whichever of the
+        /// recognizer's own end state and a mid-gesture disable arrives second is a no-op.
+        private func finishActiveDrag() {
+            switch activeDragIntent {
+            case .move:
+                controller.endMoveDrag()
+            case .capture:
+                controller.endCapture()
+            case nil:
+                break
+            }
+            activeDragIntent = nil
+        }
+
+        private func updateMoveTranslation(for gesture: UIPanGestureRecognizer) {
+            guard let canvasView = gesture.view as? PKCanvasView,
+                  let dragStartLocation,
+                  let location = contentLocation(of: gesture, in: canvasView) else { return }
+            controller.setDragTranslation(
+                CGSize(
+                    width: location.x - dragStartLocation.x,
+                    height: location.y - dragStartLocation.y
+                )
+            )
+        }
+
         @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
             switch gesture.state {
             case .began:
-                if dragKind == .move {
+                if activeDragIntent == .move {
                     invalidateAutoScroll(clearDragLocation: true)
                     panGestureRecognizer.isEnabled = false
                     panGestureRecognizer.isEnabled = true
+                    // Hand the move back here rather than waiting for the `.cancelled` that toggle
+                    // produces: the handle drag below refuses to start while a move is in flight,
+                    // and whether UIKit delivers that cancel before or after this line is not
+                    // something to depend on. `finishActiveDrag` is idempotent, so the cancel
+                    // arriving either way is a no-op. This commits the move — the selection keeps
+                    // the ground it covered and `beginHandleDrag` snapshots the refreshed bounds.
+                    finishActiveDrag()
                 }
                 controller.beginHandleDrag()
             case .changed:
@@ -252,9 +320,13 @@ struct SelectionCaptureSurface: UIViewRepresentable {
             guard gesture.state == .ended,
                   let canvasView = gesture.view as? PKCanvasView,
                   controller.selection != nil,
-                  let bounds = controller.selectionBounds,
-                  let location = contentLocation(of: gesture, in: canvasView),
-                  !bounds.contains(location) else { return }
+                  let location = contentLocation(of: gesture, in: canvasView) else { return }
+            // A selection can outlive its bounds — deleting the page an element sat on leaves
+            // exactly that — and then there is no outline on screen to tap outside of. Any tap
+            // drops it, so the selection is escapable rather than stuck where it cannot be seen.
+            let isOutsideSelection = controller.selectionBounds
+                .map { !$0.contains(location) } ?? true
+            guard isOutsideSelection else { return }
             controller.clearSelection()
         }
 
@@ -312,7 +384,7 @@ struct SelectionCaptureSurface: UIViewRepresentable {
         }
 
         @objc private func handleAutoScrollTick(_ link: CADisplayLink) {
-            guard dragKind == .move,
+            guard activeDragIntent == .move,
                   let canvasView = installedCanvas,
                   let canvasSuperview = canvasView.superview,
                   let lastDragScreenLocation,
@@ -380,11 +452,6 @@ struct SelectionCaptureSurface: UIViewRepresentable {
         private func resetPinchClaimDecision() {
             pinchClaimDecision = nil
             pinchDecisionTouch = nil
-        }
-
-        private enum DragKind {
-            case capture
-            case move
         }
     }
 }

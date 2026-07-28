@@ -244,6 +244,7 @@ struct NoteToolbarView: View {
                 )
         }
         .accessibilityLabel(tool.displayName)
+        .accessibilityAddTraits(selectedTool == tool ? .isSelected : [])
     }
 
     private var collapseButton: some View {
