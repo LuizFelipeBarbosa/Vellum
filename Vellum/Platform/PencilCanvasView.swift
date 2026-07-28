@@ -54,18 +54,25 @@ final class PagedCanvasView: PKCanvasView {
     private static let zoomSnapDuration: CFTimeInterval = 0.25
     private var isApplyingLayoutZoom = false
 
-    /// True while zoom/offset changes originate from a layout or SwiftUI update
-    /// pass rather than a user gesture or snap animation. Viewport reports made
-    /// in this window must be deferred: a synchronous @State write during a
-    /// SwiftUI update is dropped, leaving the overlays stuck on a stale viewport.
-    private(set) var isInLayoutDrivenChange = false
+    /// True only while a SwiftUI representable update pass (`makeUIView`/`updateUIView`)
+    /// is on the stack. Viewport reports are deferred only in this window because a
+    /// synchronous @State write would modify state during a view update. UIKit layout
+    /// passes such as rotation and split-view resize must report synchronously so overlay
+    /// state commits in the same CATransaction as the canvas geometry change; otherwise
+    /// the page lags the strokes by a frame.
+    private(set) var isInRepresentableUpdate = false
+
+    func performRepresentableUpdate(_ body: () -> Void) {
+        let previous = isInRepresentableUpdate
+        isInRepresentableUpdate = true
+        defer { isInRepresentableUpdate = previous }
+        body()
+    }
 
     var topContentInset: CGFloat = 0 {
         didSet {
             guard oldValue != topContentInset else { return }
             let wasRestingAtTop = abs(contentOffset.y + oldValue) <= 0.5
-            isInLayoutDrivenChange = true
-            defer { isInLayoutDrivenChange = false }
             syncContentSize()
             if wasRestingAtTop {
                 contentOffset.y = -topContentInset
@@ -77,8 +84,6 @@ final class PagedCanvasView: PKCanvasView {
     var contentHeightInContentSpace: CGFloat = PageGeometry.a4.pageHeight {
         didSet {
             guard oldValue != contentHeightInContentSpace else { return }
-            isInLayoutDrivenChange = true
-            defer { isInLayoutDrivenChange = false }
             syncContentSize()
         }
     }
@@ -86,8 +91,6 @@ final class PagedCanvasView: PKCanvasView {
     private var lastFitScale: CGFloat?
 
     override func layoutSubviews() {
-        isInLayoutDrivenChange = true
-        defer { isInLayoutDrivenChange = false }
         super.layoutSubviews()
         guard bounds.size != lastLayoutSize else { return }
         lastLayoutSize = bounds.size
@@ -284,129 +287,139 @@ struct PencilCanvasView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> PKCanvasView {
-        let canvasView: PKCanvasView = PagedCanvasView()
-        canvasView.contentInsetAdjustmentBehavior = .never
-        (canvasView as? PagedCanvasView)?.contentHeightInContentSpace = contentHeight
-        (canvasView as? PagedCanvasView)?.topContentInset = topContentInset
-        canvasView.delegate = context.coordinator
+        let canvasView = PagedCanvasView()
+        canvasView.performRepresentableUpdate {
+            canvasView.contentInsetAdjustmentBehavior = .never
+            canvasView.contentHeightInContentSpace = contentHeight
+            canvasView.topContentInset = topContentInset
+            canvasView.delegate = context.coordinator
 #if targetEnvironment(simulator)
-        #if DEBUG
-        canvasView.drawingPolicy = ProcessInfo.processInfo.arguments.contains("-vellum-force-pencil-only")
-            ? .pencilOnly
-            : .anyInput
-        #else
-        canvasView.drawingPolicy = .anyInput      // mouse can draw in the simulator
-        #endif
+            #if DEBUG
+            canvasView.drawingPolicy = ProcessInfo.processInfo.arguments.contains("-vellum-force-pencil-only")
+                ? .pencilOnly
+                : .anyInput
+            #else
+            canvasView.drawingPolicy = .anyInput      // mouse can draw in the simulator
+            #endif
 #else
-        canvasView.drawingPolicy = .pencilOnly    // fingers scroll & pinch; pencil draws
+            canvasView.drawingPolicy = .pencilOnly    // fingers scroll & pinch; pencil draws
 #endif
-        canvasView.backgroundColor = isTransparent ? .clear : .white
-        canvasView.isOpaque = !isTransparent
-        canvasView.bouncesZoom = false
-        canvasView.alwaysBounceVertical = true
-        canvasView.drawingGestureRecognizer.isEnabled = isDrawingEnabled
+            canvasView.backgroundColor = isTransparent ? .clear : .white
+            canvasView.isOpaque = !isTransparent
+            canvasView.bouncesZoom = false
+            canvasView.alwaysBounceVertical = true
+            canvasView.drawingGestureRecognizer.isEnabled = isDrawingEnabled
 
-        let undoTap = UITapGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleTwoFingerTap(_:))
-        )
-        undoTap.numberOfTapsRequired = 1
-        undoTap.numberOfTouchesRequired = 2
-        undoTap.allowedTouchTypes = [UITouch.TouchType.direct.rawValue as NSNumber]
-        undoTap.delegate = context.coordinator
+            let undoTap = UITapGestureRecognizer(
+                target: context.coordinator,
+                action: #selector(Coordinator.handleTwoFingerTap(_:))
+            )
+            undoTap.numberOfTapsRequired = 1
+            undoTap.numberOfTouchesRequired = 2
+            undoTap.allowedTouchTypes = [UITouch.TouchType.direct.rawValue as NSNumber]
+            undoTap.delegate = context.coordinator
 
-        let redoTap = UITapGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleThreeFingerTap(_:))
-        )
-        redoTap.numberOfTapsRequired = 1
-        redoTap.numberOfTouchesRequired = 3
-        redoTap.allowedTouchTypes = [UITouch.TouchType.direct.rawValue as NSNumber]
-        redoTap.delegate = context.coordinator
+            let redoTap = UITapGestureRecognizer(
+                target: context.coordinator,
+                action: #selector(Coordinator.handleThreeFingerTap(_:))
+            )
+            redoTap.numberOfTapsRequired = 1
+            redoTap.numberOfTouchesRequired = 3
+            redoTap.allowedTouchTypes = [UITouch.TouchType.direct.rawValue as NSNumber]
+            redoTap.delegate = context.coordinator
 
-        undoTap.require(toFail: redoTap)
-        canvasView.addGestureRecognizer(undoTap)
-        canvasView.addGestureRecognizer(redoTap)
+            undoTap.require(toFail: redoTap)
+            canvasView.addGestureRecognizer(undoTap)
+            canvasView.addGestureRecognizer(redoTap)
 
-        if #available(iOS 17.5, *) {
-            canvasView.addInteraction(UIPencilInteraction(delegate: context.coordinator))
+            if #available(iOS 17.5, *) {
+                canvasView.addInteraction(UIPencilInteraction(delegate: context.coordinator))
+            }
+
+            if let tool {
+                canvasView.tool = tool
+            }
+
+            if showsSystemToolPicker {
+                context.coordinator.toolPicker.addObserver(canvasView)
+                context.coordinator.isObservingToolPicker = true
+                context.coordinator.toolPicker.setVisible(true, forFirstResponder: canvasView)
+                canvasView.becomeFirstResponder()
+            }
+
+            onCanvasReady?(canvasView)
+            context.coordinator.reportViewportDeferred(for: canvasView)
         }
-
-        if let tool {
-            canvasView.tool = tool
-        }
-
-        if showsSystemToolPicker {
-            context.coordinator.toolPicker.addObserver(canvasView)
-            context.coordinator.isObservingToolPicker = true
-            context.coordinator.toolPicker.setVisible(true, forFirstResponder: canvasView)
-            canvasView.becomeFirstResponder()
-        }
-
-        onCanvasReady?(canvasView)
-        context.coordinator.reportViewportDeferred(for: canvasView)
 
         return canvasView
     }
 
     func updateUIView(_ canvasView: PKCanvasView, context: Context) {
-        context.coordinator.onDrawingChanged = onDrawingChanged
-        context.coordinator.onViewportChanged = onViewportChanged
-        context.coordinator.onExternalDrawingChange = onExternalDrawingChange
-        context.coordinator.onPencilSqueeze = onPencilSqueeze
-        context.coordinator.onTwoFingerTap = onTwoFingerTap
-        context.coordinator.onThreeFingerTap = onThreeFingerTap
-        canvasView.backgroundColor = isTransparent ? .clear : .white
-        canvasView.isOpaque = !isTransparent
-        canvasView.drawingGestureRecognizer.isEnabled = isDrawingEnabled
-        (canvasView as? PagedCanvasView)?.contentHeightInContentSpace = contentHeight
-        (canvasView as? PagedCanvasView)?.topContentInset = topContentInset
+        let updateCanvas = {
+            context.coordinator.onDrawingChanged = onDrawingChanged
+            context.coordinator.onViewportChanged = onViewportChanged
+            context.coordinator.onExternalDrawingChange = onExternalDrawingChange
+            context.coordinator.onPencilSqueeze = onPencilSqueeze
+            context.coordinator.onTwoFingerTap = onTwoFingerTap
+            context.coordinator.onThreeFingerTap = onThreeFingerTap
+            canvasView.backgroundColor = isTransparent ? .clear : .white
+            canvasView.isOpaque = !isTransparent
+            canvasView.drawingGestureRecognizer.isEnabled = isDrawingEnabled
+            (canvasView as? PagedCanvasView)?.contentHeightInContentSpace = contentHeight
+            (canvasView as? PagedCanvasView)?.topContentInset = topContentInset
 
-        if let tool, !Self.toolsMatch(canvasView.tool, tool) {
-            canvasView.tool = tool
-        }
+            if let tool, !Self.toolsMatch(canvasView.tool, tool) {
+                canvasView.tool = tool
+            }
 
-        let beganObservingToolPicker: Bool
-        if showsSystemToolPicker {
-            if !context.coordinator.isObservingToolPicker {
-                context.coordinator.toolPicker.addObserver(canvasView)
-                context.coordinator.isObservingToolPicker = true
-                context.coordinator.toolPicker.setVisible(true, forFirstResponder: canvasView)
-                canvasView.becomeFirstResponder()
-                beganObservingToolPicker = true
+            let beganObservingToolPicker: Bool
+            if showsSystemToolPicker {
+                if !context.coordinator.isObservingToolPicker {
+                    context.coordinator.toolPicker.addObserver(canvasView)
+                    context.coordinator.isObservingToolPicker = true
+                    context.coordinator.toolPicker.setVisible(true, forFirstResponder: canvasView)
+                    canvasView.becomeFirstResponder()
+                    beganObservingToolPicker = true
+                } else {
+                    beganObservingToolPicker = false
+                }
+            } else if context.coordinator.isObservingToolPicker {
+                context.coordinator.toolPicker.setVisible(false, forFirstResponder: canvasView)
+                context.coordinator.toolPicker.removeObserver(canvasView)
+                context.coordinator.isObservingToolPicker = false
+                beganObservingToolPicker = false
             } else {
                 beganObservingToolPicker = false
             }
-        } else if context.coordinator.isObservingToolPicker {
-            context.coordinator.toolPicker.setVisible(false, forFirstResponder: canvasView)
-            context.coordinator.toolPicker.removeObserver(canvasView)
-            context.coordinator.isObservingToolPicker = false
-            beganObservingToolPicker = false
+
+            guard !context.coordinator.hasTransientDrawingOverride,
+                  !canvasView.isZooming,
+                  (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true,
+                  let drawingData,
+                  drawingData != context.coordinator.lastSyncedDrawingData,
+                  let drawing = try? PKDrawing(data: drawingData) else {
+                return
+            }
+
+            context.coordinator.isUpdatingFromModel = true
+            canvasView.drawing = drawing
+            context.coordinator.isUpdatingFromModel = false
+            context.coordinator.lastSyncedDrawingData = drawingData
+            context.coordinator.onExternalDrawingChange?()
+
+            if showsSystemToolPicker,
+               !beganObservingToolPicker,
+               canvasView.window != nil,
+               !canvasView.isFirstResponder {
+                context.coordinator.toolPicker.setVisible(true, forFirstResponder: canvasView)
+                canvasView.becomeFirstResponder()
+            }
+        }
+
+        if let pagedCanvasView = canvasView as? PagedCanvasView {
+            pagedCanvasView.performRepresentableUpdate(updateCanvas)
         } else {
-            beganObservingToolPicker = false
-        }
-
-        guard !context.coordinator.hasTransientDrawingOverride,
-              !canvasView.isZooming,
-              (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true,
-              let drawingData,
-              drawingData != context.coordinator.lastSyncedDrawingData,
-              let drawing = try? PKDrawing(data: drawingData) else {
-            return
-        }
-
-        context.coordinator.isUpdatingFromModel = true
-        canvasView.drawing = drawing
-        context.coordinator.isUpdatingFromModel = false
-        context.coordinator.lastSyncedDrawingData = drawingData
-        context.coordinator.onExternalDrawingChange?()
-
-        if showsSystemToolPicker,
-           !beganObservingToolPicker,
-           canvasView.window != nil,
-           !canvasView.isFirstResponder {
-            context.coordinator.toolPicker.setVisible(true, forFirstResponder: canvasView)
-            canvasView.becomeFirstResponder()
+            updateCanvas()
         }
     }
 
@@ -445,6 +458,7 @@ struct PencilCanvasView: UIViewRepresentable {
         var lastSyncedDrawingData: Data?
         var isObservingToolPicker = false
         private var lastReportedViewport: CanvasViewport?
+        private var hasPendingDeferredViewportReport = false
         private var hasPendingDrawingSyncAfterGesture = false
         /// True while the selection controller has intentionally diverged canvasView.drawing
         /// from the model (strokes hidden during a drag); updateUIView must not re-sync
@@ -590,7 +604,7 @@ struct PencilCanvasView: UIViewRepresentable {
         }
 
         fileprivate func reportViewport(for scrollView: UIScrollView) {
-            if (scrollView as? PagedCanvasView)?.isInLayoutDrivenChange == true {
+            if (scrollView as? PagedCanvasView)?.isInRepresentableUpdate == true {
                 reportViewportDeferred(for: scrollView)
                 return
             }
@@ -605,6 +619,9 @@ struct PencilCanvasView: UIViewRepresentable {
 
         /// For call sites inside a SwiftUI update pass (makeUIView), where a synchronous
         /// state write would be state-modification-during-view-update.
+        /// Deferred delivery must never regress past a viewport already delivered
+        /// synchronously by reportViewport, so it delivers the latest known viewport
+        /// at fire time, making a stale or superseded Task idempotent instead of regressive.
         fileprivate func reportViewportDeferred(for scrollView: UIScrollView) {
             let viewport = CanvasViewport(
                 contentOffset: scrollView.contentOffset,
@@ -612,8 +629,14 @@ struct PencilCanvasView: UIViewRepresentable {
             )
             guard viewport != lastReportedViewport else { return }
             lastReportedViewport = viewport
+            if hasPendingDeferredViewportReport {
+                return
+            }
+            hasPendingDeferredViewportReport = true
             Task { @MainActor in
-                self.onViewportChanged?(viewport)
+                self.hasPendingDeferredViewportReport = false
+                guard let latest = self.lastReportedViewport else { return }
+                self.onViewportChanged?(latest)
             }
         }
     }
