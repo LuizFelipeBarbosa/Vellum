@@ -444,6 +444,35 @@ final class ElementUndoTransactionTests: XCTestCase {
         withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
     }
 
+    // The note screen always hands the controller a lattice, and `setVertexPosition` snaps every
+    // sample to it before the editor sees it — so a radius handle lands on the nearest line rather
+    // than under the finger, and the tests above, which supply no grid, never see that.
+    func testARadiusHandleDragLandsOnThePageLattice() throws {
+        let (store, _) = makeStore()
+        let ellipseElement = makeShapeElement(geometry: .ellipse)
+        store.hydrate([ellipseElement])
+        let harness = makeSelectionController(for: store)
+        // Dots at the default spacing: lines every 24 points, tolerance 7.2.
+        harness.controller.snapGrid = { _ in
+            ShapeSnapGrid(origin: .zero, spacing: 24, snapsX: true, snapsY: true)
+        }
+        select(ellipseElement, with: harness.controller)
+
+        harness.controller.beginVertexDrag(elementID: ellipseElement.id, vertexIndex: 1)
+
+        // The right edge starts at 120. Pulled to 140.5 it settles on the line at 144.
+        harness.controller.setVertexPosition(CGPoint(x: 140.5, y: 70))
+        XCTAssertEqual(try XCTUnwrap(store.elements.first).frame.width, 124, accuracy: 0.001)
+
+        // And a pull that never leaves the tolerance of the line the edge began on is swallowed
+        // whole: the ellipse ignores anything shorter than a snap step rather than following it.
+        harness.controller.setVertexPosition(CGPoint(x: 126, y: 70))
+        XCTAssertEqual(try XCTUnwrap(store.elements.first).frame.width, 100, accuracy: 0.001)
+
+        harness.controller.endVertexDrag()
+        withExtendedLifetime((harness.canvasView, harness.coordinator)) {}
+    }
+
     func testAnUnconvertibleVertexSampleIsSkippedWithoutLosingTheUndoStep() {
         let (store, undoManager) = makeStore()
         let shapeElement = makeShapeElement(

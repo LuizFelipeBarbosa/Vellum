@@ -135,10 +135,8 @@ final class ShapeRecognitionFlowUITests: XCTestCase {
         )
     }
 
-    /// Covers that the handles are there and on the curve. Dragging one is covered by
-    /// `ElementUndoTransactionTests`, not here: a synthesized drag on these handles does not
-    /// resize the ellipse even though the identical gesture works on polyline vertex handles,
-    /// which is unexplained and needs a pass on a real device before it can be called working.
+    /// Covers that the handles are there and on the curve;
+    /// `testDraggingAnEllipseRadiusHandleResizesOnlyThatAxis` covers pulling one.
     func testAnEllipseExposesFourRadiusHandlesOnItsCurve() throws {
         let app = XCUIApplication()
         app.launch()
@@ -191,6 +189,102 @@ final class ShapeRecognitionFlowUITests: XCTestCase {
                 "radius handle \(index) is not reachable"
             )
         }
+    }
+
+    /// A radius handle pulled sideways stretches the ellipse across, and only across: the
+    /// opposite point on the curve and both ends of the other axis stay exactly where they were.
+    ///
+    /// The grab is deliberately off the handle's dead centre, and that is the whole reason this
+    /// once looked untestable. A radius handle sits on the selection's own bounding edge, and
+    /// `SelectionCapturePolicy` gives any drag starting within a touch target of those bounds to
+    /// the canvas as a move — so the handle's drag gesture and the move pan both want this touch.
+    /// Aimed a few points to the side the handle takes it and the ellipse resizes; aimed at the
+    /// exact centre of the handle's reported frame the move takes it and the whole shape slides
+    /// instead, which is what every earlier attempt measured. Two points off is enough, and a
+    /// finger never aims that finely, so this offset buys reliability rather than hiding anything.
+    func testDraggingAnEllipseRadiusHandleResizesOnlyThatAxis() throws {
+        let app = XCUIApplication()
+        app.launch()
+        let window = try openClearedNote(in: app)
+        let shapeCountElement = app.otherElements["vellum-shape-element-count"]
+        XCTAssertTrue(shapeCountElement.waitForExistence(timeout: 10))
+        let shapeCountBefore = ShapeFlowTestHelpers.shapeCount(of: shapeCountElement)
+
+        let box = CGRect(x: 240, y: 470, width: 220, height: 160)
+        ShapeFlowTestHelpers.drawStroke(
+            in: app,
+            window: window,
+            through: ellipsePath(in: box)
+        )
+        let snapped = expectation(
+            for: NSPredicate(format: "value == %@", String(shapeCountBefore + 1)),
+            evaluatedWith: shapeCountElement
+        )
+        wait(for: [snapped], timeout: 5)
+
+        ShapeFlowTestHelpers.boxSelect(
+            in: app,
+            window: window,
+            around: box.insetBy(dx: -40, dy: -40)
+        )
+        let vertexHandles = app.otherElements["vellum-shape-vertex-handles"]
+        XCTAssertTrue(
+            vertexHandles.waitForExistence(timeout: 5),
+            "the ellipse exposed no radius handles"
+        )
+        let summaryBefore = ShapeFlowTestHelpers.accessibilityValue(of: vertexHandles)
+        let before = ShapeFlowTestHelpers.vertices(from: summaryBefore)
+        XCTAssertEqual(before.count, 4)
+
+        // Handle 1 is the right end of the horizontal axis, pulled further right.
+        let rightHandle = app.descendants(matching: .any)
+            .matching(identifier: "vellum-shape-vertex-handle-1")
+            .firstMatch
+        XCTAssertTrue(
+            rightHandle.waitForExistence(timeout: 5),
+            "the ellipse's right radius handle is not reachable"
+        )
+        let grab = rightHandle.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        grab.press(
+            forDuration: 0.05,
+            thenDragTo: grab.withOffset(CGVector(dx: 96, dy: 0))
+        )
+
+        let resized = expectation(
+            for: NSPredicate(format: "value != %@", summaryBefore),
+            evaluatedWith: vertexHandles
+        )
+        wait(for: [resized], timeout: 5)
+
+        let after = ShapeFlowTestHelpers.vertices(
+            from: ShapeFlowTestHelpers.accessibilityValue(of: vertexHandles)
+        )
+        XCTAssertEqual(after.count, 4, "the ellipse lost a radius handle to the drag")
+
+        // The dragged end travelled; the far end of the same axis did not, so this grew the
+        // ellipse rather than sliding it across the page.
+        XCTAssertGreaterThan(
+            after[1].x - before[1].x,
+            40,
+            "the dragged radius handle barely moved"
+        )
+        XCTAssertEqual(
+            after[3].x,
+            before[3].x,
+            accuracy: 0.5,
+            "the whole ellipse moved instead of one radius growing"
+        )
+
+        // `ShapeEllipseEditor.resizing` is single-axis by design: the vertical radius is the
+        // untouched one, top and bottom keeping both their positions and their separation.
+        XCTAssertEqual(after[0].y, before[0].y, accuracy: 0.5, "the top of the curve moved")
+        XCTAssertEqual(after[2].y, before[2].y, accuracy: 0.5, "the bottom of the curve moved")
+        XCTAssertEqual(
+            after[1].y,
+            before[1].y,
+            accuracy: 0.5,
+            "the dragged handle left the axis it belongs to"
+        )
     }
 
     func testDraggingASelectedShapeSettlesItOnThePageLattice() throws {
