@@ -45,11 +45,12 @@ public enum PageLayout {
         visibleCenterContentY: CGFloat,
         scale: CGFloat,
         viewportHeight: CGFloat,
-        contentHeight: CGFloat
+        contentHeight: CGFloat,
+        minimumOffsetY: CGFloat = 0
     ) -> CGFloat {
         let maxOffsetY = max(0, contentHeight * scale - viewportHeight)
         let ideal = visibleCenterContentY * scale - viewportHeight / 2
-        return min(max(0, ideal), maxOffsetY)
+        return min(max(minimumOffsetY, ideal), maxOffsetY)
     }
 
     /// Fraction of fit-to-width the user can zoom out to for the multi-page overview.

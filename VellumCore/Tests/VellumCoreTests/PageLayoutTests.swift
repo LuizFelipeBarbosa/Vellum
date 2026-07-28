@@ -263,8 +263,8 @@ func endedZoomScalesSettleInsideLogicalBounds() {
     )
 }
 
-@Test("Anchored zoom offset keeps the visible center in range")
-func anchoredZoomOffsetKeepsVisibleCenterInRange() {
+@Test("Anchored zoom offset keeps the visible center within the default range")
+func anchoredZoomOffsetKeepsVisibleCenterWithinDefaultRange() {
     #expect(
         PageLayout.anchoredOffsetY(
             visibleCenterContentY: 1_000,
@@ -296,6 +296,37 @@ func anchoredZoomOffsetKeepsVisibleCenterInRange() {
             viewportHeight: 800,
             contentHeight: 1_000
         ) == 0
+    )
+}
+
+@Test("Anchored zoom offset respects a custom minimum")
+func anchoredZoomOffsetRespectsCustomMinimum() {
+    #expect(
+        PageLayout.anchoredOffsetY(
+            visibleCenterContentY: 300,
+            scale: 1,
+            viewportHeight: 800,
+            contentHeight: 3_000,
+            minimumOffsetY: -120
+        ) == -100
+    )
+    #expect(
+        PageLayout.anchoredOffsetY(
+            visibleCenterContentY: 100,
+            scale: 1,
+            viewportHeight: 800,
+            contentHeight: 3_000,
+            minimumOffsetY: -120
+        ) == -120
+    )
+    #expect(
+        PageLayout.anchoredOffsetY(
+            visibleCenterContentY: 2_900,
+            scale: 1,
+            viewportHeight: 800,
+            contentHeight: 3_000,
+            minimumOffsetY: -120
+        ) == 2_200
     )
 }
 

@@ -319,6 +319,7 @@ struct NoteScreenView: View {
                     },
                     isDrawingEnabled: selectedTool.usesDrawingGesture,
                     contentHeight: pageState.contentHeight,
+                    topContentInset: topOverlayGlobalFrame.maxY + 16,
                     onViewportChanged: { canvasViewport = $0 },
                     onExternalDrawingChange: {
                         selectionController.externalDrawingDidChange()
@@ -861,10 +862,11 @@ struct NoteScreenView: View {
     private func scrollCanvas(toPageIndex index: Int) {
         guard let canvas = canvasReference.canvasView else { return }
         let geometry = model.note?.pageGeometry ?? .a4
-        let y = geometry.pageRect(index: index).minY * canvas.zoomScale
-        let maxY = max(0, canvas.contentSize.height - canvas.bounds.height)
+        let inset = canvas.contentInset.top
+        let y = geometry.pageRect(index: index).minY * canvas.zoomScale - inset
+        let maxY = max(-inset, canvas.contentSize.height - canvas.bounds.height)
         canvas.setContentOffset(
-            CGPoint(x: canvas.contentOffset.x, y: min(y, maxY)),
+            CGPoint(x: canvas.contentOffset.x, y: min(max(-inset, y), maxY)),
             animated: true
         )
     }
