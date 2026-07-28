@@ -162,6 +162,141 @@ final class SelectionMoveFlowUITests: XCTestCase {
         }
     }
 
+    /// Physical devices leave a finger drag outside the selection's grab area to the canvas,
+    /// keeping one-finger scrolling reachable while something is selected. The simulator's
+    /// default finger-capture path cannot express that contract, so the pencil-only launch
+    /// override pins both halves of it: the document stays unchanged and the canvas scrolls.
+    func testFingerDragOutsideSelectionGrabAreaScrollsCanvasWithoutMovingSelection() {
+        let context = ShapeFlowTestHelpers
+            .preparePersistedLineShapeForPencilOnlyRelaunch(using: self)
+
+        context.shapeMiddle.tap()
+
+        let vertexHandles = context.app.otherElements["vellum-shape-vertex-handles"]
+        XCTAssertTrue(
+            vertexHandles.waitForExistence(timeout: 5),
+            "shape vertex handles did not appear after a pencil-only finger tap"
+        )
+        let summaryBefore = ShapeFlowTestHelpers.accessibilityValue(of: vertexHandles)
+        guard !summaryBefore.isEmpty else {
+            XCTFail("selected shape exposed an empty vertex summary before scrolling")
+            return
+        }
+        let pointsBefore = ShapeFlowTestHelpers.vertices(from: summaryBefore)
+        guard pointsBefore.count >= 2 else {
+            XCTFail("selected shape exposes fewer than two vertices")
+            return
+        }
+
+        let firstHandle = vertexHandle(0, in: context.app)
+        let firstCenterBefore = center(of: firstHandle)
+        let secondCenterBefore = center(of: vertexHandle(1, in: context.app))
+        let screenSpan = hypot(
+            secondCenterBefore.x - firstCenterBefore.x,
+            secondCenterBefore.y - firstCenterBefore.y
+        )
+        let contentSpan = hypot(
+            pointsBefore[1].x - pointsBefore[0].x,
+            pointsBefore[1].y - pointsBefore[0].y
+        )
+        guard screenSpan > 0, contentSpan > 0 else {
+            XCTFail("the selected line has no length to measure the canvas zoom with")
+            return
+        }
+        let zoomScale = screenSpan / contentSpan
+
+        let boundsEdge = max(abs(pointsBefore[1].y - pointsBefore[0].y), 8)
+            / 2 * zoomScale
+        let midpoint = CGPoint(
+            x: (firstCenterBefore.x + secondCenterBefore.x) / 2,
+            y: (firstCenterBefore.y + secondCenterBefore.y) / 2
+        )
+        let anchor = firstHandle.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        )
+        let dragStart = anchor.withOffset(
+            CGVector(
+                dx: midpoint.x - firstCenterBefore.x,
+                dy: midpoint.y - firstCenterBefore.y + boundsEdge + grabPadding * 3
+            )
+        )
+        let dragDistance: CGFloat = 180
+        let dragEnd = dragStart.withOffset(CGVector(dx: 0, dy: -dragDistance))
+        guard context.window.frame.contains(dragStart.screenPoint),
+              context.window.frame.contains(dragEnd.screenPoint) else {
+            XCTFail("the measured scroll drag path left the canvas window")
+            return
+        }
+
+        // This central strip is clear of the docked toolbar. Holding a slow drag still before
+        // lifting removes momentum, so the line's predicted resting point follows the applied
+        // finger delta closely enough to re-select it if scrolling happens to clear the handles.
+        dragStart.press(
+            forDuration: 0.05,
+            thenDragTo: dragEnd,
+            withVelocity: .slow,
+            thenHoldForDuration: 1.0
+        )
+
+        let selectionBranch: String
+        if vertexHandles.waitForNonExistence(timeout: 1) {
+            selectionBranch = "selection cleared during scroll"
+            let predictedMiddle = CGPoint(
+                x: midpoint.x,
+                y: midpoint.y - dragDistance
+            )
+            let windowOrigin = context.window.coordinate(withNormalizedOffset: .zero)
+            windowOrigin.withOffset(
+                CGVector(
+                    dx: predictedMiddle.x - windowOrigin.screenPoint.x,
+                    dy: predictedMiddle.y - windowOrigin.screenPoint.y
+                )
+            ).tap()
+            guard vertexHandles.waitForExistence(timeout: 5) else {
+                XCTFail(
+                    "could not re-select the scrolled shape at its predicted position "
+                        + "(\(selectionBranch))"
+                )
+                return
+            }
+        } else {
+            selectionBranch = "selection survived scroll"
+            guard vertexHandles.waitForExistence(timeout: 1) else {
+                XCTFail("shape handles did not settle after the drag (\(selectionBranch))")
+                return
+            }
+        }
+
+        let summaryAfter = ShapeFlowTestHelpers.accessibilityValue(of: vertexHandles)
+        guard !summaryAfter.isEmpty else {
+            XCTFail("selected shape exposed an empty post-scroll summary (\(selectionBranch))")
+            return
+        }
+        XCTAssertEqual(
+            summaryAfter,
+            summaryBefore,
+            "the outside finger drag mutated the selected shape (\(selectionBranch))"
+        )
+
+        let firstCenterAfter = center(of: vertexHandle(0, in: context.app))
+        let secondCenterAfter = center(of: vertexHandle(1, in: context.app))
+        let firstVerticalShift = firstCenterAfter.y - firstCenterBefore.y
+        let secondVerticalShift = secondCenterAfter.y - secondCenterBefore.y
+        let minimumScrollShift = dragDistance / 4
+        XCTAssertLessThan(
+            firstVerticalShift,
+            -minimumScrollShift,
+            "the first handle did not move upward with the scrolled canvas "
+                + "(\(selectionBranch))"
+        )
+        XCTAssertLessThan(
+            secondVerticalShift,
+            -minimumScrollShift,
+            "the second handle did not move upward with the scrolled canvas "
+                + "(\(selectionBranch))"
+        )
+    }
+
     /// Boxes the drawn line with a rectangle that clears it on every side, so the selection this
     /// makes is the same one however often it is remade.
     private func selectDrawnLine(in app: XCUIApplication, window: XCUIElement) {

@@ -203,6 +203,71 @@ enum ShapeFlowTestHelpers {
         card.tap()
     }
 
+    static func preparePersistedLineShapeForPencilOnlyRelaunch(
+        using testCase: XCTestCase
+    ) -> (
+        app: XCUIApplication,
+        window: XCUIElement,
+        shapeMiddle: XCUICoordinate
+    ) {
+        let app = XCUIApplication()
+        app.launch()
+
+        openSiteNotes(in: app)
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "app window not found")
+        clearShapeDrawingArea(
+            in: app,
+            window: window,
+            selectionStart: CGVector(dx: 0.22, dy: 0.38),
+            selectionEnd: CGVector(dx: 0.80, dy: 0.76)
+        )
+        selectTool("Pen", in: app)
+
+        let shapeCountElement = app.otherElements["vellum-shape-element-count"]
+        XCTAssertTrue(
+            shapeCountElement.waitForExistence(timeout: 10),
+            "shape count accessibility element not found"
+        )
+        let shapeCountBefore = shapeCount(of: shapeCountElement)
+
+        let shapeStart = window.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.30, dy: 0.58)
+        )
+        let shapeEnd = window.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.58, dy: 0.58)
+        )
+        shapeStart.press(
+            forDuration: 0.05,
+            thenDragTo: shapeEnd,
+            withVelocity: .slow,
+            thenHoldForDuration: 1.0
+        )
+
+        let created = testCase.expectation(
+            for: NSPredicate(format: "value == %@", String(shapeCountBefore + 1)),
+            evaluatedWith: shapeCountElement
+        )
+        testCase.wait(for: [created], timeout: 5)
+
+        app.terminate()
+        app.launchArguments = ["-vellum-force-pencil-only"]
+        app.launch()
+
+        openSiteNotes(in: app)
+
+        let relaunchedWindow = app.windows.firstMatch
+        XCTAssertTrue(
+            relaunchedWindow.waitForExistence(timeout: 5),
+            "app window not found after pencil-only relaunch"
+        )
+        let shapeMiddle = relaunchedWindow.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.44, dy: 0.58)
+        )
+        return (app, relaunchedWindow, shapeMiddle)
+    }
+
     static func selectTool(
         _ name: String,
         in app: XCUIApplication,

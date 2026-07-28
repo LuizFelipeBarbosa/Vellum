@@ -148,6 +148,11 @@ struct SelectionCaptureSurface: UIViewRepresentable {
 
             guard gestureRecognizer === panGestureRecognizer else { return true }
 
+            // UIKit enforces maximumNumberOfTouches after this delegate call, so a rejected
+            // second touch must not replace the anchor of the drag already in progress.
+            guard panGestureRecognizer.state != .began,
+                  panGestureRecognizer.state != .changed else { return false }
+
             dragStartLocation = nil
             claimedDragIntent = nil
             guard let canvasView = installedCanvas,
