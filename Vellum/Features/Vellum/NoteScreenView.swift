@@ -319,7 +319,7 @@ struct NoteScreenView: View {
                     },
                     isDrawingEnabled: selectedTool.usesDrawingGesture,
                     contentHeight: pageState.contentHeight,
-                    topContentInset: topOverlayGlobalFrame.maxY + 16,
+                    topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + 16,
                     onViewportChanged: { canvasViewport = $0 },
                     onExternalDrawingChange: {
                         selectionController.externalDrawingDidChange()
