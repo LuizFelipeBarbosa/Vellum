@@ -3,6 +3,7 @@ import PencilKit
 import UIKit
 @testable import Vellum
 import VellumCore
+import UniformTypeIdentifiers
 import XCTest
 
 @MainActor
@@ -174,6 +175,98 @@ final class SelectionPasteboardTests: XCTestCase {
             harness.undoManager.canUndo,
             "Targeted paste must append strokes and elements in exactly one undo transaction"
         )
+    }
+
+    func testHasSystemImageWithoutPayloadEnablesCanPaste() throws {
+        let harness = makeHarness(strokes: [], elements: [])
+        let imageData = try XCTUnwrap(makePNGData())
+        UIPasteboard.general.setData(
+            imageData,
+            forPasteboardType: UTType.png.identifier
+        )
+
+        XCTAssertTrue(SelectionPasteboard.hasSystemImage)
+        XCTAssertFalse(SelectionPasteboard.hasPayload)
+        XCTAssertTrue(harness.controller.canPaste)
+    }
+
+    func testReadSystemImageDataReturnsExactBytesForRawDataType() throws {
+        let imageData = try XCTUnwrap(makePNGData())
+        UIPasteboard.general.setData(
+            imageData,
+            forPasteboardType: UTType.png.identifier
+        )
+
+        XCTAssertEqual(SelectionPasteboard.readSystemImageData(), imageData)
+    }
+
+    func testPasteFromPasteboardFallsBackToSystemImageAndSelectsResult() async throws {
+        let harness = makeHarness(strokes: [], elements: [])
+        let imageData = try XCTUnwrap(makePNGData())
+        UIPasteboard.general.setData(
+            imageData,
+            forPasteboardType: UTType.png.identifier
+        )
+        var receivedData: Data?
+        var receivedTarget: CGPoint?
+        let importedID = UUID()
+        harness.controller.importSystemImage = { data, target in
+            receivedData = data
+            receivedTarget = target
+            return importedID
+        }
+        harness.store.hydrate([
+            CanvasElement(
+                id: importedID,
+                content: .text(
+                    TextBoxContent(
+                        text: "placeholder",
+                        fontSize: 18,
+                        color: CodableColor(red: 0, green: 0, blue: 0)
+                    )
+                ),
+                frame: CanvasRect(x: 0, y: 0, width: 10, height: 10)
+            ),
+        ])
+        let target = CGPoint(x: 150, y: 220)
+
+        await harness.controller.pasteFromPasteboard(at: target)
+
+        XCTAssertEqual(receivedData, imageData)
+        XCTAssertEqual(receivedTarget, target)
+        XCTAssertEqual(harness.controller.selection?.elementIDs, Set([importedID]))
+    }
+
+    func testPasteFromPasteboardPrefersVellumPayloadOverSystemImage() async throws {
+        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let harness = makeHarness(
+            strokes: [
+                makeStroke(
+                    locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
+                ),
+            ],
+            elements: [element]
+        )
+        selectMixedContent(in: harness)
+        XCTAssertTrue(harness.controller.copySelection())
+
+        let imageData = try XCTUnwrap(makePNGData())
+        var pasteboardItems = UIPasteboard.general.items
+        pasteboardItems[0][UTType.png.identifier] = imageData
+        UIPasteboard.general.items = pasteboardItems
+        XCTAssertTrue(SelectionPasteboard.hasPayload)
+        XCTAssertTrue(SelectionPasteboard.hasSystemImage)
+
+        var systemImageCalled = false
+        harness.controller.importSystemImage = { _, _ in
+            systemImageCalled = true
+            return nil
+        }
+
+        await harness.controller.pasteFromPasteboard()
+
+        XCTAssertFalse(systemImageCalled)
+        XCTAssertEqual(harness.store.elements.count, 2)
     }
 
     func testRequestPasteAffordanceLifecycle() async {

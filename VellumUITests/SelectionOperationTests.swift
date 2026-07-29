@@ -21,6 +21,166 @@ final class SelectionOperationTests: XCTestCase {
         XCTAssertNotNil(harness.controller.selectionBounds)
     }
 
+    func testCommittedChromeRotationUsesSingleSelectedElementRotation() {
+        let rotation = Double.pi / 3
+        let element = makeElement(
+            frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
+            rotation: rotation
+        )
+        let harness = makeHarness(strokes: [], elements: [element])
+
+        harness.controller.selectElement(id: element.id)
+
+        XCTAssertEqual(
+            harness.controller.committedChromeRotation,
+            rotation,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testCommittedChromeRotationIsZeroForTwoSelectedElements() {
+        let first = makeElement(
+            frame: CanvasRect(x: 20, y: 20, width: 30, height: 30),
+            rotation: Double.pi / 3
+        )
+        let second = makeElement(
+            frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
+            rotation: Double.pi / 4
+        )
+        let harness = makeHarness(strokes: [], elements: [first, second])
+
+        selectMixedContent(in: harness)
+
+        XCTAssertEqual(harness.controller.selection?.elementIDs.count, 2)
+        XCTAssertEqual(harness.controller.committedChromeRotation, 0)
+    }
+
+    func testCommittedChromeRotationIsZeroForStrokeOnlySelection() {
+        let harness = makeHarness(
+            strokes: [
+                makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
+            ],
+            elements: []
+        )
+
+        selectMixedContent(in: harness)
+
+        XCTAssertEqual(harness.controller.selection?.strokeIndices, IndexSet(integer: 0))
+        XCTAssertEqual(harness.controller.committedChromeRotation, 0)
+    }
+
+    func testCommittedChromeRotationIsZeroForElementAndStrokeSelection() {
+        let element = makeElement(
+            frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
+            rotation: Double.pi / 3
+        )
+        let harness = makeHarness(
+            strokes: [
+                makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
+            ],
+            elements: [element]
+        )
+
+        selectMixedContent(in: harness)
+
+        XCTAssertEqual(harness.controller.selection?.elementIDs, Set([element.id]))
+        XCTAssertEqual(harness.controller.selection?.strokeIndices, IndexSet(integer: 0))
+        XCTAssertEqual(harness.controller.committedChromeRotation, 0)
+    }
+
+    func testEdgeResizeFactorProjectsOntoRotatedContentXAxis() {
+        let center = CGPoint(x: 100, y: 80)
+        let halfWidth: CGFloat = 60
+        let factor: CGFloat = 0.5
+        let current = CGPoint(x: center.x, y: center.y + halfWidth * factor)
+
+        let projected = SelectionHandleGeometry.edgeResizeFactor(
+            current: current,
+            center: center,
+            rotation: .pi / 2,
+            axisIsX: true,
+            halfExtent: halfWidth
+        )
+
+        XCTAssertEqual(projected, factor, accuracy: 0.000_001)
+    }
+
+    func testEdgeResizeFactorAtZeroRotationMatchesLegacyXAxisMath() {
+        let center = CGPoint(x: 100, y: 80)
+        let halfWidth: CGFloat = 60
+        let factor: CGFloat = 0.5
+        let current = CGPoint(x: center.x + halfWidth * factor, y: center.y)
+        let legacyFactor = abs(current.x - center.x) / halfWidth
+
+        let projected = SelectionHandleGeometry.edgeResizeFactor(
+            current: current,
+            center: center,
+            rotation: 0,
+            axisIsX: true,
+            halfExtent: halfWidth
+        )
+
+        XCTAssertEqual(projected, legacyFactor)
+        XCTAssertEqual(projected, factor, accuracy: 0.000_001)
+    }
+
+    func testRotationSnappingUsesCommittedAndLiveRotationTotal() {
+        let twoDegrees = 2 * Double.pi / 180
+        let committed = Double.pi / 2 - twoDegrees
+
+        let delta = SelectionHandleGeometry.snappedRotation(
+            committed: committed,
+            delta: twoDegrees
+        )
+
+        XCTAssertEqual(committed + delta, Double.pi / 2, accuracy: 0.000_001)
+    }
+
+    func testRotationSnappingPassesThroughWhenTotalIsOutsideThreshold() {
+        let committed = 0.3
+        let requestedDelta = 0.01
+
+        let delta = SelectionHandleGeometry.snappedRotation(
+            committed: committed,
+            delta: requestedDelta
+        )
+
+        XCTAssertEqual(delta, requestedDelta, accuracy: 0.000_001)
+    }
+
+    func testRotateCommitBecomesCommittedChromeRotationAndClearsLiveDelta() throws {
+        let initialRotation = 0.2
+        let rotationDelta = 0.37
+        let element = makeElement(
+            frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
+            rotation: initialRotation
+        )
+        let harness = makeHarness(strokes: [], elements: [element])
+        harness.controller.selectElement(id: element.id)
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: CGSize(width: 1, height: 1),
+            rotation: rotationDelta
+        )
+        harness.controller.endHandleDrag()
+
+        let committedElement = try XCTUnwrap(
+            harness.store.elements.first(where: { $0.id == element.id })
+        )
+        XCTAssertEqual(
+            committedElement.rotation,
+            initialRotation + rotationDelta,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            harness.controller.committedChromeRotation,
+            committedElement.rotation,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(harness.controller.handleRotation, 0)
+    }
+
     func testSelectionSupportsStylingTruthTable() {
         let frame = CanvasRect(x: 60, y: 20, width: 30, height: 30)
         let stroke = makeStroke(
@@ -559,7 +719,7 @@ final class SelectionOperationTests: XCTestCase {
         )
     }
 
-    private func makeElement(frame: CanvasRect) -> CanvasElement {
+    private func makeElement(frame: CanvasRect, rotation: Double = 0) -> CanvasElement {
         CanvasElement(
             content: .text(
                 TextBoxContent(
@@ -568,7 +728,8 @@ final class SelectionOperationTests: XCTestCase {
                     color: CodableColor(red: 0, green: 0, blue: 0)
                 )
             ),
-            frame: frame
+            frame: frame,
+            rotation: rotation
         )
     }
 

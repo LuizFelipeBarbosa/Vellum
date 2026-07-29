@@ -96,6 +96,7 @@ struct NoteScreenView: View {
                 selectionController: selectionController,
                 shapeSnapController: shapeSnapController,
                 pageState: pageState,
+                currentVisibleContentRect: { currentVisibleContentRect },
                 selectedTool: $selectedTool,
                 cacheCurrentTool: cacheCurrentTool,
                 scrollCanvas: scrollCanvas
@@ -971,6 +972,7 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
     let selectionController: CanvasSelectionController
     let shapeSnapController: ShapeSnapController
     let pageState: NotePageState
+    let currentVisibleContentRect: () -> CGRect
     @Binding var selectedTool: ToolID
     let cacheCurrentTool: () -> Void
     let scrollCanvas: (Int) -> Void
@@ -1018,6 +1020,13 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                 shapeSnapController.snapGrid = resolveSnapGrid
                 selectionController.persistImageData = { [weak model] data in
                     await model?.persistPastedImageData(data)
+                }
+                selectionController.importSystemImage = { [weak model] data, target in
+                    await model?.importImage(
+                        data,
+                        visibleContentRect: currentVisibleContentRect(),
+                        centeredAt: target
+                    )
                 }
                 selectionController.onOperationFailed = { [weak model] message in
                     model?.errorMessage = message

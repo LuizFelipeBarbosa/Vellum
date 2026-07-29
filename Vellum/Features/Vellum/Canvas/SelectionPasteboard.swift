@@ -1,6 +1,7 @@
 import Foundation
 import PencilKit
 import UIKit
+import UniformTypeIdentifiers
 import VellumCore
 
 struct SelectionPasteboardPayload: Codable {
@@ -30,6 +31,26 @@ enum SelectionPasteboard {
     @MainActor
     static var hasPayload: Bool {
         UIPasteboard.general.contains(pasteboardTypes: [pasteboardType])
+    }
+
+    @MainActor
+    static var hasSystemImage: Bool {
+        UIPasteboard.general.hasImages
+    }
+
+    @MainActor
+    static func readSystemImageData() -> Data? {
+        let candidateTypes = [
+            UTType.jpeg.identifier,
+            UTType.png.identifier,
+            UTType.heic.identifier,
+        ]
+        for type in candidateTypes {
+            if let data = UIPasteboard.general.data(forPasteboardType: type) {
+                return data
+            }
+        }
+        return UIPasteboard.general.image?.jpegData(compressionQuality: 0.9)
     }
 
     private static func encoder() -> JSONEncoder {

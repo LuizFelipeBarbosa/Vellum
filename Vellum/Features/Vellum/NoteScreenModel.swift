@@ -421,7 +421,11 @@ final class NoteScreenModel {
     }
 
     @discardableResult
-    func importImage(_ data: Data, visibleContentRect: CGRect) async -> UUID? {
+    func importImage(
+        _ data: Data,
+        visibleContentRect: CGRect,
+        centeredAt target: CGPoint? = nil
+    ) async -> UUID? {
         let processed: ImageImportPipeline.ProcessedImage
         do {
             processed = try await ImageImportPipeline.processForStorage(data)
@@ -460,11 +464,15 @@ final class NoteScreenModel {
             width: processed.pixelSize.width * scale,
             height: processed.pixelSize.height * scale
         )
+        let center = target ?? CGPoint(
+            x: visibleContentRect.midX,
+            y: visibleContentRect.midY
+        )
         let frameX = min(
-            max(0, visibleContentRect.midX - fittedSize.width / 2),
+            max(0, center.x - fittedSize.width / 2),
             PageLayout.contentWidth - fittedSize.width
         )
-        let frameY = max(0, visibleContentRect.midY - fittedSize.height / 2)
+        let frameY = max(0, center.y - fittedSize.height / 2)
         let frame = CanvasRect(
             x: Double(frameX),
             y: Double(frameY),

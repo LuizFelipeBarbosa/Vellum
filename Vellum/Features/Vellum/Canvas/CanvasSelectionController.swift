@@ -28,10 +28,24 @@ final class CanvasSelectionController {
     weak var canvasReference: NoteCanvasReference?
     weak var elementsStore: CanvasElementsStore?
     var persistImageData: ((Data) async -> String?)?
+    var importSystemImage: ((Data, CGPoint?) async -> UUID?)?
     var onOperationFailed: ((String) -> Void)?
     /// Alignment lattice for a content-space point, or nil where there is nothing to align to.
     /// Supplied by the note screen, which is what knows the page background.
     var snapGrid: ((CGPoint) -> ShapeSnapGrid?)?
+
+    /// Only a lone element has one committed orientation the selection chrome can represent;
+    /// strokes and multi-element selections keep the shared axis-aligned frame.
+    var committedChromeRotation: Double {
+        guard let selection,
+              selection.strokeIndices.isEmpty,
+              selection.elementIDs.count == 1,
+              let elementID = selection.elementIDs.first,
+              let element = elementsStore?.elements.first(where: { $0.id == elementID }) else {
+            return 0
+        }
+        return element.rotation
+    }
 
     private var captureStart: CGPoint?
     private var captureMode: SelectionMode?
@@ -432,10 +446,24 @@ final class CanvasSelectionController {
         // Same composition as endHandleDrag, using the raw handle scale so the preview matches
         // the stroke snapshot; endHandleDrag clamps only when it commits.
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let scale = CGAffineTransform(
+            scaleX: handleScale.width,
+            y: handleScale.height
+        )
+        let committedRotation = committedChromeRotation
+        let previewScale: CGAffineTransform
+        if committedRotation != 0 {
+            // The element paints in its own rotated axes, so an asymmetric live resize must use
+            // those axes too or its preview will disagree with the locally sized commit.
+            previewScale = CGAffineTransform(rotationAngle: -committedRotation)
+                .concatenating(scale)
+                .concatenating(CGAffineTransform(rotationAngle: committedRotation))
+        } else {
+            previewScale = scale
+        }
+
         return CGAffineTransform(translationX: -center.x, y: -center.y)
-            .concatenating(
-                CGAffineTransform(scaleX: handleScale.width, y: handleScale.height)
-            )
+            .concatenating(previewScale)
             .concatenating(CGAffineTransform(rotationAngle: handleRotation))
             .concatenating(CGAffineTransform(translationX: center.x, y: center.y))
     }
@@ -741,7 +769,7 @@ final class CanvasSelectionController {
     }
 
     var canPaste: Bool {
-        SelectionPasteboard.hasPayload
+        SelectionPasteboard.hasPayload || SelectionPasteboard.hasSystemImage
     }
 
     func requestPasteAffordance(at point: CGPoint) {
@@ -798,8 +826,14 @@ final class CanvasSelectionController {
 
     func pasteFromPasteboard(at target: CGPoint? = nil) async {
         dismissPasteAffordance()
-        guard let payload = SelectionPasteboard.read(),
-              let drawing = try? PKDrawing(data: payload.drawingData),
+        guard let payload = SelectionPasteboard.read() else {
+            guard SelectionPasteboard.hasSystemImage,
+                  let data = SelectionPasteboard.readSystemImageData(),
+                  let importedID = await importSystemImage?(data, target) else { return }
+            selectElement(id: importedID)
+            return
+        }
+        guard let drawing = try? PKDrawing(data: payload.drawingData),
               let elementsStore else { return }
 
         let duplicateOffset: CGSize
