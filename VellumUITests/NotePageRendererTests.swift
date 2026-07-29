@@ -175,6 +175,217 @@ final class NotePageRendererTests: XCTestCase {
         XCTAssertEqual(pixel.alpha, 255)
     }
 
+    func testInterleavedLegacyElementsRenderIdenticallyToLegacyBandOrder() throws {
+        let assetPath = "assets/legacy-order.png"
+        let frame = CanvasRect(x: 240, y: 280, width: 240, height: 160)
+        let image = CanvasElement(
+            content: .image(
+                ImageContent(
+                    assetPath: assetPath,
+                    originalPixelSize: CanvasSize(width: 12, height: 8)
+                )
+            ),
+            frame: frame
+        )
+        let shape = CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0),
+                            CanvasPoint(x: 1, y: 1),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: 12
+                )
+            ),
+            frame: frame
+        )
+        let text = CanvasElement(
+            content: .text(
+                TextBoxContent(
+                    text: "Legacy",
+                    fontSize: 44,
+                    color: CodableColor(red: 0, green: 0, blue: 0)
+                )
+            ),
+            frame: frame
+        )
+        let imagesByAssetPath = [
+            assetPath: solidImage(color: .red, size: CGSize(width: 12, height: 8)),
+        ]
+        let interleaved = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    elements: [text, image, shape],
+                    imagesByAssetPath: imagesByAssetPath,
+                    style: .blank
+                )
+            )
+        )
+        let legacyBandOrder = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    elements: [image, shape, text],
+                    imagesByAssetPath: imagesByAssetPath,
+                    style: .blank
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            differingPixelCount(
+                interleaved,
+                legacyBandOrder,
+                in: PageGeometry.a4.pageRect(index: 0)
+            ),
+            0
+        )
+    }
+
+    func testAboveInkImagePaintsOverInk() throws {
+        let assetPath = "assets/above-ink.png"
+        let center = CGPoint(
+            x: PageLayout.contentWidth / 2,
+            y: PageGeometry.a4.pageHeight / 2
+        )
+        let frame = CanvasRect(
+            x: Double(center.x - 60),
+            y: Double(center.y - 60),
+            width: 120,
+            height: 120
+        )
+        let imageContent = ImageContent(
+            assetPath: assetPath,
+            originalPixelSize: CanvasSize(width: 8, height: 8)
+        )
+        let aboveInkImage = CanvasElement(
+            content: .image(imageContent),
+            frame: frame,
+            layerPlacement: .aboveInk
+        )
+        let defaultBelowInkImage = CanvasElement(
+            content: .image(imageContent),
+            frame: frame
+        )
+        let stroke = makeStroke(
+            locations: [
+                CGPoint(x: center.x - 40, y: center.y),
+                center,
+                CGPoint(x: center.x + 40, y: center.y),
+            ],
+            size: CGSize(width: 28, height: 28)
+        )
+        let image = solidImage(color: .red, size: CGSize(width: 8, height: 8))
+        let aboveInkPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    drawing: PKDrawing(strokes: [stroke]),
+                    elements: [aboveInkImage],
+                    imagesByAssetPath: [assetPath: image],
+                    style: .blank
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let defaultPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    drawing: PKDrawing(strokes: [stroke]),
+                    elements: [defaultBelowInkImage],
+                    imagesByAssetPath: [assetPath: image],
+                    style: .blank
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let aboveInkPixel = aboveInkPixels.pixel(atContentPoint: center)
+        let defaultPixel = defaultPixels.pixel(atContentPoint: center)
+
+        XCTAssertGreaterThanOrEqual(aboveInkPixel.red, 250)
+        XCTAssertLessThanOrEqual(aboveInkPixel.green, 5)
+        XCTAssertLessThanOrEqual(aboveInkPixel.blue, 5)
+        XCTAssertTrue(defaultPixel.differs(from: aboveInkPixel))
+    }
+
+    func testHorizontallyFlippedImageSwapsLeftAndRightPixels() throws {
+        let assetPath = "assets/split-color.png"
+        let sourceSize = CGSize(width: 20, height: 10)
+        let frame = CanvasRect(x: 240, y: 280, width: 200, height: 100)
+        let image = splitColorImage(
+            leftColor: .red,
+            rightColor: .blue,
+            size: sourceSize
+        )
+        let unflipped = CanvasElement(
+            content: .image(
+                ImageContent(
+                    assetPath: assetPath,
+                    originalPixelSize: CanvasSize(width: 20, height: 10)
+                )
+            ),
+            frame: frame
+        )
+        let flipped = CanvasElement(
+            content: .image(
+                ImageContent(
+                    assetPath: assetPath,
+                    originalPixelSize: CanvasSize(width: 20, height: 10),
+                    flippedHorizontally: true
+                )
+            ),
+            frame: frame
+        )
+        let unflippedPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    elements: [unflipped],
+                    imagesByAssetPath: [assetPath: image],
+                    style: .blank
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let flippedPixels = try pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    elements: [flipped],
+                    imagesByAssetPath: [assetPath: image],
+                    style: .blank
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let renderedFrame = cgRect(frame)
+        let leftSample = CGPoint(
+            x: renderedFrame.minX + renderedFrame.width / 4,
+            y: renderedFrame.midY
+        )
+        let rightSample = CGPoint(
+            x: renderedFrame.maxX - renderedFrame.width / 4,
+            y: renderedFrame.midY
+        )
+        let unflippedLeft = unflippedPixels.pixel(atContentPoint: leftSample)
+        let unflippedRight = unflippedPixels.pixel(atContentPoint: rightSample)
+        let flippedLeft = flippedPixels.pixel(atContentPoint: leftSample)
+        let flippedRight = flippedPixels.pixel(atContentPoint: rightSample)
+
+        XCTAssertGreaterThan(unflippedLeft.red, unflippedLeft.blue)
+        XCTAssertGreaterThan(unflippedRight.blue, unflippedRight.red)
+        XCTAssertGreaterThan(flippedLeft.blue, flippedLeft.red)
+        XCTAssertGreaterThan(flippedRight.red, flippedRight.blue)
+        XCTAssertTrue(flippedLeft.differs(from: unflippedLeft))
+        XCTAssertTrue(flippedRight.differs(from: unflippedRight))
+    }
+
     func testRotatedImageCrossingPageBoundaryDrawsOnSecondPage() throws {
         let assetPath = "assets/rotated-red.png"
         let centerY = PageGeometry.a4.pageHeight - 30
@@ -1412,6 +1623,32 @@ final class NotePageRendererTests: XCTestCase {
         return UIGraphicsImageRenderer(size: size, format: format).image { context in
             color.setFill()
             context.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    private func splitColorImage(
+        leftColor: UIColor,
+        rightColor: UIColor,
+        size: CGSize
+    ) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            let halfWidth = size.width / 2
+            leftColor.setFill()
+            context.fill(
+                CGRect(x: 0, y: 0, width: halfWidth, height: size.height)
+            )
+            rightColor.setFill()
+            context.fill(
+                CGRect(
+                    x: halfWidth,
+                    y: 0,
+                    width: size.width - halfWidth,
+                    height: size.height
+                )
+            )
         }
     }
 

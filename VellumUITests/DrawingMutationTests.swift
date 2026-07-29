@@ -311,7 +311,7 @@ final class DrawingMutationTests: XCTestCase {
         XCTAssertEqual(pages.count, originalPages.count)
         XCTAssertEqual(pages.map(\.id), originalPages.map(\.id))
         XCTAssertEqual(pages.map(\.order), originalPages.map(\.order))
-        XCTAssertEqual(store.elements, originalElements)
+        XCTAssertEqual(store.elements, originalElements.zOrderMaterialized())
 
         let restoredStrokes = canvasView.drawing.strokes
         XCTAssertEqual(restoredStrokes.count, originalDrawing.strokes.count)
@@ -445,7 +445,7 @@ final class DrawingMutationTests: XCTestCase {
         XCTAssertEqual(pages.count, originalPages.count)
         XCTAssertEqual(pages.map(\.id), originalPages.map(\.id))
         XCTAssertEqual(pages.map(\.order), originalPages.map(\.order))
-        XCTAssertEqual(store.elements, originalElements)
+        XCTAssertEqual(store.elements, originalElements.zOrderMaterialized())
 
         let restoredStrokes = canvasView.drawing.strokes
         XCTAssertEqual(restoredStrokes.count, originalDrawing.strokes.count)

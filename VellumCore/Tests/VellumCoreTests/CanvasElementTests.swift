@@ -245,3 +245,106 @@ func notePageWithoutElementsDefaultsToEmpty() throws {
 
     #expect(page.elements == [])
 }
+
+@Test("Image flip state and layer placement round trip through JSON")
+func imageFlipStateAndLayerPlacementRoundTrip() throws {
+    let original = CanvasElement(
+        id: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+        content: .image(
+            ImageContent(
+                assetPath: "assets/flipped-image.jpg",
+                originalPixelSize: CanvasSize(width: 3_000, height: 2_000),
+                flippedHorizontally: true,
+                flippedVertically: true
+            )
+        ),
+        frame: CanvasRect(x: 15, y: 25, width: 300, height: 200),
+        rotation: 0.75,
+        createdAt: Date(timeIntervalSince1970: 4_567.89),
+        layerPlacement: .aboveInk
+    )
+
+    let data = try FilePersistence.encoder().encode(original)
+    let decoded = try FilePersistence.decoder().decode(CanvasElement.self, from: data)
+
+    #expect(decoded == original)
+}
+
+@Test("Legacy image JSON defaults missing flip state and layer placement")
+func legacyImageJSONDefaultsNewFields() throws {
+    let data = Data(
+        """
+        {
+          "id": "55555555-5555-5555-5555-555555555555",
+          "kind": "image",
+          "image": {
+            "assetPath": "assets/legacy-photo.jpg",
+            "originalPixelSize": { "width": 1600, "height": 900 }
+          },
+          "frame": { "x": 20, "y": 30, "width": 320, "height": 180 },
+          "rotation": -0.25,
+          "createdAt": "1970-01-01T00:00:05.000Z"
+        }
+        """.utf8
+    )
+
+    let element = try FilePersistence.decoder().decode(CanvasElement.self, from: data)
+
+    #expect(element.layerPlacement == nil)
+    guard case .image(let image) = element.content else {
+        Issue.record("Expected decoded legacy image content.")
+        return
+    }
+    #expect(image.flippedHorizontally == false)
+    #expect(image.flippedVertically == false)
+}
+
+@Test("An unrecognized layer placement decodes as absent")
+func unrecognizedLayerPlacementDefaultsToNil() throws {
+    let data = Data(
+        """
+        {
+          "id": "66666666-6666-6666-6666-666666666666",
+          "kind": "text",
+          "text": {
+            "text": "Future placement",
+            "fontSize": 18,
+            "color": { "red": 0.2, "green": 0.4, "blue": 0.6, "alpha": 1 }
+          },
+          "frame": { "x": 5, "y": 10, "width": 200, "height": 60 },
+          "rotation": 0,
+          "createdAt": "1970-01-01T00:00:06.000Z",
+          "layerPlacement": "insideInk"
+        }
+        """.utf8
+    )
+
+    let element = try FilePersistence.decoder().decode(CanvasElement.self, from: data)
+
+    #expect(element.layerPlacement == nil)
+}
+
+@Test("Encoding an absent layer placement omits its JSON key")
+func absentLayerPlacementIsNotEncoded() throws {
+    let element = CanvasElement(
+        id: UUID(uuidString: "77777777-7777-7777-7777-777777777777")!,
+        content: .text(
+            TextBoxContent(
+                text: "No explicit placement",
+                fontSize: 14,
+                color: CodableColor(red: 0.3, green: 0.5, blue: 0.7)
+            )
+        ),
+        frame: CanvasRect(x: 1, y: 2, width: 180, height: 50),
+        createdAt: Date(timeIntervalSince1970: 7)
+    )
+
+    let data = try FilePersistence.encoder().encode(element)
+    let json = try FilePersistence.decoder().decode(JSONValue.self, from: data)
+
+    guard case .object(let object) = json else {
+        Issue.record("Expected an encoded JSON object.")
+        return
+    }
+    #expect(object["layerPlacement"] == nil)
+}

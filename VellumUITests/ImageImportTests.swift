@@ -1,6 +1,8 @@
 import Foundation
+import ImageIO
 @testable import Vellum
 import VellumCore
+import UniformTypeIdentifiers
 import XCTest
 
 @MainActor
@@ -39,6 +41,17 @@ final class ImageImportTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+    }
+
+    func testProcessForStorageBakesInNonUpExifOrientation() async throws {
+        let data = jpegDataWithExifOrientation(width: 400, height: 300, orientation: 6)
+
+        let processed = try await ImageImportPipeline.processForStorage(data)
+
+        XCTAssertEqual(processed.pixelSize.width, 300, accuracy: 2)
+        XCTAssertEqual(processed.pixelSize.height, 400, accuracy: 2)
+        let resultImage = try XCTUnwrap(UIImage(data: processed.jpegData))
+        XCTAssertEqual(resultImage.imageOrientation, .up)
     }
 
     func testImageImportRoundTripsAssetElementAndCache() async throws {
@@ -169,6 +182,47 @@ final class ImageImportTests: XCTestCase {
             context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         }
         return image.pngData()!
+    }
+
+    private func jpegDataWithExifOrientation(
+        width: Int,
+        height: Int,
+        orientation: Int
+    ) -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(
+            size: CGSize(width: width, height: height),
+            format: format
+        )
+        let image = renderer.image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        guard let cgImage = image.cgImage else {
+            XCTFail("Failed to create CGImage")
+            return Data()
+        }
+        let mutableData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            mutableData,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            XCTFail("Failed to create CGImageDestination")
+            return Data()
+        }
+        let properties: [CFString: Any] = [
+            kCGImagePropertyOrientation: orientation,
+        ]
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            XCTFail("Failed to finalize image destination")
+            return Data()
+        }
+        return mutableData as Data
     }
 
     private func makeRootDirectory() throws -> URL {

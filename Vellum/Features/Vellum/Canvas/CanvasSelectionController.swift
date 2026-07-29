@@ -14,6 +14,9 @@ final class CanvasSelectionController {
     }
 
     private(set) var selection: Selection?
+    /// Content-space point where an empty-canvas tap asked for a paste affordance.
+    /// Non-nil only while the bubble should be visible; mutually exclusive with `selection`.
+    private(set) var pendingPasteTarget: CGPoint?
     private(set) var selectionBounds: CGRect?
     private(set) var capturePath: Path?
     private(set) var dragTranslation: CGSize = .zero
@@ -25,10 +28,24 @@ final class CanvasSelectionController {
     weak var canvasReference: NoteCanvasReference?
     weak var elementsStore: CanvasElementsStore?
     var persistImageData: ((Data) async -> String?)?
+    var importSystemImage: ((Data, CGPoint?) async -> UUID?)?
     var onOperationFailed: ((String) -> Void)?
     /// Alignment lattice for a content-space point, or nil where there is nothing to align to.
     /// Supplied by the note screen, which is what knows the page background.
     var snapGrid: ((CGPoint) -> ShapeSnapGrid?)?
+
+    /// Only a lone element has one committed orientation the selection chrome can represent;
+    /// strokes and multi-element selections keep the shared axis-aligned frame.
+    var committedChromeRotation: Double {
+        guard let selection,
+              selection.strokeIndices.isEmpty,
+              selection.elementIDs.count == 1,
+              let elementID = selection.elementIDs.first,
+              let element = elementsStore?.elements.first(where: { $0.id == elementID }) else {
+            return 0
+        }
+        return element.rotation
+    }
 
     private var captureStart: CGPoint?
     private var captureMode: SelectionMode?
@@ -41,6 +58,7 @@ final class CanvasSelectionController {
     private var vertexDragIndex: Int?
 
     func beginCapture(at point: CGPoint, mode: SelectionMode) {
+        dismissPasteAffordance()
         selection = nil
         selectionBounds = nil
         strokesSnapshot = nil
@@ -123,6 +141,7 @@ final class CanvasSelectionController {
     }
 
     func clearSelection() {
+        dismissPasteAffordance()
         restoreHiddenStrokes()
         // The exemption below belongs to the selection a shape tap just made, so it dies with
         // that selection: an unrelated later tool change must never inherit it.
@@ -142,6 +161,7 @@ final class CanvasSelectionController {
     /// also switches to the Select tool: without it the tool change would clear the selection the
     /// tap just made.
     func selectElement(id: UUID, survivesNextToolChange: Bool = false) {
+        dismissPasteAffordance()
         restoreHiddenStrokes()
         keepsSelectionThroughNextToolChange = survivesNextToolChange
         let selection = Selection(
@@ -164,6 +184,7 @@ final class CanvasSelectionController {
     func toolChanged() {
         guard !keepsSelectionThroughNextToolChange else {
             keepsSelectionThroughNextToolChange = false
+            dismissPasteAffordance()
             return
         }
         clearSelection()
@@ -425,10 +446,24 @@ final class CanvasSelectionController {
         // Same composition as endHandleDrag, using the raw handle scale so the preview matches
         // the stroke snapshot; endHandleDrag clamps only when it commits.
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let scale = CGAffineTransform(
+            scaleX: handleScale.width,
+            y: handleScale.height
+        )
+        let committedRotation = committedChromeRotation
+        let previewScale: CGAffineTransform
+        if committedRotation != 0 {
+            // The element paints in its own rotated axes, so an asymmetric live resize must use
+            // those axes too or its preview will disagree with the locally sized commit.
+            previewScale = CGAffineTransform(rotationAngle: -committedRotation)
+                .concatenating(scale)
+                .concatenating(CGAffineTransform(rotationAngle: committedRotation))
+        } else {
+            previewScale = scale
+        }
+
         return CGAffineTransform(translationX: -center.x, y: -center.y)
-            .concatenating(
-                CGAffineTransform(scaleX: handleScale.width, y: handleScale.height)
-            )
+            .concatenating(previewScale)
             .concatenating(CGAffineTransform(rotationAngle: handleRotation))
             .concatenating(CGAffineTransform(translationX: center.x, y: center.y))
     }
@@ -560,6 +595,24 @@ final class CanvasSelectionController {
         )
     }
 
+    /// True when `restyleSelection` would actually touch something in the current selection:
+    /// strokes, or elements whose content is `.shape` or `.text`. False for no selection, or a
+    /// selection made only of `.image` / `.unknown` elements (restyleSelection skips those).
+    var selectionSupportsStyling: Bool {
+        guard let selection else { return false }
+        if !selection.strokeIndices.isEmpty { return true }
+        guard let elementsStore else { return false }
+        return selection.elementIDs.contains { id in
+            guard let element = elementsStore.elements.first(where: { $0.id == id }) else {
+                return false
+            }
+            switch element.content {
+            case .shape, .text: return true
+            case .image, .unknown: return false
+            }
+        }
+    }
+
     func restyleSelection(color: CodableColor?, strokeWidth: Double?) {
         guard let selection, let elementsStore else { return }
 
@@ -643,8 +696,92 @@ final class CanvasSelectionController {
         selectionBounds = bounds(for: selection)
     }
 
+    func flipSelection(horizontal: Bool) {
+        guard let selection,
+              let elementsStore,
+              let flipBounds = selectionBounds,
+              !isHandleDragging,
+              !isVertexDragging,
+              !isMoveDragging else {
+            return
+        }
+
+        let pivot = CGPoint(x: flipBounds.midX, y: flipBounds.midY)
+        let reflection = CGAffineTransform(translationX: -pivot.x, y: -pivot.y)
+            .concatenating(
+                CGAffineTransform(
+                    scaleX: horizontal ? -1 : 1,
+                    y: horizontal ? 1 : -1
+                )
+            )
+            .concatenating(CGAffineTransform(translationX: pivot.x, y: pivot.y))
+
+        elementsStore.performTransaction(horizontal ? "Flip Horizontal" : "Flip Vertical") {
+            elementsStore.mutateDrawing { drawing in
+                var strokes = drawing.strokes
+                for index in selection.strokeIndices where strokes.indices.contains(index) {
+                    strokes[index] = Self.flippedStroke(strokes[index], applying: reflection)
+                }
+                drawing = PKDrawing(strokes: strokes)
+            }
+
+            for elementID in selection.elementIDs {
+                guard let element = elementsStore.elements.first(where: { $0.id == elementID })
+                else { continue }
+                elementsStore.updateElement(
+                    element.flipped(horizontal: horizontal, aboutPivot: pivot)
+                )
+            }
+        }
+
+        self.selection = selection
+        selectionBounds = bounds(for: selection)
+    }
+
+    var canReorderSelection: Bool {
+        guard let selection else { return false }
+        return selection.strokeIndices.isEmpty && !selection.elementIDs.isEmpty
+    }
+
+    func reorderSelection(_ direction: ReorderDirection) {
+        guard canReorderSelection,
+              !isHandleDragging,
+              !isVertexDragging,
+              !isMoveDragging else {
+            return
+        }
+
+        let inkRects =
+            canvasReference?.canvasView?.drawing.strokes.map(\.renderBounds) ?? []
+        guard let selection, let elementsStore else { return }
+        guard let reordered = ElementReorderer.reorder(
+            elements: elementsStore.elements,
+            selectedIDs: selection.elementIDs,
+            direction: direction,
+            inkRects: inkRects
+        ) else {
+            return
+        }
+
+        elementsStore.performTransaction(direction.undoLabel) {
+            elementsStore.replaceAllElements(reordered)
+        }
+    }
+
     var canPaste: Bool {
-        SelectionPasteboard.hasPayload
+        SelectionPasteboard.hasPayload || SelectionPasteboard.hasSystemImage
+    }
+
+    func requestPasteAffordance(at point: CGPoint) {
+        guard canPaste else {
+            pendingPasteTarget = nil
+            return
+        }
+        pendingPasteTarget = point
+    }
+
+    func dismissPasteAffordance() {
+        pendingPasteTarget = nil
     }
 
     @discardableResult
@@ -687,12 +824,34 @@ final class CanvasSelectionController {
         deleteSelection()
     }
 
-    func pasteFromPasteboard() async {
-        guard let payload = SelectionPasteboard.read(),
-              let drawing = try? PKDrawing(data: payload.drawingData),
+    func pasteFromPasteboard(at target: CGPoint? = nil) async {
+        dismissPasteAffordance()
+        guard let payload = SelectionPasteboard.read() else {
+            guard SelectionPasteboard.hasSystemImage,
+                  let data = await SelectionPasteboard.readSystemImageData(),
+                  let importedID = await importSystemImage?(data, target) else {
+                if target != nil,
+                   SelectionPasteboard.hasPayload || SelectionPasteboard.hasSystemImage {
+                    onOperationFailed?("Couldn't read the copied content.")
+                }
+                return
+            }
+            selectElement(id: importedID)
+            return
+        }
+        guard let drawing = try? PKDrawing(data: payload.drawingData),
               let elementsStore else { return }
 
-        let duplicateOffset = CGSize(width: 20, height: 20)
+        let duplicateOffset: CGSize
+        if let target {
+            duplicateOffset = Self.pasteOffset(
+                forTarget: target,
+                drawing: drawing,
+                elements: payload.elements
+            )
+        } else {
+            duplicateOffset = CGSize(width: 20, height: 20)
+        }
         let pastedStrokes = drawing.strokes.map {
             Self.copy($0, translatedBy: duplicateOffset)
         }
@@ -718,7 +877,8 @@ final class CanvasSelectionController {
                 CanvasElement(
                     content: content,
                     frame: frame,
-                    rotation: element.rotation
+                    rotation: element.rotation,
+                    layerPlacement: element.layerPlacement
                 )
             )
         }
@@ -815,7 +975,8 @@ final class CanvasSelectionController {
                 let duplicate = CanvasElement(
                     content: element.content,
                     frame: frame,
-                    rotation: element.rotation
+                    rotation: element.rotation,
+                    layerPlacement: element.layerPlacement
                 )
                 duplicatedElementIDs.insert(duplicate.id)
                 elementsStore.addElement(duplicate)
@@ -861,7 +1022,7 @@ final class CanvasSelectionController {
         if let drawing = canvasReference?.canvasView?.drawing {
             for index in selection.strokeIndices where drawing.strokes.indices.contains(index) {
                 // PencilKit's renderBounds is already in drawing space, including stroke.transform.
-                result = union(result, with: drawing.strokes[index].renderBounds)
+                result = Self.union(result, with: drawing.strokes[index].renderBounds)
             }
         }
 
@@ -873,14 +1034,42 @@ final class CanvasSelectionController {
                     width: element.frame.width,
                     height: element.frame.height
                 ).standardized
-                result = union(result, with: frame)
+                result = Self.union(result, with: frame)
             }
         }
 
         return result
     }
 
-    private func union(_ current: CGRect?, with candidate: CGRect) -> CGRect? {
+    /// Content-space rect the action strip must keep clear of: the selection's handle chrome
+    /// plus the painted extent of rotated elements. `selectionBounds` itself still drives the
+    /// outline and handles.
+    var stripAvoidanceBounds: CGRect? {
+        guard let selection, let selectionBounds else { return nil }
+        var result = selectionBounds.insetBy(
+            dx: -SelectionHandleGeometry.resizeHitSize / 2,
+            dy: -SelectionHandleGeometry.resizeHitSize / 2
+        )                                                               // resize-handle chrome
+        result = result.union(CGRect(                                    // rotation handle band
+            x: selectionBounds.midX - SelectionHandleGeometry.rotationHitSize / 2,
+            y: selectionBounds.minY - (
+                SelectionHandleGeometry.rotationOffset
+                    + SelectionHandleGeometry.rotationHitSize / 2
+            ),
+            width: SelectionHandleGeometry.rotationHitSize,
+            height: SelectionHandleGeometry.rotationOffset
+                + SelectionHandleGeometry.rotationHitSize / 2
+        ))
+        if let elementsStore {
+            for element in elementsStore.elements
+            where selection.elementIDs.contains(element.id) && element.rotation != 0 {
+                result = result.union(element.rotatedBoundingBox)
+            }
+        }
+        return result
+    }
+
+    private static func union(_ current: CGRect?, with candidate: CGRect) -> CGRect? {
         guard !candidate.isNull, !candidate.isInfinite else { return current }
         return current?.union(candidate) ?? candidate
     }
@@ -973,6 +1162,46 @@ final class CanvasSelectionController {
         vertexDragIndex = nil
     }
 
+    private static func pasteOffset(
+        forTarget target: CGPoint,
+        drawing: PKDrawing,
+        elements: [CanvasElement]
+    ) -> CGSize {
+        var payloadBounds: CGRect?
+        if !drawing.strokes.isEmpty {
+            payloadBounds = Self.union(payloadBounds, with: drawing.bounds)
+        }
+        for element in elements {
+            payloadBounds = Self.union(payloadBounds, with: element.rotatedBoundingBox)
+        }
+
+        guard let payloadBounds else {
+            return CGSize(width: 20, height: 20)
+        }
+
+        var delta = CGSize(
+            width: target.x - payloadBounds.midX,
+            height: target.y - payloadBounds.midY
+        )
+
+        // X protects both finite page edges when the payload fits; Y protects only the top because pages grow downward without a bottom edge.
+        if payloadBounds.width <= PageLayout.contentWidth {
+            let translatedMinX = payloadBounds.minX + delta.width
+            let translatedMaxX = payloadBounds.maxX + delta.width
+            if translatedMinX < 0 {
+                delta.width -= translatedMinX
+            } else if translatedMaxX > PageLayout.contentWidth {
+                delta.width -= translatedMaxX - PageLayout.contentWidth
+            }
+        }
+
+        let translatedMinY = payloadBounds.minY + delta.height
+        if translatedMinY < 0 {
+            delta.height -= translatedMinY
+        }
+        return delta
+    }
+
     private static func copy(_ stroke: PKStroke, translatedBy translation: CGSize) -> PKStroke {
         PKStroke(
             ink: stroke.ink,
@@ -996,6 +1225,16 @@ final class CanvasSelectionController {
             mask: stroke.mask,
             randomSeed: stroke.randomSeed
         )
+    }
+
+    private static func flippedStroke(
+        _ stroke: PKStroke,
+        applying reflection: CGAffineTransform
+    ) -> PKStroke {
+        // FALLBACK: If PencilKit rejects or normalizes negative-determinant transforms, rebuild
+        // stroke.path as in restyleSelection, applying the same reflection directly to each
+        // PKStrokePoint location, and drop the transform-based approach. The rest can stay put.
+        Self.copy(stroke, applying: reflection)
     }
 
     private static func currentAverageTipWidth(_ stroke: PKStroke) -> Double? {

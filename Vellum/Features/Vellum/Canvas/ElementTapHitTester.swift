@@ -12,8 +12,9 @@ enum ElementTapHitTester {
         minimumHitWidth: CGFloat = ElementTapHitTester.defaultMinimumHitWidth,
         extraRadius: CGFloat = ElementTapHitTester.defaultTouchHitRadius
     ) -> CanvasElement? {
-        // Elements paint in array order, so the later hittable element is on top and wins.
-        elements.last { element in
+        // Elements paint in effective z-order: below ink, then ink, then above ink.
+        // Array order breaks ties within a placement, so the topmost hittable element wins.
+        elements.sortedByEffectiveZ().last { element in
             switch element.content {
             case .shape:
                 return ShapeHitTester.contains(

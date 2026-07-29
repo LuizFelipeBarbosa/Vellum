@@ -329,7 +329,11 @@ struct SelectionCaptureSurface: UIViewRepresentable {
                 return
             }
 
-            guard controller.selection != nil else { return }
+            guard controller.selection != nil else {
+                // Element-only tap hit-testing intentionally lets the paste affordance appear over ink; flow tests rely on it.
+                controller.requestPasteAffordance(at: location)
+                return
+            }
             // A selection can outlive its bounds — deleting the page an element sat on leaves
             // exactly that — and then there is no outline on screen to tap outside of. Any tap
             // drops it, so the selection is escapable rather than stuck where it cannot be seen.

@@ -3,6 +3,7 @@ import PencilKit
 import UIKit
 @testable import Vellum
 import VellumCore
+import UniformTypeIdentifiers
 import XCTest
 
 @MainActor
@@ -32,6 +33,7 @@ final class SelectionPasteboardTests: XCTestCase {
         let originalElements = harness.store.elements
 
         XCTAssertTrue(harness.controller.copySelection())
+        // This no-argument paste also guards the legacy nil-target +20/+20 offset.
         await harness.controller.pasteFromPasteboard()
 
         XCTAssertEqual(harness.canvasView.drawing.strokes.count, originalStrokeCount + 1)
@@ -65,6 +67,391 @@ final class SelectionPasteboardTests: XCTestCase {
             harness.undoManager.canUndo,
             "Paste must append strokes and elements in exactly one undo transaction"
         )
+    }
+
+    func testPasteAtTargetCentersPayloadBounds() async throws {
+        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let harness = makeHarness(
+            strokes: [
+                makeStroke(
+                    locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
+                ),
+            ],
+            elements: [element]
+        )
+        selectMixedContent(in: harness)
+        let target = CGPoint(x: 320, y: 280)
+
+        XCTAssertTrue(harness.controller.copySelection())
+        await harness.controller.pasteFromPasteboard(at: target)
+
+        let pastedSelection = try XCTUnwrap(harness.controller.selection)
+        var pastedBounds: CGRect?
+        for index in pastedSelection.strokeIndices
+        where harness.canvasView.drawing.strokes.indices.contains(index) {
+            let renderBounds = harness.canvasView.drawing.strokes[index].renderBounds
+            pastedBounds = pastedBounds.map { $0.union(renderBounds) } ?? renderBounds
+        }
+        for element in harness.store.elements
+        where pastedSelection.elementIDs.contains(element.id) {
+            let frame = CGRect(
+                x: element.frame.x,
+                y: element.frame.y,
+                width: element.frame.width,
+                height: element.frame.height
+            ).standardized
+            pastedBounds = pastedBounds.map { $0.union(frame) } ?? frame
+        }
+
+        let bounds = try XCTUnwrap(pastedBounds)
+        XCTAssertEqual(bounds.midX, target.x, accuracy: 1)
+        XCTAssertEqual(bounds.midY, target.y, accuracy: 1)
+    }
+
+    func testPasteAtTargetClampsToPageEdges() async throws {
+        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let harness = makeHarness(
+            strokes: [
+                makeStroke(
+                    locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
+                ),
+            ],
+            elements: [element]
+        )
+        selectMixedContent(in: harness)
+
+        XCTAssertTrue(harness.controller.copySelection())
+        await harness.controller.pasteFromPasteboard(at: CGPoint(x: 1, y: 1))
+
+        let pastedSelection = try XCTUnwrap(harness.controller.selection)
+        var pastedBounds: CGRect?
+        for index in pastedSelection.strokeIndices
+        where harness.canvasView.drawing.strokes.indices.contains(index) {
+            let renderBounds = harness.canvasView.drawing.strokes[index].renderBounds
+            pastedBounds = pastedBounds.map { $0.union(renderBounds) } ?? renderBounds
+        }
+        for element in harness.store.elements
+        where pastedSelection.elementIDs.contains(element.id) {
+            let frame = CGRect(
+                x: element.frame.x,
+                y: element.frame.y,
+                width: element.frame.width,
+                height: element.frame.height
+            ).standardized
+            pastedBounds = pastedBounds.map { $0.union(frame) } ?? frame
+        }
+
+        let bounds = try XCTUnwrap(pastedBounds)
+        XCTAssertGreaterThanOrEqual(bounds.minX, -0.001)
+        XCTAssertLessThanOrEqual(bounds.maxX, PageLayout.contentWidth + 0.001)
+        XCTAssertGreaterThanOrEqual(bounds.minY, -0.001)
+    }
+
+    func testPasteAtTargetIsOneUndoTransaction() async {
+        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let harness = makeHarness(
+            strokes: [
+                makeStroke(
+                    locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
+                ),
+            ],
+            elements: [element]
+        )
+        selectMixedContent(in: harness)
+        let originalStrokeCount = harness.canvasView.drawing.strokes.count
+        let originalElements = harness.store.elements
+
+        XCTAssertTrue(harness.controller.copySelection())
+        await harness.controller.pasteFromPasteboard(at: CGPoint(x: 320, y: 280))
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, originalStrokeCount + 1)
+        XCTAssertEqual(harness.store.elements.count, originalElements.count + 1)
+
+        harness.undoManager.undo()
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, originalStrokeCount)
+        XCTAssertEqual(harness.store.elements, originalElements)
+        XCTAssertFalse(
+            harness.undoManager.canUndo,
+            "Targeted paste must append strokes and elements in exactly one undo transaction"
+        )
+    }
+
+    func testHasSystemImageWithoutPayloadEnablesCanPaste() throws {
+        let harness = makeHarness(strokes: [], elements: [])
+        let imageData = try XCTUnwrap(makePNGData())
+        UIPasteboard.general.setData(
+            imageData,
+            forPasteboardType: UTType.png.identifier
+        )
+
+        XCTAssertTrue(SelectionPasteboard.hasSystemImage)
+        XCTAssertFalse(SelectionPasteboard.hasPayload)
+        XCTAssertTrue(harness.controller.canPaste)
+    }
+
+    func testReadSystemImageDataReturnsExactBytesForRawDataType() async throws {
+        let imageData = try XCTUnwrap(makePNGData())
+        UIPasteboard.general.setData(
+            imageData,
+            forPasteboardType: UTType.png.identifier
+        )
+
+        let readData = await SelectionPasteboard.readSystemImageData()
+        XCTAssertEqual(readData, imageData)
+    }
+
+    func testReadSystemImageDataLoadsPromisedImageProvider() async {
+        let promisedData = Data("promised image data".utf8)
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.image.identifier,
+            visibility: .all
+        ) { completion in
+            completion(promisedData, nil)
+            return nil
+        }
+        UIPasteboard.general.itemProviders = [provider]
+
+        let readData = await SelectionPasteboard.readSystemImageData()
+        XCTAssertEqual(readData, promisedData)
+    }
+
+    func testPasteFromPasteboardFallsBackToSystemImageAndSelectsResult() async throws {
+        let harness = makeHarness(strokes: [], elements: [])
+        let imageData = try XCTUnwrap(makePNGData())
+        UIPasteboard.general.setData(
+            imageData,
+            forPasteboardType: UTType.png.identifier
+        )
+        var receivedData: Data?
+        var receivedTarget: CGPoint?
+        let importedID = UUID()
+        harness.controller.importSystemImage = { data, target in
+            receivedData = data
+            receivedTarget = target
+            return importedID
+        }
+        harness.store.hydrate([
+            CanvasElement(
+                id: importedID,
+                content: .text(
+                    TextBoxContent(
+                        text: "placeholder",
+                        fontSize: 18,
+                        color: CodableColor(red: 0, green: 0, blue: 0)
+                    )
+                ),
+                frame: CanvasRect(x: 0, y: 0, width: 10, height: 10)
+            ),
+        ])
+        let target = CGPoint(x: 150, y: 220)
+
+        await harness.controller.pasteFromPasteboard(at: target)
+
+        XCTAssertEqual(receivedData, imageData)
+        XCTAssertEqual(receivedTarget, target)
+        XCTAssertEqual(harness.controller.selection?.elementIDs, Set([importedID]))
+    }
+
+    func testTargetedPasteReportsClaimedUnreadableContent() async {
+        let harness = makeHarness(strokes: [], elements: [])
+        UIPasteboard.general.setData(
+            Data("not a Vellum payload".utf8),
+            forPasteboardType: SelectionPasteboard.pasteboardType
+        )
+        var failureMessage: String?
+        harness.controller.onOperationFailed = { failureMessage = $0 }
+
+        await harness.controller.pasteFromPasteboard(at: CGPoint(x: 150, y: 220))
+
+        XCTAssertEqual(failureMessage, "Couldn't read the copied content.")
+    }
+
+    func testUntargetedPasteDoesNotReportClaimedUnreadableContent() async {
+        let harness = makeHarness(strokes: [], elements: [])
+        UIPasteboard.general.setData(
+            Data("not a Vellum payload".utf8),
+            forPasteboardType: SelectionPasteboard.pasteboardType
+        )
+        var failureMessage: String?
+        harness.controller.onOperationFailed = { failureMessage = $0 }
+
+        await harness.controller.pasteFromPasteboard()
+
+        XCTAssertNil(failureMessage)
+    }
+
+    func testTargetedPasteDoesNotReportEmptyPasteboard() async {
+        let harness = makeHarness(strokes: [], elements: [])
+        var failureMessage: String?
+        harness.controller.onOperationFailed = { failureMessage = $0 }
+
+        await harness.controller.pasteFromPasteboard(at: CGPoint(x: 150, y: 220))
+
+        XCTAssertNil(failureMessage)
+    }
+
+    func testPasteFromPasteboardPrefersVellumPayloadOverSystemImage() async throws {
+        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let harness = makeHarness(
+            strokes: [
+                makeStroke(
+                    locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
+                ),
+            ],
+            elements: [element]
+        )
+        selectMixedContent(in: harness)
+        XCTAssertTrue(harness.controller.copySelection())
+
+        let imageData = try XCTUnwrap(makePNGData())
+        var pasteboardItems = UIPasteboard.general.items
+        pasteboardItems[0][UTType.png.identifier] = imageData
+        UIPasteboard.general.items = pasteboardItems
+        XCTAssertTrue(SelectionPasteboard.hasPayload)
+        XCTAssertTrue(SelectionPasteboard.hasSystemImage)
+
+        var systemImageCalled = false
+        harness.controller.importSystemImage = { _, _ in
+            systemImageCalled = true
+            return nil
+        }
+
+        await harness.controller.pasteFromPasteboard()
+
+        XCTAssertFalse(systemImageCalled)
+        XCTAssertEqual(harness.store.elements.count, 2)
+    }
+
+    func testRequestPasteAffordanceLifecycle() async {
+        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let harness = makeHarness(
+            strokes: [
+                makeStroke(
+                    locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
+                ),
+            ],
+            elements: [element]
+        )
+        let firstTarget = CGPoint(x: 120, y: 140)
+        let secondTarget = CGPoint(x: 180, y: 220)
+
+        harness.controller.requestPasteAffordance(at: firstTarget)
+        XCTAssertNil(harness.controller.pendingPasteTarget)
+
+        selectMixedContent(in: harness)
+        XCTAssertTrue(harness.controller.copySelection())
+        harness.controller.requestPasteAffordance(at: firstTarget)
+        XCTAssertEqual(harness.controller.pendingPasteTarget, firstTarget)
+        harness.controller.requestPasteAffordance(at: secondTarget)
+        XCTAssertEqual(harness.controller.pendingPasteTarget, secondTarget)
+
+        harness.controller.clearSelection()
+        XCTAssertNil(harness.controller.pendingPasteTarget)
+
+        harness.controller.selectElement(id: element.id)
+        harness.controller.requestPasteAffordance(at: firstTarget)
+        harness.controller.toolChanged()
+        XCTAssertNil(harness.controller.pendingPasteTarget)
+        XCTAssertNil(harness.controller.selection)
+
+        harness.controller.selectElement(id: element.id, survivesNextToolChange: true)
+        harness.controller.requestPasteAffordance(at: firstTarget)
+        harness.controller.toolChanged()
+        XCTAssertNil(harness.controller.pendingPasteTarget)
+        XCTAssertNotNil(harness.controller.selection)
+
+        harness.controller.requestPasteAffordance(at: firstTarget)
+        harness.controller.beginCapture(at: CGPoint(x: 0, y: 0), mode: .boxed)
+        XCTAssertNil(harness.controller.pendingPasteTarget)
+
+        harness.controller.requestPasteAffordance(at: firstTarget)
+        harness.controller.selectElement(id: element.id)
+        XCTAssertNil(harness.controller.pendingPasteTarget)
+
+        harness.controller.requestPasteAffordance(at: firstTarget)
+        await harness.controller.pasteFromPasteboard(at: secondTarget)
+        XCTAssertNil(harness.controller.pendingPasteTarget)
+    }
+
+    func testPasteBubblePositionCentersAboveMiddleTap() {
+        let viewportSize = CGSize(width: 400, height: 300)
+        let tap = CGPoint(x: 200, y: 150)
+
+        let position = SelectionPasteBubbleView.position(
+            forTapAt: tap,
+            in: viewportSize
+        )
+
+        XCTAssertEqual(position.x, tap.x, accuracy: 0.001)
+        XCTAssertEqual(
+            position.y,
+            tap.y - 12 - SelectionPasteBubbleView.bubbleSize.height / 2,
+            accuracy: 0.001
+        )
+    }
+
+    func testPasteBubblePositionClampsNearTopLeft() {
+        let viewportSize = CGSize(width: 400, height: 300)
+        let margin: CGFloat = 8
+
+        let position = SelectionPasteBubbleView.position(
+            forTapAt: CGPoint(x: 1, y: 1),
+            in: viewportSize
+        )
+
+        XCTAssertEqual(
+            position.x,
+            SelectionPasteBubbleView.bubbleSize.width / 2 + margin,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            position.y,
+            SelectionPasteBubbleView.bubbleSize.height / 2 + margin,
+            accuracy: 0.001
+        )
+    }
+
+    func testPasteBubblePositionClampsNearBottomRight() {
+        let viewportSize = CGSize(width: 400, height: 300)
+        let margin: CGFloat = 8
+
+        let position = SelectionPasteBubbleView.position(
+            forTapAt: CGPoint(
+                x: viewportSize.width + 20,
+                y: viewportSize.height + 20
+            ),
+            in: viewportSize
+        )
+
+        XCTAssertEqual(
+            position.x,
+            viewportSize.width - SelectionPasteBubbleView.bubbleSize.width / 2 - margin,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            position.y,
+            viewportSize.height - SelectionPasteBubbleView.bubbleSize.height / 2 - margin,
+            accuracy: 0.001
+        )
+    }
+
+    func testCopyPastePreservesLayerPlacement() async throws {
+        var element = makeElement(
+            frame: CanvasRect(x: 60, y: 20, width: 30, height: 30)
+        )
+        element.layerPlacement = .aboveInk
+        let harness = makeHarness(strokes: [], elements: [element])
+        harness.controller.selectElement(id: element.id)
+
+        XCTAssertTrue(harness.controller.copySelection())
+        await harness.controller.pasteFromPasteboard()
+
+        let pasted = try XCTUnwrap(
+            harness.store.elements.first(where: { $0.id != element.id })
+        )
+        XCTAssertEqual(pasted.layerPlacement, .aboveInk)
     }
 
     func testCutLeavesPayloadAndPasteRestoresOffsetEquivalentContent() async throws {

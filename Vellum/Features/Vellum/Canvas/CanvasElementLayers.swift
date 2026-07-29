@@ -2,53 +2,15 @@ import SwiftUI
 import UIKit
 import VellumCore
 
-struct ImageElementsLayer: View {
+struct CanvasElementsBandLayer: View {
     let store: CanvasElementsStore
     let selectionController: CanvasSelectionController
-    let viewport: CanvasViewport
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(store.elements) { element in
-                if case .image(let content) = element.content {
-                    image(for: content)
-                        .frame(
-                            width: CGFloat(element.frame.width),
-                            height: CGFloat(element.frame.height)
-                        )
-                        .rotationEffect(.radians(element.rotation))
-                        .position(
-                            x: CGFloat(element.frame.x + element.frame.width / 2),
-                            y: CGFloat(element.frame.y + element.frame.height / 2)
-                        )
-                        .transformEffect(
-                            selectionController.liveTransform(forElementWith: element.id)
-                        )
-                }
-            }
-        }
-        .allowsHitTesting(false)
-    }
-
-    @ViewBuilder
-    private func image(for content: ImageContent) -> some View {
-        if let image = store.imageCache[content.assetPath] {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-        } else {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(VellumTheme.ink(0.06))
-        }
-    }
-}
-
-struct ShapeElementsLayer: View {
-    let store: CanvasElementsStore
-    let selectionController: CanvasSelectionController
-    let viewport: CanvasViewport
+    let placement: LayerPlacement
+    var textDefaults: TextConfig? = nil
+    var isTextToolActive = false
 
     @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var focusedElementID: UUID?
 
     private var shapeCount: Int {
         store.elements.reduce(into: 0) { count, element in
@@ -59,53 +21,21 @@ struct ShapeElementsLayer: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(store.elements) { element in
-                if case .shape(let content) = element.content {
-                    Path(
-                        ShapeGeometry.path(
-                            for: content,
-                            in: element.frame,
-                            rotation: element.rotation
-                        )
-                    )
-                    .stroke(
-                        Color(
-                            ShapeInkAppearance.displayColor(
-                                for: content.strokeColor,
-                                style: colorScheme == .dark ? .dark : .light
-                            )
-                        ),
-                        style: StrokeStyle(
-                            lineWidth: CGFloat(content.strokeWidth),
-                            lineCap: .round,
-                            lineJoin: .round
-                        )
-                    )
-                    .transformEffect(
-                        selectionController.liveTransform(forElementWith: element.id)
-                    )
-                }
-            }
+        if placement == .belowInk {
+            bandContent
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityIdentifier("vellum-shape-element-count")
+                .accessibilityValue("\(shapeCount)")
+        } else {
+            bandContent
+                .allowsHitTesting(isTextToolActive)
         }
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .ignore)
-        .accessibilityIdentifier("vellum-shape-element-count")
-        .accessibilityValue("\(shapeCount)")
     }
-}
 
-struct TextElementsLayer: View {
-    let store: CanvasElementsStore
-    let textDefaults: TextConfig
-    let viewport: CanvasViewport
-    let isActive: Bool
-
-    @FocusState private var focusedElementID: UUID?
-
-    var body: some View {
+    private var bandContent: some View {
         ZStack(alignment: .topLeading) {
-            if isActive {
+            if placement == .aboveInk, isTextToolActive, let textDefaults {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture(coordinateSpace: .local) { location in
@@ -132,17 +62,84 @@ struct TextElementsLayer: View {
             }
 
             ForEach(store.elements) { element in
-                if case .text = element.content {
-                    TextBoxElementView(
-                        element: element,
-                        store: store,
-                        isActive: isActive,
-                        focusedID: $focusedElementID
-                    )
+                switch element.content {
+                case .image(let content):
+                    if element.effectivePlacement == placement {
+                        image(for: content)
+                            .frame(
+                                width: CGFloat(element.frame.width),
+                                height: CGFloat(element.frame.height)
+                            )
+                            .scaleEffect(
+                                x: content.flippedHorizontally ? -1 : 1,
+                                y: content.flippedVertically ? -1 : 1
+                            )
+                            .rotationEffect(.radians(element.rotation))
+                            .position(
+                                x: CGFloat(element.frame.x + element.frame.width / 2),
+                                y: CGFloat(element.frame.y + element.frame.height / 2)
+                            )
+                            .transformEffect(
+                                selectionController.liveTransform(forElementWith: element.id)
+                            )
+                            .allowsHitTesting(false)
+                    }
+                case .shape(let content):
+                    if element.effectivePlacement == placement {
+                        Path(
+                            ShapeGeometry.path(
+                                for: content,
+                                in: element.frame,
+                                rotation: element.rotation
+                            )
+                        )
+                        .stroke(
+                            Color(
+                                ShapeInkAppearance.displayColor(
+                                    for: content.strokeColor,
+                                    style: colorScheme == .dark ? .dark : .light
+                                )
+                            ),
+                            style: StrokeStyle(
+                                lineWidth: CGFloat(content.strokeWidth),
+                                lineCap: .round,
+                                lineJoin: .round
+                            )
+                        )
+                        .transformEffect(
+                            selectionController.liveTransform(forElementWith: element.id)
+                        )
+                        .allowsHitTesting(false)
+                    }
+                case .text:
+                    let belongsInBand = placement == .aboveInk
+                        ? element.effectivePlacement == .aboveInk || isTextToolActive
+                        : element.effectivePlacement == .belowInk && !isTextToolActive
+                    if belongsInBand {
+                        TextBoxElementView(
+                            element: element,
+                            store: store,
+                            isActive: isTextToolActive,
+                            focusedID: $focusedElementID
+                        )
+                    }
+                case .unknown:
+                    EmptyView()
                 }
             }
         }
-        .allowsHitTesting(isActive)
+    }
+
+    @ViewBuilder
+    private func image(for content: ImageContent) -> some View {
+        if let image = store.imageCache[content.assetPath] {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+        } else {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(VellumTheme.ink(0.06))
+        }
     }
 }
 
@@ -154,7 +151,6 @@ private struct TextBoxElementView: View {
 
     @State private var text: String
     @State private var dragOffset: CGSize = .zero
-    @State private var sessionBaseline: [CanvasElement]?
     @State private var renderedHeight: CGFloat
     @State private var hasMeasuredRenderedHeight = false
 
@@ -225,10 +221,10 @@ private struct TextBoxElementView: View {
                 )
                 .onChange(of: focusedID.wrappedValue) { oldValue, newValue in
                     if oldValue != element.id, newValue == element.id {
-                        sessionBaseline = store.elements
+                        store.beginTextEditingSession(for: element.id)
                     }
                     if oldValue == element.id, newValue != element.id {
-                        finishEditingSession(content: content)
+                        store.finishTextEditingSession(matching: element.id)
                     }
                 }
                 .onChange(of: text) { _, newValue in
@@ -248,7 +244,7 @@ private struct TextBoxElementView: View {
                     text = newValue
                 }
                 .onSubmit {
-                    finishEditingSession(content: content)
+                    store.finishTextEditingSession(matching: element.id)
                 }
                 .accessibilityLabel("Text box")
         }
@@ -264,44 +260,5 @@ private struct TextBoxElementView: View {
             )
         )
         store.updateElementLive(updated)
-    }
-
-    private func finishEditingSession(content: TextBoxContent) {
-        defer { sessionBaseline = nil }
-
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if trimmed.isEmpty {
-            if let sessionBaseline {
-                store.removeElementLive(id: element.id)
-                store.registerEditingSessionUndo(from: sessionBaseline, label: "Remove Text Box")
-            } else {
-                store.removeElement(id: element.id)
-            }
-            return
-        }
-
-        let finalContent = TextBoxContent(
-            text: trimmed,
-            fontSize: content.fontSize,
-            color: content.color
-        )
-        var updated = element
-        updated.content = .text(finalContent)
-        updated.frame.height = max(
-            44,
-            NotePageRenderer.growTextFrame(
-                updated.frame,
-                textContent: finalContent
-            ).height
-        )
-        store.updateElementLive(updated)
-
-        if let sessionBaseline {
-            store.registerEditingSessionUndo(
-                from: sessionBaseline,
-                label: "Edit Text"
-            )
-        }
     }
 }

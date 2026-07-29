@@ -1,6 +1,53 @@
 import SwiftUI
 import VellumCore
 
+enum SelectionHandleGeometry {
+    static let resizeHitSize: CGFloat = 28
+    static let rotationHitSize: CGFloat = 32
+    static let rotationOffset: CGFloat = 28
+
+    /// Edge drags follow the chrome's local axes so a rotated element resizes in the direction
+    /// indicated by the handle instead of against the canvas axes.
+    static func edgeResizeFactor(
+        current: CGPoint,
+        center: CGPoint,
+        rotation: Double,
+        axisIsX: Bool,
+        halfExtent: CGFloat
+    ) -> CGFloat {
+        guard halfExtent > 0 else { return 1 }
+
+        let cosine = CGFloat(cos(rotation))
+        let sine = CGFloat(sin(rotation))
+        let deltaX = current.x - center.x
+        let deltaY = current.y - center.y
+        let projection = axisIsX
+            ? deltaX * cosine + deltaY * sine
+            : deltaX * -sine + deltaY * cosine
+        return abs(projection) / halfExtent
+    }
+
+    /// Snapping the combined orientation makes cardinal targets reachable from elements that
+    /// already have a committed rotation while still returning the live delta the controller owns.
+    static func snappedRotation(committed: Double, delta: Double) -> Double {
+        let fullTurn = Double.pi * 2
+        let total = committed + delta
+        var normalizedTotal = total.truncatingRemainder(dividingBy: fullTurn)
+        if normalizedTotal < 0 {
+            normalizedTotal += fullTurn
+        }
+
+        let snapPoints = stride(from: 0.0, through: fullTurn, by: Double.pi / 2)
+        let nearest = snapPoints.min { lhs, rhs in
+            abs(normalizedTotal - lhs) < abs(normalizedTotal - rhs)
+        }
+        if let nearest, abs(normalizedTotal - nearest) <= 4 * .pi / 180 {
+            return nearest - committed
+        }
+        return normalizedTotal - committed
+    }
+}
+
 struct SelectionOverlayView: View {
     let controller: CanvasSelectionController
     let selectionMode: SelectionMode
@@ -89,6 +136,7 @@ struct SelectionOverlayView: View {
         if controller.isHandleDragging {
             framed
                 .scaleEffect(controller.handleScale)
+                // Snapshot pixels already contain the committed rotation — use only the live delta.
                 .rotationEffect(.radians(controller.handleRotation))
                 .position(x: bounds.midX, y: bounds.midY)
                 .opacity(0.9)
@@ -106,6 +154,8 @@ struct SelectionOverlayView: View {
 
     @ViewBuilder
     private func selectionOutline(in bounds: CGRect) -> some View {
+        let rotation = controller.committedChromeRotation
+            + (controller.isHandleDragging ? controller.handleRotation : 0)
         let framed = RoundedRectangle(cornerRadius: 8)
             .stroke(
                 VellumTheme.accentDark,
@@ -116,13 +166,13 @@ struct SelectionOverlayView: View {
         if controller.isHandleDragging {
             framed
                 .scaleEffect(controller.handleScale)
-                .rotationEffect(.radians(controller.handleRotation))
+                .rotationEffect(.radians(rotation))
                 .position(x: bounds.midX, y: bounds.midY)
                 .allowsHitTesting(false)
         } else {
             framed
                 .scaleEffect(CGSize(width: 1, height: 1))
-                .rotationEffect(.radians(0))
+                .rotationEffect(.radians(rotation))
                 .position(x: bounds.midX, y: bounds.midY)
                 .offset(controller.dragTranslation)
                 .allowsHitTesting(false)
@@ -149,7 +199,10 @@ struct SelectionOverlayView: View {
                         Rectangle()
                             .stroke(VellumTheme.accentDark, lineWidth: 1.5)
                     }
-                    .frame(width: 28, height: 28)
+                    .frame(
+                        width: SelectionHandleGeometry.resizeHitSize,
+                        height: SelectionHandleGeometry.resizeHitSize
+                    )
                     .contentShape(Rectangle())
                     .position(livePoint(for: handle, in: bounds))
                     .gesture(handleGesture(handle, bounds: bounds))
@@ -163,7 +216,10 @@ struct SelectionOverlayView: View {
                     Circle()
                         .stroke(VellumTheme.accentDark, lineWidth: 1.5)
                 }
-                .frame(width: 32, height: 32)
+                .frame(
+                    width: SelectionHandleGeometry.rotationHitSize,
+                    height: SelectionHandleGeometry.rotationHitSize
+                )
                 .contentShape(Circle())
                 .position(livePoint(for: .rotation, in: bounds))
                 .gesture(handleGesture(.rotation, bounds: bounds))
@@ -295,11 +351,23 @@ struct SelectionOverlayView: View {
             return (CGSize(width: factor, height: factor), 0)
         case .left, .right:
             let halfWidth = bounds.width / 2
-            let factor = halfWidth > 0 ? abs(current.x - center.x) / halfWidth : 1
+            let factor = SelectionHandleGeometry.edgeResizeFactor(
+                current: current,
+                center: center,
+                rotation: controller.committedChromeRotation,
+                axisIsX: true,
+                halfExtent: halfWidth
+            )
             return (CGSize(width: factor, height: 1), 0)
         case .top, .bottom:
             let halfHeight = bounds.height / 2
-            let factor = halfHeight > 0 ? abs(current.y - center.y) / halfHeight : 1
+            let factor = SelectionHandleGeometry.edgeResizeFactor(
+                current: current,
+                center: center,
+                rotation: controller.committedChromeRotation,
+                axisIsX: false,
+                halfExtent: halfHeight
+            )
             return (CGSize(width: 1, height: factor), 0)
         case .rotation:
             let startAngle = atan2(start.y - center.y, start.x - center.x)
@@ -312,20 +380,10 @@ struct SelectionOverlayView: View {
     }
 
     private func snappedRotation(_ rotation: Double) -> Double {
-        let fullTurn = Double.pi * 2
-        var normalized = rotation.truncatingRemainder(dividingBy: fullTurn)
-        if normalized < 0 {
-            normalized += fullTurn
-        }
-
-        let snapPoints = stride(from: 0.0, through: fullTurn, by: Double.pi / 2)
-        let nearest = snapPoints.min { lhs, rhs in
-            abs(normalized - lhs) < abs(normalized - rhs)
-        }
-        if let nearest, abs(normalized - nearest) <= 4 * .pi / 180 {
-            return nearest
-        }
-        return normalized
+        SelectionHandleGeometry.snappedRotation(
+            committed: controller.committedChromeRotation,
+            delta: rotation
+        )
     }
 
     private func livePoint(for handle: SelectionHandle, in bounds: CGRect) -> CGPoint {
@@ -333,7 +391,8 @@ struct SelectionOverlayView: View {
         let scale = controller.isHandleDragging
             ? controller.handleScale
             : CGSize(width: 1, height: 1)
-        let rotation = controller.isHandleDragging ? controller.handleRotation : 0
+        let rotation = controller.committedChromeRotation
+            + (controller.isHandleDragging ? controller.handleRotation : 0)
 
         let topPoint = transformed(
             SelectionHandle.top.anchorPoint(in: bounds),
@@ -343,8 +402,10 @@ struct SelectionOverlayView: View {
         )
         if handle == .rotation {
             return CGPoint(
-                x: topPoint.x + CGFloat(sin(rotation)) * 28,
-                y: topPoint.y - CGFloat(cos(rotation)) * 28
+                x: topPoint.x
+                    + CGFloat(sin(rotation)) * SelectionHandleGeometry.rotationOffset,
+                y: topPoint.y
+                    - CGFloat(cos(rotation)) * SelectionHandleGeometry.rotationOffset
             )
         }
         return transformed(

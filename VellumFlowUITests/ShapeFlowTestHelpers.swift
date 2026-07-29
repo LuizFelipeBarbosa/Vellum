@@ -203,6 +203,49 @@ enum ShapeFlowTestHelpers {
         card.tap()
     }
 
+    /// Clears elements left at a point by persistent test documents so the next tap reaches
+    /// the element-free path; ink is not hit-tested by this tap path.
+    static func clearElement(
+        at point: CGVector,
+        in app: XCUIApplication,
+        window: XCUIElement,
+        maxAttempts: Int = 5
+    ) {
+        let deleteSelection = app.buttons["Delete selection"]
+        for _ in 0..<maxAttempts {
+            window.coordinate(withNormalizedOffset: point).tap()
+            guard deleteSelection.waitForExistence(timeout: 1.5) else { return }
+
+            deleteSelection.tap()
+            _ = deleteSelection.waitForNonExistence(timeout: 1.5)
+        }
+    }
+
+    /// The cross-app paste permission alert asks again for every new pasteboard write, and
+    /// "Don't Allow Paste" is its DEFAULT action, so XCUITest's automatic interruption
+    /// handling would deny the permission — tap "Allow Paste" explicitly. Query ONLY
+    /// SpringBoard (which hosts the alert): the app's main thread blocks inside the
+    /// pasteboard read until the alert is answered, so any query against the app process
+    /// hangs for its full 30s snapshot deadline and starves this poll.
+    static func allowPastePermission(
+        in app: XCUIApplication,
+        timeout: TimeInterval = 20
+    ) {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let candidates = [
+            springboard.alerts.buttons["Allow Paste"],
+            springboard.buttons["Allow Paste"],
+        ]
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            for allow in candidates where allow.exists {
+                allow.tap()
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+    }
+
     static func preparePersistedLineShapeForPencilOnlyRelaunch(
         using testCase: XCTestCase
     ) -> (

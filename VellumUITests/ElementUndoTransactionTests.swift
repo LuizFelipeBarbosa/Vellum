@@ -229,7 +229,8 @@ final class ElementUndoTransactionTests: XCTestCase {
                     strokeWidth: 4
                 )
             ),
-            frame: CanvasRect(x: 10, y: 12, width: 100, height: 8)
+            frame: CanvasRect(x: 10, y: 12, width: 100, height: 8),
+            layerPlacement: .belowInk
         )
 
         store.performTransaction("Draw Shape") {
@@ -758,7 +759,8 @@ final class ElementUndoTransactionTests: XCTestCase {
                     color: CodableColor(red: 0, green: 0, blue: 0)
                 )
             ),
-            frame: CanvasRect(x: 10, y: 20, width: 100, height: 40)
+            frame: CanvasRect(x: 10, y: 20, width: 100, height: 40),
+            layerPlacement: .aboveInk
         )
     }
 
@@ -770,7 +772,8 @@ final class ElementUndoTransactionTests: XCTestCase {
                     originalPixelSize: CanvasSize(width: 200, height: 100)
                 )
             ),
-            frame: CanvasRect(x: 20, y: 30, width: 200, height: 100)
+            frame: CanvasRect(x: 20, y: 30, width: 200, height: 100),
+            layerPlacement: .belowInk
         )
     }
 
@@ -785,7 +788,8 @@ final class ElementUndoTransactionTests: XCTestCase {
                     strokeWidth: 4
                 )
             ),
-            frame: CanvasRect(x: 20, y: 30, width: 100, height: 80)
+            frame: CanvasRect(x: 20, y: 30, width: 100, height: 80),
+            layerPlacement: .belowInk
         )
     }
 
