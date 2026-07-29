@@ -196,7 +196,7 @@ final class SelectionOperationTests: XCTestCase {
         let frame = CanvasRect(x: 60, y: 20, width: 30, height: 30)
         let selected = makeElement(frame: frame)
         let front = makeElement(frame: frame)
-        let originalElements = [selected, front]
+        let originalElements = [selected, front].zOrderMaterialized()
         let harness = makeHarness(strokes: [], elements: originalElements)
         harness.controller.selectElement(id: selected.id)
 
@@ -212,7 +212,9 @@ final class SelectionOperationTests: XCTestCase {
         harness.undoManager.undo()
 
         XCTAssertEqual(harness.store.elements, originalElements)
-        XCTAssertTrue(harness.store.elements.allSatisfy { $0.layerPlacement == nil })
+        XCTAssertTrue(harness.store.elements.allSatisfy {
+            $0.layerPlacement == .aboveInk
+        })
         XCTAssertFalse(
             harness.undoManager.canUndo,
             "Reorder must register exactly one undo entry"
@@ -234,7 +236,7 @@ final class SelectionOperationTests: XCTestCase {
         XCTAssertTrue(legacyElements.allSatisfy { $0.layerPlacement == nil })
 
         let store = CanvasElementsStore()
-        store.hydrate(legacyElements.zOrderMaterialized())
+        store.hydrate(legacyElements)
         XCTAssertTrue(store.elements.allSatisfy { $0.layerPlacement != nil })
 
         let appendedImage = makeImageElement(
@@ -242,7 +244,7 @@ final class SelectionOperationTests: XCTestCase {
         )
         store.addElement(appendedImage)
 
-        XCTAssertNil(store.elements.last?.layerPlacement)
+        XCTAssertEqual(store.elements.last?.layerPlacement, .belowInk)
         let screenOrder =
             store.elements.filter { $0.effectivePlacement == .belowInk }
             + store.elements.filter { $0.effectivePlacement == .aboveInk }
@@ -391,7 +393,7 @@ final class SelectionOperationTests: XCTestCase {
         harness.undoManager.undo()
 
         XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1)
-        XCTAssertEqual(harness.store.elements, [element])
+        XCTAssertEqual(harness.store.elements, [element].zOrderMaterialized())
         XCTAssertFalse(
             harness.undoManager.canUndo,
             "A mixed stroke-and-element delete must register exactly one undo entry"
@@ -432,7 +434,7 @@ final class SelectionOperationTests: XCTestCase {
         harness.undoManager.undo()
 
         XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1)
-        XCTAssertEqual(harness.store.elements, [element])
+        XCTAssertEqual(harness.store.elements, [element].zOrderMaterialized())
         XCTAssertFalse(
             harness.undoManager.canUndo,
             "A mixed stroke-and-element duplicate must register exactly one undo entry"

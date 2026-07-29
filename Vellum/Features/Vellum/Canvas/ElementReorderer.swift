@@ -24,6 +24,8 @@ enum ReorderDirection: String, CaseIterable, Sendable {
 
 enum ElementReorderer {
     /// Returns the new full elements array, or nil when the operation is a visual no-op.
+    /// Mixed-band non-contiguous selections are an exception: stepwise moves can return nil
+    /// rather than move an interleaved element across ink and change selected members' bands.
     /// A successful reorder materializes every placement so later legacy normalization cannot
     /// reinterpret the explicit order.
     static func reorder(
@@ -39,6 +41,12 @@ enum ElementReorderer {
             return nil
         }
 
+        let inkIntersectsSelection = inkRects.contains {
+            $0.intersects(context.selectedBounds)
+        }
+
+        // At a sequence edge, crossing ink is the only possible visual change, and it is
+        // invisible unless ink overlaps the selection.
         switch direction {
         case .toFront:
             let isTopmost = context.sequence.suffix(context.selected.count).map(\.id)
@@ -46,7 +54,7 @@ enum ElementReorderer {
             let allAboveInk = context.selected.allSatisfy {
                 $0.effectivePlacement == .aboveInk
             }
-            guard !(isTopmost && allAboveInk) else {
+            guard !(isTopmost && (allAboveInk || !inkIntersectsSelection)) else {
                 return nil
             }
             return result(
@@ -57,16 +65,12 @@ enum ElementReorderer {
         case .forward:
             return moveForward(
                 context,
-                inkIntersectsSelection: inkRects.contains {
-                    $0.intersects(context.selectedBounds)
-                }
+                inkIntersectsSelection: inkIntersectsSelection
             )
         case .backward:
             return moveBackward(
                 context,
-                inkIntersectsSelection: inkRects.contains {
-                    $0.intersects(context.selectedBounds)
-                }
+                inkIntersectsSelection: inkIntersectsSelection
             )
         case .toBack:
             let isBottommost = context.sequence.prefix(context.selected.count).map(\.id)
@@ -74,7 +78,7 @@ enum ElementReorderer {
             let allBelowInk = context.selected.allSatisfy {
                 $0.effectivePlacement == .belowInk
             }
-            guard !(isBottommost && allBelowInk) else {
+            guard !(isBottommost && (allBelowInk || !inkIntersectsSelection)) else {
                 return nil
             }
             return result(
@@ -89,11 +93,16 @@ enum ElementReorderer {
         _ context: ReorderContext,
         inkIntersectsSelection: Bool
     ) -> [CanvasElement]? {
+        let selectedIDs = Set(context.selected.map(\.id))
+        let allSamePlacement = context.selected.dropFirst().allSatisfy {
+            $0.effectivePlacement == context.selected[0].effectivePlacement
+        }
         let candidate: CanvasElement?
         if context.topmostSelectedIndex < context.belowCount {
             candidate = firstCandidate(
                 in: context.sequence,
-                indices: (context.topmostSelectedIndex + 1)..<context.belowCount,
+                indices: (context.bottommostSelectedIndex + 1)..<context.belowCount,
+                selectedIDs: selectedIDs,
                 selectedBounds: context.selectedBounds,
                 ascending: true
             )
@@ -109,6 +118,7 @@ enum ElementReorderer {
                     firstCandidate(
                         in: context.sequence,
                         indices: context.belowCount..<context.sequence.count,
+                        selectedIDs: selectedIDs,
                         selectedBounds: context.selectedBounds,
                         ascending: true
                     ),
@@ -116,9 +126,13 @@ enum ElementReorderer {
                 )
             }
         } else {
+            let startIndex = allSamePlacement
+                ? context.bottommostSelectedIndex + 1
+                : context.topmostSelectedIndex + 1
             candidate = firstCandidate(
                 in: context.sequence,
-                indices: (context.topmostSelectedIndex + 1)..<context.sequence.count,
+                indices: startIndex..<context.sequence.count,
+                selectedIDs: selectedIDs,
                 selectedBounds: context.selectedBounds,
                 ascending: true
             )
@@ -148,11 +162,16 @@ enum ElementReorderer {
         _ context: ReorderContext,
         inkIntersectsSelection: Bool
     ) -> [CanvasElement]? {
+        let selectedIDs = Set(context.selected.map(\.id))
+        let allSamePlacement = context.selected.dropFirst().allSatisfy {
+            $0.effectivePlacement == context.selected[0].effectivePlacement
+        }
         let candidate: CanvasElement?
         if context.bottommostSelectedIndex >= context.belowCount {
             candidate = firstCandidate(
                 in: context.sequence,
-                indices: context.belowCount..<context.bottommostSelectedIndex,
+                indices: context.belowCount..<context.topmostSelectedIndex,
+                selectedIDs: selectedIDs,
                 selectedBounds: context.selectedBounds,
                 ascending: false
             )
@@ -168,6 +187,7 @@ enum ElementReorderer {
                     firstCandidate(
                         in: context.sequence,
                         indices: 0..<context.belowCount,
+                        selectedIDs: selectedIDs,
                         selectedBounds: context.selectedBounds,
                         ascending: false
                     ),
@@ -175,9 +195,13 @@ enum ElementReorderer {
                 )
             }
         } else {
+            let endIndex = allSamePlacement
+                ? context.topmostSelectedIndex
+                : context.bottommostSelectedIndex
             candidate = firstCandidate(
                 in: context.sequence,
-                indices: 0..<context.bottommostSelectedIndex,
+                indices: 0..<endIndex,
+                selectedIDs: selectedIDs,
                 selectedBounds: context.selectedBounds,
                 ascending: false
             )
@@ -206,17 +230,20 @@ enum ElementReorderer {
     private static func firstCandidate(
         in sequence: [CanvasElement],
         indices: Range<Int>,
+        selectedIDs: Set<UUID>,
         selectedBounds: CGRect,
         ascending: Bool
     ) -> CanvasElement? {
         if ascending {
             for index in indices
-            where sequence[index].rotatedBoundingBox.intersects(selectedBounds) {
+            where !selectedIDs.contains(sequence[index].id)
+                && sequence[index].rotatedBoundingBox.intersects(selectedBounds) {
                 return sequence[index]
             }
         } else {
             for index in indices.reversed()
-            where sequence[index].rotatedBoundingBox.intersects(selectedBounds) {
+            where !selectedIDs.contains(sequence[index].id)
+                && sequence[index].rotatedBoundingBox.intersects(selectedBounds) {
                 return sequence[index]
             }
         }

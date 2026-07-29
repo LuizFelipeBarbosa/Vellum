@@ -203,6 +203,24 @@ enum ShapeFlowTestHelpers {
         card.tap()
     }
 
+    /// Clears elements left at a point by persistent test documents so the next tap reaches
+    /// the element-free path; ink is not hit-tested by this tap path.
+    static func clearElement(
+        at point: CGVector,
+        in app: XCUIApplication,
+        window: XCUIElement,
+        maxAttempts: Int = 5
+    ) {
+        let deleteSelection = app.buttons["Delete selection"]
+        for _ in 0..<maxAttempts {
+            window.coordinate(withNormalizedOffset: point).tap()
+            guard deleteSelection.waitForExistence(timeout: 1.5) else { return }
+
+            deleteSelection.tap()
+            _ = deleteSelection.waitForNonExistence(timeout: 1.5)
+        }
+    }
+
     static func preparePersistedLineShapeForPencilOnlyRelaunch(
         using testCase: XCTestCase
     ) -> (

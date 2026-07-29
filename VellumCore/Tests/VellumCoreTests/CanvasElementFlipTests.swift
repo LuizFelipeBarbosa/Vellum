@@ -61,6 +61,76 @@ func verticalImageFlip() {
     #expect(image.flippedVertically)
 }
 
+@Test("Flipping an already-flipped and rotated image composes its flags and rotation")
+func alreadyFlippedAndRotatedImageFlip() {
+    let original = CanvasElement(
+        content: .image(
+            ImageContent(
+                assetPath: "assets/already-flipped.jpg",
+                originalPixelSize: CanvasSize(width: 1_400, height: 900),
+                flippedHorizontally: true,
+                flippedVertically: false
+            )
+        ),
+        frame: CanvasRect(x: 18, y: 42, width: 96, height: 54),
+        rotation: 0.7
+    )
+    let pivot = CGPoint(x: 160, y: -25)
+
+    let horizontallyFlipped = original.flipped(horizontal: true, aboutPivot: pivot)
+
+    expectApproximatelyEqual(
+        centerX(of: horizontallyFlipped.frame),
+        2 * Double(pivot.x) - centerX(of: original.frame)
+    )
+    expectApproximatelyEqual(centerY(of: horizontallyFlipped.frame), centerY(of: original.frame))
+    expectApproximatelyEqual(horizontallyFlipped.frame.width, original.frame.width)
+    expectApproximatelyEqual(horizontallyFlipped.frame.height, original.frame.height)
+    expectApproximatelyEqual(horizontallyFlipped.rotation, -original.rotation)
+    guard case .image(let horizontallyFlippedImage) = horizontallyFlipped.content else {
+        Issue.record("Expected image content after horizontal flipping.")
+        return
+    }
+    #expect(horizontallyFlippedImage.flippedHorizontally == false)
+    #expect(horizontallyFlippedImage.flippedVertically == false)
+
+    let verticallyFlipped = original.flipped(horizontal: false, aboutPivot: pivot)
+
+    expectApproximatelyEqual(centerX(of: verticallyFlipped.frame), centerX(of: original.frame))
+    expectApproximatelyEqual(
+        centerY(of: verticallyFlipped.frame),
+        2 * Double(pivot.y) - centerY(of: original.frame)
+    )
+    expectApproximatelyEqual(verticallyFlipped.frame.width, original.frame.width)
+    expectApproximatelyEqual(verticallyFlipped.frame.height, original.frame.height)
+    expectApproximatelyEqual(verticallyFlipped.rotation, -original.rotation)
+    guard case .image(let verticallyFlippedImage) = verticallyFlipped.content else {
+        Issue.record("Expected image content after vertical flipping.")
+        return
+    }
+    #expect(verticallyFlippedImage.flippedHorizontally)
+    #expect(verticallyFlippedImage.flippedVertically)
+}
+
+@Test("Flipping unknown content reflects its frame without changing its payload")
+func unknownContentFlipPreservesContent() {
+    let original = CanvasElement(
+        content: .unknown(UnknownContent(kind: "someKind", payload: .null)),
+        frame: CanvasRect(x: -45, y: 30, width: 150, height: 85),
+        rotation: -0.45
+    )
+    let pivot = CGPoint(x: 210, y: 95)
+
+    let flipped = original.flipped(horizontal: true, aboutPivot: pivot)
+
+    expectApproximatelyEqual(centerX(of: flipped.frame), 2 * Double(pivot.x) - centerX(of: original.frame))
+    expectApproximatelyEqual(centerY(of: flipped.frame), centerY(of: original.frame))
+    expectApproximatelyEqual(flipped.frame.width, original.frame.width)
+    expectApproximatelyEqual(flipped.frame.height, original.frame.height)
+    expectApproximatelyEqual(flipped.rotation, -original.rotation)
+    #expect(flipped.content == original.content)
+}
+
 @Test("Two horizontal flips about the same pivot restore an image element")
 func doubleHorizontalFlipRestoresElement() {
     let original = CanvasElement(

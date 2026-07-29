@@ -56,14 +56,16 @@ final class CanvasElementsStore {
     var onSnapshotApplied: (() -> Void)?
 
     private var isInTransaction = false
+    private var activeTextSession: (elementID: UUID, baseline: [CanvasElement])?
 
     /// Opaque full-state token (drawing + elements + pages) captured at session start.
     struct LiveSessionToken {
         fileprivate let before: Snapshot
     }
 
+    /// Elements are always fully materialized after hydrate.
     func hydrate(_ elements: [CanvasElement]) {
-        self.elements = elements
+        self.elements = elements.zOrderMaterialized()
     }
 
     func cacheImage(_ image: UIImage, data: Data, forAssetPath assetPath: String) {
@@ -74,6 +76,7 @@ final class CanvasElementsStore {
     func addElement(_ element: CanvasElement) {
         performTransaction("Add \(kindName(for: element))") {
             elements.append(element)
+            elements = elements.zOrderMaterialized()
         }
     }
 
@@ -92,6 +95,82 @@ final class CanvasElementsStore {
         guard let index = elements.firstIndex(where: { $0.id == element.id }) else { return }
         elements[index] = element
         onElementsChanged?(elements)
+    }
+
+    func beginTextEditingSession(for id: UUID) {
+        if let activeTextSession, activeTextSession.elementID != id {
+            finishTextEditingSession(matching: activeTextSession.elementID)
+        }
+        activeTextSession = (id, elements)
+    }
+
+    func finishTextEditingSession(matching id: UUID? = nil) {
+        if let activeTextSession,
+           id == nil || id == activeTextSession.elementID {
+            let elementID = activeTextSession.elementID
+            let baseline = activeTextSession.baseline
+            self.activeTextSession = nil
+
+            guard let element = elements.first(where: { $0.id == elementID }),
+                  case .text(let content) = element.content else {
+                return
+            }
+
+            let trimmed = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                removeElementLive(id: elementID)
+                registerEditingSessionUndo(from: baseline, label: "Remove Text Box")
+                return
+            }
+
+            let finalContent = TextBoxContent(
+                text: trimmed,
+                fontSize: content.fontSize,
+                color: content.color
+            )
+            var updated = element
+            updated.content = .text(finalContent)
+            updated.frame.height = max(
+                44,
+                NotePageRenderer.growTextFrame(
+                    updated.frame,
+                    textContent: finalContent
+                ).height
+            )
+            updateElementLive(updated)
+            registerEditingSessionUndo(from: baseline, label: "Edit Text")
+            return
+        }
+
+        guard let id,
+              let element = elements.first(where: { $0.id == id }),
+              case .text(let content) = element.content else {
+            return
+        }
+        let trimmed = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            removeElement(id: id)
+            return
+        }
+
+        let finalContent = TextBoxContent(
+            text: trimmed,
+            fontSize: content.fontSize,
+            color: content.color
+        )
+        var updated = element
+        updated.content = .text(finalContent)
+        updated.frame.height = max(
+            44,
+            NotePageRenderer.growTextFrame(
+                updated.frame,
+                textContent: finalContent
+            ).height
+        )
+        guard trimmed != content.text || updated.frame.height != element.frame.height else {
+            return
+        }
+        updateElementLive(updated)
     }
 
     /// Begin a live session that may mutate BOTH the drawing and elements without
@@ -121,6 +200,7 @@ final class CanvasElementsStore {
     /// Append without undo registration; fires onElementsChanged.
     func addElementLive(_ element: CanvasElement) {
         elements.append(element)
+        elements = elements.zOrderMaterialized()
         onElementsChanged?(elements)
     }
 
@@ -251,6 +331,8 @@ final class CanvasElementsStore {
         if let pages = snapshot.pages {
             onPagesRestored?(pages)
         }
+        // Must run after onPagesRestored: editing-session undo snapshots capture current
+        // pages with baseline elements, and this call re-syncs pages[0].elements last.
         onElementsChanged?(elements)
         onSnapshotApplied?()
     }

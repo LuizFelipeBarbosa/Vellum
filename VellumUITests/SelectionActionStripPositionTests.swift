@@ -142,14 +142,59 @@ final class SelectionActionStripPositionTests: XCTestCase {
 
         let selectionBounds = try XCTUnwrap(harness.controller.selectionBounds)
         let avoidanceBounds = try XCTUnwrap(harness.controller.stripAvoidanceBounds)
-        let expected = selectionBounds.insetBy(dx: -14, dy: -14).union(CGRect(
-            x: selectionBounds.midX - 16,
-            y: selectionBounds.minY - 44,
-            width: 32,
-            height: 44
-        ))
+        let resizeHitSize = SelectionHandleGeometry.resizeHitSize
+        let rotationHitSize = SelectionHandleGeometry.rotationHitSize
+        let rotationCenter = CGPoint(
+            x: selectionBounds.midX,
+            y: selectionBounds.minY - SelectionHandleGeometry.rotationOffset
+        )
+        let expected = selectionBounds
+            .insetBy(dx: -resizeHitSize / 2, dy: -resizeHitSize / 2)
+            .union(
+                frame(
+                    centeredAt: rotationCenter,
+                    size: CGSize(width: rotationHitSize, height: rotationHitSize)
+                )
+            )
 
         assertEqual(avoidanceBounds, expected)
+    }
+
+    func testAvoidanceBoundsContainsEveryHandleHitRect() throws {
+        let element = makeElement(
+            frame: CanvasRect(x: 100, y: 200, width: 120, height: 60)
+        )
+        let harness = makeHarness(elements: [element])
+        harness.controller.selectElement(id: element.id)
+
+        let selectionBounds = try XCTUnwrap(harness.controller.selectionBounds)
+        let avoidanceBounds = try XCTUnwrap(harness.controller.stripAvoidanceBounds)
+        let resizeHitSize = SelectionHandleGeometry.resizeHitSize
+        let resizeHitRectSize = CGSize(width: resizeHitSize, height: resizeHitSize)
+        let resizeHandleCenters = [
+            CGPoint(x: selectionBounds.minX, y: selectionBounds.minY),
+            CGPoint(x: selectionBounds.maxX, y: selectionBounds.minY),
+            CGPoint(x: selectionBounds.minX, y: selectionBounds.maxY),
+            CGPoint(x: selectionBounds.maxX, y: selectionBounds.maxY),
+        ]
+        let resizeHitRects = resizeHandleCenters.map {
+            frame(centeredAt: $0, size: resizeHitRectSize)
+        }
+        let rotationHitSize = SelectionHandleGeometry.rotationHitSize
+        let rotationHitRect = frame(
+            centeredAt: CGPoint(
+                x: selectionBounds.midX,
+                y: selectionBounds.minY - SelectionHandleGeometry.rotationOffset
+            ),
+            size: CGSize(width: rotationHitSize, height: rotationHitSize)
+        )
+
+        for hitRect in resizeHitRects + [rotationHitRect] {
+            XCTAssertTrue(
+                avoidanceBounds.contains(hitRect),
+                "Avoidance bounds \(avoidanceBounds) do not contain handle hit rect \(hitRect)"
+            )
+        }
     }
 
     func testRotatedSelectionAvoidsPaintedBoundingBox() throws {
@@ -162,12 +207,20 @@ final class SelectionActionStripPositionTests: XCTestCase {
 
         let selectionBounds = try XCTUnwrap(harness.controller.selectionBounds)
         let avoidanceBounds = try XCTUnwrap(harness.controller.stripAvoidanceBounds)
-        let handleBounds = selectionBounds.insetBy(dx: -14, dy: -14).union(CGRect(
-            x: selectionBounds.midX - 16,
-            y: selectionBounds.minY - 44,
-            width: 32,
-            height: 44
-        ))
+        let resizeHitSize = SelectionHandleGeometry.resizeHitSize
+        let rotationHitSize = SelectionHandleGeometry.rotationHitSize
+        let rotationCenter = CGPoint(
+            x: selectionBounds.midX,
+            y: selectionBounds.minY - SelectionHandleGeometry.rotationOffset
+        )
+        let handleBounds = selectionBounds
+            .insetBy(dx: -resizeHitSize / 2, dy: -resizeHitSize / 2)
+            .union(
+                frame(
+                    centeredAt: rotationCenter,
+                    size: CGSize(width: rotationHitSize, height: rotationHitSize)
+                )
+            )
         let expected = handleBounds.union(element.rotatedBoundingBox)
 
         assertEqual(avoidanceBounds, expected)

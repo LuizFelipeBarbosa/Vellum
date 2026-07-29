@@ -276,8 +276,7 @@ struct SelectionActionStripView: View {
     }
 
     static func actions(includesStyle: Bool) -> [StripAction] {
-        let all: [StripAction] = [.cut, .copy, .style, .arrange, .duplicate, .delete]
-        return includesStyle ? all : all.filter { $0 != .style }
+        includesStyle ? StripAction.allCases : StripAction.allCases.filter { $0 != .style }
     }
 
     static func stripSize(includesStyle: Bool) -> CGSize {

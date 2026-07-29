@@ -43,10 +43,73 @@ final class ElementReordererTests: XCTestCase {
         XCTAssertEqual(result.first?.layerPlacement, .aboveInk)
     }
 
+    func testToFrontReturnsNilForTopmostBelowInkElementWithoutOverlappingInk() {
+        let selected = makeImage(
+            frame: CanvasRect(x: 20, y: 20, width: 80, height: 60),
+            placement: .belowInk
+        )
+
+        XCTAssertNil(
+            ElementReorderer.reorder(
+                elements: [selected],
+                selectedIDs: [selected.id],
+                direction: .toFront,
+                inkRects: [CGRect(x: 300, y: 300, width: 10, height: 10)]
+            )
+        )
+    }
+
+    func testToFrontPromotesTopmostBelowInkElementWhenInkOverlapsSelection() throws {
+        let selected = makeImage(
+            frame: CanvasRect(x: 20, y: 20, width: 80, height: 60),
+            placement: .belowInk
+        )
+
+        let result = try XCTUnwrap(
+            ElementReorderer.reorder(
+                elements: [selected],
+                selectedIDs: [selected.id],
+                direction: .toFront,
+                inkRects: [CGRect(x: 40, y: 40, width: 10, height: 10)]
+            )
+        )
+
+        XCTAssertEqual(result.map(\.id), [selected.id])
+        XCTAssertEqual(result.first?.layerPlacement, .aboveInk)
+    }
+
     func testToBackDemotesBottommostAboveInkElementBelowInk() throws {
         let selected = makeText(
             frame: CanvasRect(x: 20, y: 20, width: 80, height: 60),
             placement: .aboveInk
+        )
+
+        let result = try XCTUnwrap(
+            ElementReorderer.reorder(
+                elements: [selected],
+                selectedIDs: [selected.id],
+                direction: .toBack,
+                inkRects: [CGRect(x: 40, y: 40, width: 10, height: 10)]
+            )
+        )
+
+        XCTAssertEqual(result.map(\.id), [selected.id])
+        XCTAssertEqual(result.first?.layerPlacement, .belowInk)
+    }
+
+    func testToBackAtBottomEdgeOnlyDemotesWhenInkOverlapsSelection() throws {
+        let selected = makeText(
+            frame: CanvasRect(x: 20, y: 20, width: 80, height: 60),
+            placement: .aboveInk
+        )
+
+        XCTAssertNil(
+            ElementReorderer.reorder(
+                elements: [selected],
+                selectedIDs: [selected.id],
+                direction: .toBack,
+                inkRects: [CGRect(x: 300, y: 300, width: 10, height: 10)]
+            )
         )
 
         let result = try XCTUnwrap(
@@ -129,6 +192,28 @@ final class ElementReordererTests: XCTestCase {
         XCTAssertEqual(result.last?.layerPlacement, .belowInk)
     }
 
+    func testForwardMovesNoncontiguousBelowInkSelectionPastInterleavedCandidate() throws {
+        let frame = CanvasRect(x: 20, y: 20, width: 80, height: 60)
+        let firstSelected = makeImage(frame: frame, placement: .belowInk)
+        let candidate = makeShape(frame: frame, placement: .belowInk)
+        let secondSelected = makeText(frame: frame, placement: .belowInk)
+
+        let result = try XCTUnwrap(
+            ElementReorderer.reorder(
+                elements: [firstSelected, candidate, secondSelected],
+                selectedIDs: [firstSelected.id, secondSelected.id],
+                direction: .forward,
+                inkRects: []
+            )
+        )
+
+        XCTAssertEqual(
+            result.map(\.id),
+            [candidate.id, firstSelected.id, secondSelected.id]
+        )
+        XCTAssertTrue(result.allSatisfy { $0.layerPlacement == .belowInk })
+    }
+
     func testBackwardHopsInkOnlyWhenInkOverlapsSelection() throws {
         let below = makeImage(
             frame: CanvasRect(x: 300, y: 300, width: 40, height: 40),
@@ -194,6 +279,55 @@ final class ElementReordererTests: XCTestCase {
 
         XCTAssertEqual(result.map(\.id), [selected.id, candidate.id, farAway.id])
         XCTAssertEqual(result.first?.layerPlacement, .aboveInk)
+    }
+
+    func testBackwardMovesNoncontiguousBelowInkSelectionBehindInterleavedCandidate() throws {
+        let frame = CanvasRect(x: 20, y: 20, width: 80, height: 60)
+        let firstSelected = makeImage(frame: frame, placement: .belowInk)
+        let candidate = makeShape(frame: frame, placement: .belowInk)
+        let secondSelected = makeText(frame: frame, placement: .belowInk)
+
+        let result = try XCTUnwrap(
+            ElementReorderer.reorder(
+                elements: [firstSelected, candidate, secondSelected],
+                selectedIDs: [firstSelected.id, secondSelected.id],
+                direction: .backward,
+                inkRects: []
+            )
+        )
+
+        XCTAssertEqual(
+            result.map(\.id),
+            [firstSelected.id, secondSelected.id, candidate.id]
+        )
+        XCTAssertTrue(result.allSatisfy { $0.layerPlacement == .belowInk })
+    }
+
+    func testBackwardStageTwoMovesSelectionBeforeOverlappingBelowInkCandidate() throws {
+        let candidate = makeImage(
+            frame: CanvasRect(x: 60, y: 40, width: 80, height: 60),
+            placement: .belowInk
+        )
+        let farAway = makeText(
+            frame: CanvasRect(x: 300, y: 300, width: 40, height: 40),
+            placement: .aboveInk
+        )
+        let selected = makeText(
+            frame: CanvasRect(x: 20, y: 20, width: 80, height: 60),
+            placement: .aboveInk
+        )
+
+        let result = try XCTUnwrap(
+            ElementReorderer.reorder(
+                elements: [candidate, farAway, selected],
+                selectedIDs: [selected.id],
+                direction: .backward,
+                inkRects: []
+            )
+        )
+
+        XCTAssertEqual(result.map(\.id), [selected.id, candidate.id, farAway.id])
+        XCTAssertEqual(result.first?.layerPlacement, .belowInk)
     }
 
     func testMultiSelectionPreservesMixedBlockOrderAndAdoptsOnePlacement() throws {

@@ -343,7 +343,8 @@ final class ShapeEraserTests: XCTestCase {
                 )
             ),
             frame: frame,
-            rotation: rotation
+            rotation: rotation,
+            layerPlacement: .belowInk
         )
     }
 
@@ -356,7 +357,8 @@ final class ShapeEraserTests: XCTestCase {
                     strokeWidth: 4
                 )
             ),
-            frame: frame
+            frame: frame,
+            layerPlacement: .belowInk
         )
     }
 

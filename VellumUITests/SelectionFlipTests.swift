@@ -226,6 +226,56 @@ final class SelectionFlipTests: XCTestCase {
             "A mixed flip must register exactly one undo entry"
         )
         XCTAssertTrue(harness.undoManager.canRedo)
+
+        harness.undoManager.redo()
+
+        XCTAssertTrue(harness.undoManager.canUndo)
+        let redoneElement = try XCTUnwrap(harness.store.elements.first)
+        guard case .shape(let redoneShape) = redoneElement.content,
+              case .polyline(let vertices, let isClosed) = redoneShape.geometry else {
+            return XCTFail("Expected a polyline shape")
+        }
+        XCTAssertEqual(
+            vertices,
+            [
+                CanvasPoint(x: 1, y: 0),
+                CanvasPoint(x: 0, y: 1),
+            ]
+        )
+        XCTAssertFalse(isClosed)
+    }
+
+    func testFlipSelectionSurvivesDrawingDataRoundTrip() throws {
+        let harness = makeHarness(
+            strokes: [
+                makeStroke(
+                    locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 35)]
+                ),
+            ],
+            elements: []
+        )
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 80, y: 60))
+
+        harness.controller.flipSelection(horizontal: true)
+
+        // Mirrored PencilKit transforms must survive drawing serialization for save/reload.
+        let flippedDrawing = harness.canvasView.drawing
+        let decodedDrawing = try PKDrawing(data: flippedDrawing.dataRepresentation())
+        XCTAssertEqual(decodedDrawing.strokes.count, flippedDrawing.strokes.count)
+        for (decodedStroke, flippedStroke) in zip(
+            decodedDrawing.strokes,
+            flippedDrawing.strokes
+        ) {
+            assertRect(
+                decodedStroke.renderBounds,
+                equals: flippedStroke.renderBounds,
+                accuracy: 0.5
+            )
+            let determinant =
+                decodedStroke.transform.a * decodedStroke.transform.d
+                    - decodedStroke.transform.b * decodedStroke.transform.c
+            XCTAssertLessThan(determinant, 0)
+        }
     }
 
     func testDuplicateAndCopyPastePreserveImageFlipState() async throws {

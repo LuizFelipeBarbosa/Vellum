@@ -43,13 +43,10 @@ extension CanvasElement {
             break
         }
 
-        return CanvasElement(
-            id: id,
-            content: reflectedContent,
-            frame: reflectedFrame,
-            rotation: -rotation,
-            createdAt: createdAt,
-            layerPlacement: layerPlacement
-        )
+        var copy = self
+        copy.content = reflectedContent
+        copy.frame = reflectedFrame
+        copy.rotation = -rotation
+        return copy
     }
 }

@@ -194,7 +194,7 @@ final class ElementAutosaveRoundTripTests: XCTestCase {
         )
         model.canvasElements.hydrate([element])
 
-        XCTAssertEqual(model.canvasElements.elements, [element])
+        XCTAssertEqual(model.canvasElements.elements, [element].zOrderMaterialized())
         XCTAssertEqual(model.saveState, .saved)
     }
 

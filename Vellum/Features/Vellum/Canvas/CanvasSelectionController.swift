@@ -1006,12 +1006,19 @@ final class CanvasSelectionController {
     /// outline and handles.
     var stripAvoidanceBounds: CGRect? {
         guard let selection, let selectionBounds else { return nil }
-        var result = selectionBounds.insetBy(dx: -14, dy: -14)          // resize-handle chrome
+        var result = selectionBounds.insetBy(
+            dx: -SelectionHandleGeometry.resizeHitSize / 2,
+            dy: -SelectionHandleGeometry.resizeHitSize / 2
+        )                                                               // resize-handle chrome
         result = result.union(CGRect(                                    // rotation handle band
-            x: selectionBounds.midX - 16,
-            y: selectionBounds.minY - 44,
-            width: 32,
-            height: 44
+            x: selectionBounds.midX - SelectionHandleGeometry.rotationHitSize / 2,
+            y: selectionBounds.minY - (
+                SelectionHandleGeometry.rotationOffset
+                    + SelectionHandleGeometry.rotationHitSize / 2
+            ),
+            width: SelectionHandleGeometry.rotationHitSize,
+            height: SelectionHandleGeometry.rotationOffset
+                + SelectionHandleGeometry.rotationHitSize / 2
         ))
         if let elementsStore {
             for element in elementsStore.elements
@@ -1137,6 +1144,7 @@ final class CanvasSelectionController {
             height: target.y - payloadBounds.midY
         )
 
+        // X protects both finite page edges when the payload fits; Y protects only the top because pages grow downward without a bottom edge.
         if payloadBounds.width <= PageLayout.contentWidth {
             let translatedMinX = payloadBounds.minX + delta.width
             let translatedMaxX = payloadBounds.maxX + delta.width

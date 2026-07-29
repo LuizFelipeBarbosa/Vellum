@@ -330,6 +330,7 @@ struct SelectionCaptureSurface: UIViewRepresentable {
             }
 
             guard controller.selection != nil else {
+                // Element-only tap hit-testing intentionally lets the paste affordance appear over ink; flow tests rely on it.
                 controller.requestPasteAffordance(at: location)
                 return
             }

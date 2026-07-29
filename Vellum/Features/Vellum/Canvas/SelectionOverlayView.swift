@@ -1,6 +1,12 @@
 import SwiftUI
 import VellumCore
 
+enum SelectionHandleGeometry {
+    static let resizeHitSize: CGFloat = 28
+    static let rotationHitSize: CGFloat = 32
+    static let rotationOffset: CGFloat = 28
+}
+
 struct SelectionOverlayView: View {
     let controller: CanvasSelectionController
     let selectionMode: SelectionMode
@@ -149,7 +155,10 @@ struct SelectionOverlayView: View {
                         Rectangle()
                             .stroke(VellumTheme.accentDark, lineWidth: 1.5)
                     }
-                    .frame(width: 28, height: 28)
+                    .frame(
+                        width: SelectionHandleGeometry.resizeHitSize,
+                        height: SelectionHandleGeometry.resizeHitSize
+                    )
                     .contentShape(Rectangle())
                     .position(livePoint(for: handle, in: bounds))
                     .gesture(handleGesture(handle, bounds: bounds))
@@ -163,7 +172,10 @@ struct SelectionOverlayView: View {
                     Circle()
                         .stroke(VellumTheme.accentDark, lineWidth: 1.5)
                 }
-                .frame(width: 32, height: 32)
+                .frame(
+                    width: SelectionHandleGeometry.rotationHitSize,
+                    height: SelectionHandleGeometry.rotationHitSize
+                )
                 .contentShape(Circle())
                 .position(livePoint(for: .rotation, in: bounds))
                 .gesture(handleGesture(.rotation, bounds: bounds))
@@ -343,8 +355,10 @@ struct SelectionOverlayView: View {
         )
         if handle == .rotation {
             return CGPoint(
-                x: topPoint.x + CGFloat(sin(rotation)) * 28,
-                y: topPoint.y - CGFloat(cos(rotation)) * 28
+                x: topPoint.x
+                    + CGFloat(sin(rotation)) * SelectionHandleGeometry.rotationOffset,
+                y: topPoint.y
+                    - CGFloat(cos(rotation)) * SelectionHandleGeometry.rotationOffset
             )
         }
         return transformed(

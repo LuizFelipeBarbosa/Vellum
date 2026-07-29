@@ -36,7 +36,7 @@ public struct TextBoxContent: Codable, Equatable, Sendable {
     }
 }
 
-public struct ImageContent: Encodable, Decodable, Equatable, Sendable {
+public struct ImageContent: Codable, Equatable, Sendable {
     public var assetPath: String
     public var originalPixelSize: CanvasSize
     public var flippedHorizontally: Bool

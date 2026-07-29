@@ -74,7 +74,7 @@ final class PasteAffordanceFlowUITests: XCTestCase {
         XCTAssertTrue(window.waitForExistence(timeout: 5), "app window not found")
 
         ShapeFlowTestHelpers.selectTool("Select", in: app)
-        clearElement(
+        ShapeFlowTestHelpers.clearElement(
             at: CGVector(dx: 0.70, dy: 0.20),
             in: app,
             window: window
@@ -161,7 +161,11 @@ final class PasteAffordanceFlowUITests: XCTestCase {
         )
 
         ShapeFlowTestHelpers.selectTool("Select", in: app)
-        clearElement(at: pastePoint, in: app, window: window)
+        ShapeFlowTestHelpers.clearElement(
+            at: pastePoint,
+            in: app,
+            window: window
+        )
         window.coordinate(withNormalizedOffset: pastePoint).tap()
 
         let pasteHere = app.buttons["Paste here"]
@@ -170,25 +174,6 @@ final class PasteAffordanceFlowUITests: XCTestCase {
             "Paste here did not appear after tapping empty canvas with copied content"
         )
         return pasteHere
-    }
-
-    /// Leftover elements from earlier test runs can occupy a paste point because the
-    /// Site Notes document persists across runs. Clear any selected element there so
-    /// the next tap can raise the paste bubble; ink is not hit-tested by this tap path.
-    private func clearElement(
-        at point: CGVector,
-        in app: XCUIApplication,
-        window: XCUIElement,
-        maxAttempts: Int = 5
-    ) {
-        let deleteSelection = app.buttons["Delete selection"]
-        for _ in 0..<maxAttempts {
-            window.coordinate(withNormalizedOffset: point).tap()
-            guard deleteSelection.waitForExistence(timeout: 1.5) else { return }
-
-            deleteSelection.tap()
-            _ = deleteSelection.waitForNonExistence(timeout: 1.5)
-        }
     }
 
     private func resizeHandle(label: String, in app: XCUIApplication) -> XCUIElement {

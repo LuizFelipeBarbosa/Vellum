@@ -1053,7 +1053,10 @@ private struct NoteScreenPrimaryChangeObservers: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: selectedTool) { _, newTool in
+            .onChange(of: selectedTool) { oldValue, newTool in
+                if oldValue == .text, newTool != .text {
+                    model.canvasElements.finishTextEditingSession(matching: nil)
+                }
                 selectionController.toolChanged()
                 app.toolPreferences.update { preferences in
                     preferences.lastSelectedTool = newTool

@@ -184,7 +184,7 @@ final class NoteScreenModel {
             let elements = loadedNote.pages.first?.elements ?? []
             note = loadedNote
             await cachePDFDocuments(for: loadedNote)
-            canvasElements.hydrate(elements.zOrderMaterialized())
+            canvasElements.hydrate(elements)
             await cacheImages(for: elements, noteID: loadedNote.id)
             drawingData = drawing
             self.proposals = sortedProposals(proposals)
@@ -224,8 +224,8 @@ final class NoteScreenModel {
                 )
                 if migration.didMigrate {
                     drawingChanged(migration.drawing.dataRepresentation())
-                    canvasElements.hydrate(migration.elements.zOrderMaterialized())
-                    elementsChanged(migration.elements)
+                    canvasElements.hydrate(migration.elements)
+                    elementsChanged(canvasElements.elements)
                 }
 
                 guard var currentNote = note else { return }
@@ -519,6 +519,7 @@ final class NoteScreenModel {
 
     @discardableResult
     func flushPendingSave() async -> Bool {
+        canvasElements.finishTextEditingSession(matching: nil)
         pendingSaveTask?.cancel()
         pendingSaveTask = nil
         pendingSaveToken = nil

@@ -151,7 +151,6 @@ private struct TextBoxElementView: View {
 
     @State private var text: String
     @State private var dragOffset: CGSize = .zero
-    @State private var sessionBaseline: [CanvasElement]?
     @State private var renderedHeight: CGFloat
     @State private var hasMeasuredRenderedHeight = false
 
@@ -222,10 +221,10 @@ private struct TextBoxElementView: View {
                 )
                 .onChange(of: focusedID.wrappedValue) { oldValue, newValue in
                     if oldValue != element.id, newValue == element.id {
-                        sessionBaseline = store.elements
+                        store.beginTextEditingSession(for: element.id)
                     }
                     if oldValue == element.id, newValue != element.id {
-                        finishEditingSession(content: content)
+                        store.finishTextEditingSession(matching: element.id)
                     }
                 }
                 .onChange(of: text) { _, newValue in
@@ -245,7 +244,7 @@ private struct TextBoxElementView: View {
                     text = newValue
                 }
                 .onSubmit {
-                    finishEditingSession(content: content)
+                    store.finishTextEditingSession(matching: element.id)
                 }
                 .accessibilityLabel("Text box")
         }
@@ -261,44 +260,5 @@ private struct TextBoxElementView: View {
             )
         )
         store.updateElementLive(updated)
-    }
-
-    private func finishEditingSession(content: TextBoxContent) {
-        defer { sessionBaseline = nil }
-
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if trimmed.isEmpty {
-            if let sessionBaseline {
-                store.removeElementLive(id: element.id)
-                store.registerEditingSessionUndo(from: sessionBaseline, label: "Remove Text Box")
-            } else {
-                store.removeElement(id: element.id)
-            }
-            return
-        }
-
-        let finalContent = TextBoxContent(
-            text: trimmed,
-            fontSize: content.fontSize,
-            color: content.color
-        )
-        var updated = element
-        updated.content = .text(finalContent)
-        updated.frame.height = max(
-            44,
-            NotePageRenderer.growTextFrame(
-                updated.frame,
-                textContent: finalContent
-            ).height
-        )
-        store.updateElementLive(updated)
-
-        if let sessionBaseline {
-            store.registerEditingSessionUndo(
-                from: sessionBaseline,
-                label: "Edit Text"
-            )
-        }
     }
 }

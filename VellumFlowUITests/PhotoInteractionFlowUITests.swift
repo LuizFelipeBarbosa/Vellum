@@ -153,7 +153,7 @@ final class PhotoInteractionFlowUITests: XCTestCase {
         try writePhotoPayloadToPasteboard()
 
         ShapeFlowTestHelpers.selectTool("Select", in: app)
-        clearElement(
+        ShapeFlowTestHelpers.clearElement(
             at: CGVector(dx: 0.35, dy: 0.62),
             in: app,
             window: window
@@ -192,25 +192,6 @@ final class PhotoInteractionFlowUITests: XCTestCase {
             "the pasted photo center was outside the visible app window"
         )
         return normalizedCenter
-    }
-
-    /// Leftover elements from earlier test runs can occupy the seed point because the
-    /// Site Notes document persists across runs. Clear any selected element there so
-    /// the next tap can raise the paste bubble; ink is not hit-tested by this tap path.
-    private func clearElement(
-        at point: CGVector,
-        in app: XCUIApplication,
-        window: XCUIElement,
-        maxAttempts: Int = 5
-    ) {
-        let deleteSelection = app.buttons["Delete selection"]
-        for _ in 0..<maxAttempts {
-            window.coordinate(withNormalizedOffset: point).tap()
-            guard deleteSelection.waitForExistence(timeout: 1.5) else { return }
-
-            deleteSelection.tap()
-            _ = deleteSelection.waitForNonExistence(timeout: 1.5)
-        }
     }
 
     @discardableResult
