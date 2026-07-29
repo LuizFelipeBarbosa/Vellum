@@ -3,14 +3,14 @@ import SwiftUI
 import UIKit
 
 @MainActor
-struct ShapeTapSelectionSurface: UIViewRepresentable {
+struct ElementTapSelectionSurface: UIViewRepresentable {
     let canvasReference: NoteCanvasReference
     let elementsStore: CanvasElementsStore
     let selectionController: CanvasSelectionController
     let isEnabled: Bool
-    /// Called when a tap lands on a shape. The note screen switches to the Select tool, so a
-    /// tapped shape behaves exactly as one selected with that tool — one way to edit, not two.
-    let onShapeSelected: () -> Void
+    /// Called when a tap lands on an element — a shape or photo. The note screen switches to the
+    /// Select tool, so the tapped element behaves exactly as one selected with that tool.
+    let onElementSelected: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -18,7 +18,7 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
             elementsStore: elementsStore,
             selectionController: selectionController,
             isEnabled: isEnabled,
-            onShapeSelected: onShapeSelected
+            onElementSelected: onElementSelected
         )
     }
 
@@ -35,7 +35,7 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
         context.coordinator.elementsStore = elementsStore
         context.coordinator.selectionController = selectionController
         context.coordinator.isEnabled = isEnabled
-        context.coordinator.onShapeSelected = onShapeSelected
+        context.coordinator.onElementSelected = onElementSelected
         context.coordinator.syncInstallation()
     }
 
@@ -55,7 +55,7 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
             }
         }
 
-        var onShapeSelected: () -> Void
+        var onElementSelected: () -> Void
 
         let observer = PenDwellObserverGestureRecognizer()
         weak var installedCanvas: PKCanvasView?
@@ -73,13 +73,13 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
             elementsStore: CanvasElementsStore,
             selectionController: CanvasSelectionController,
             isEnabled: Bool,
-            onShapeSelected: @escaping () -> Void
+            onElementSelected: @escaping () -> Void
         ) {
             self.canvasReference = canvasReference
             self.elementsStore = elementsStore
             self.selectionController = selectionController
             self.isEnabled = isEnabled
-            self.onShapeSelected = onShapeSelected
+            self.onElementSelected = onElementSelected
             super.init()
 
             observer.allowsPencilTouches = false
@@ -169,7 +169,7 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
                 x: lastLocation.x / canvasView.zoomScale,
                 y: lastLocation.y / canvasView.zoomScale
             )
-            if let element = ShapeHitTester.hitTest(
+            if let element = ElementTapHitTester.hitTest(
                 elements: elementsStore.elements,
                 at: contentPoint,
                 minimumHitWidth: Self.minimumHitWidth,
@@ -179,7 +179,7 @@ struct ShapeTapSelectionSurface: UIViewRepresentable {
                     id: element.id,
                     survivesNextToolChange: true
                 )
-                onShapeSelected()
+                onElementSelected()
             } else {
                 selectionController.clearSelection()
             }

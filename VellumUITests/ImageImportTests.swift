@@ -63,11 +63,7 @@ final class ImageImportTests: XCTestCase {
             return
         }
         XCTAssertEqual(max(importedElement.frame.width, importedElement.frame.height), 600, accuracy: 2)
-        XCTAssertEqual(
-            importedElement.frame.x + importedElement.frame.width / 2,
-            visibleRect.midX,
-            accuracy: 2
-        )
+        XCTAssertEqual(importedElement.frame.x, 168, accuracy: 2)
         XCTAssertEqual(
             importedElement.frame.y + importedElement.frame.height / 2,
             visibleRect.midY,
@@ -103,6 +99,31 @@ final class ImageImportTests: XCTestCase {
         await freshModel.load()
 
         XCTAssertNotNil(freshModel.canvasElements.imageCache[reloadedContent.assetPath])
+    }
+
+    func testImageImportClampsWidthToPageWidthForWideImage() async throws {
+        let rootDirectory = try makeRootDirectory()
+        defer { try? FileManager.default.removeItem(at: rootDirectory) }
+
+        let (_, model) = try await makeLoadedModel(
+            rootDirectory: rootDirectory,
+            title: "Wide image import"
+        )
+        let importedID = await model.importImage(
+            renderedImageData(width: 4000, height: 1000),
+            visibleContentRect: CGRect(x: 0, y: 0, width: 2000, height: 2000)
+        )
+
+        let importedElement = try XCTUnwrap(model.canvasElements.elements.first)
+        XCTAssertNotNil(importedID)
+        XCTAssertEqual(importedID, importedElement.id)
+        XCTAssertEqual(importedElement.frame.width, 768, accuracy: 2)
+        XCTAssertEqual(
+            importedElement.frame.height / importedElement.frame.width,
+            1000.0 / 4000.0,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(importedElement.frame.x, 0, accuracy: 2)
     }
 
     func testUndoRemovesImportedImageElement() async throws {

@@ -70,6 +70,9 @@ struct SelectionCaptureSurface: UIViewRepresentable {
         private var autoScrollDisplayLink: CADisplayLink?
         private var lastDragScreenLocation: CGPoint?
 
+        private static let minimumHitWidth: CGFloat = 4
+        private static let touchHitRadius: CGFloat = 12
+
         init(
             controller: CanvasSelectionController,
             selectionMode: SelectionMode,
@@ -319,8 +322,19 @@ struct SelectionCaptureSurface: UIViewRepresentable {
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             guard gesture.state == .ended,
                   let canvasView = gesture.view as? PKCanvasView,
-                  controller.selection != nil,
                   let location = contentLocation(of: gesture, in: canvasView) else { return }
+
+            if let element = ElementTapHitTester.hitTest(
+                elements: controller.elementsStore?.elements ?? [],
+                at: location,
+                minimumHitWidth: Self.minimumHitWidth,
+                extraRadius: Self.touchHitRadius
+            ) {
+                controller.selectElement(id: element.id)
+                return
+            }
+
+            guard controller.selection != nil else { return }
             // A selection can outlive its bounds — deleting the page an element sat on leaves
             // exactly that — and then there is no outline on screen to tap outside of. Any tap
             // drops it, so the selection is escapable rather than stuck where it cannot be seen.

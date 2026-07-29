@@ -420,19 +420,20 @@ final class NoteScreenModel {
         onScrollToPage?(newPageIndex)
     }
 
-    func importImage(_ data: Data, visibleContentRect: CGRect) async {
+    @discardableResult
+    func importImage(_ data: Data, visibleContentRect: CGRect) async -> UUID? {
         let processed: ImageImportPipeline.ProcessedImage
         do {
             processed = try await ImageImportPipeline.processForStorage(data)
         } catch {
             handle(error)
-            return
+            return nil
         }
 
         let assetPath = "assets/\(UUID().uuidString).jpg"
         guard let note else {
             errorMessage = "The note must be loaded before inserting an image."
-            return
+            return nil
         }
 
         do {
@@ -443,7 +444,7 @@ final class NoteScreenModel {
             )
         } catch {
             handle(error)
-            return
+            return nil
         }
 
         let longEdge = max(processed.pixelSize.width, processed.pixelSize.height)
@@ -451,14 +452,22 @@ final class NoteScreenModel {
             visibleContentRect.width,
             visibleContentRect.height
         )
-        let scale = fittedLongEdge / longEdge
+        let scale = min(
+            fittedLongEdge / longEdge,
+            PageLayout.contentWidth / processed.pixelSize.width
+        )
         let fittedSize = CGSize(
             width: processed.pixelSize.width * scale,
             height: processed.pixelSize.height * scale
         )
+        let frameX = min(
+            max(0, visibleContentRect.midX - fittedSize.width / 2),
+            PageLayout.contentWidth - fittedSize.width
+        )
+        let frameY = max(0, visibleContentRect.midY - fittedSize.height / 2)
         let frame = CanvasRect(
-            x: Double(visibleContentRect.midX - fittedSize.width / 2),
-            y: Double(visibleContentRect.midY - fittedSize.height / 2),
+            x: Double(frameX),
+            y: Double(frameY),
             width: Double(fittedSize.width),
             height: Double(fittedSize.height)
         )
@@ -470,8 +479,10 @@ final class NoteScreenModel {
                 forAssetPath: assetPath
             )
         }
+        let elementID = UUID()
         canvasElements.addElement(
             CanvasElement(
+                id: elementID,
                 content: .image(
                     ImageContent(
                         assetPath: assetPath,
@@ -484,6 +495,7 @@ final class NoteScreenModel {
                 frame: frame
             )
         )
+        return elementID
     }
 
     func persistPastedImageData(_ data: Data) async -> String? {
