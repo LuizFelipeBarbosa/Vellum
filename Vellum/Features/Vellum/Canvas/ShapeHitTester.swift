@@ -55,12 +55,26 @@ enum ShapeHitTester {
         // Elements paint in array order, so where two shapes overlap the later one is on top
         // and is the one the tap should pick.
         elements.last { element in
-            strokedPath(
-                for: element,
+            contains(
+                point,
+                in: element,
                 minimumHitWidth: minimumHitWidth,
                 extraRadius: extraRadius
-            )?.contains(point) == true
+            )
         }
+    }
+
+    static func contains(
+        _ point: CGPoint,
+        in element: CanvasElement,
+        minimumHitWidth: CGFloat,
+        extraRadius: CGFloat
+    ) -> Bool {
+        strokedPath(
+            for: element,
+            minimumHitWidth: minimumHitWidth,
+            extraRadius: extraRadius
+        )?.contains(point) == true
     }
 
     private static func hitWidth(

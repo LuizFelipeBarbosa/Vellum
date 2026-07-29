@@ -16,11 +16,11 @@ struct ImageElementsLayer: View {
                             width: CGFloat(element.frame.width),
                             height: CGFloat(element.frame.height)
                         )
+                        .rotationEffect(.radians(element.rotation))
                         .position(
                             x: CGFloat(element.frame.x + element.frame.width / 2),
                             y: CGFloat(element.frame.y + element.frame.height / 2)
                         )
-                        .rotationEffect(.radians(element.rotation))
                         .transformEffect(
                             selectionController.liveTransform(forElementWith: element.id)
                         )

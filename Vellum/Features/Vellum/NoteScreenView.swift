@@ -18,8 +18,8 @@ struct NoteScreenView: View {
     @State private var lastNonNilTool: (any PKTool)?
     @State private var canvasReference = NoteCanvasReference()
     @State private var selectionController = CanvasSelectionController()
-    /// The tool a shape tap set aside, restored when that selection ends.
-    @State private var toolBorrowedByShapeTap: ToolID?
+    /// The tool an element selection set aside, restored when that selection ends.
+    @State private var toolBorrowedByElementSelection: ToolID?
     @State private var shapeSnapController = ShapeSnapController()
     @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
     @State private var canvasSize: CGSize = .zero
@@ -111,11 +111,11 @@ struct NoteScreenView: View {
             )
         )
         .onChange(of: selectionController.selection != nil) { _, hasSelection in
-            // A shape tap borrows the Select tool so the shape edits the one way shapes edit.
-            // Once the selection ends the tool goes back, so selecting a shape never costs the
+            // Selecting an element borrows the Select tool so shapes and photos use one edit flow.
+            // Once the selection ends the tool goes back, so selecting either never costs the
             // pen you were drawing with. If the tool has moved on already, the user chose it.
-            guard !hasSelection, let borrowedFrom = toolBorrowedByShapeTap else { return }
-            toolBorrowedByShapeTap = nil
+            guard !hasSelection, let borrowedFrom = toolBorrowedByElementSelection else { return }
+            toolBorrowedByElementSelection = nil
             if selectedTool == .select {
                 selectedTool = borrowedFrom
             }
@@ -156,14 +156,16 @@ struct NoteScreenView: View {
                 model: model,
                 isShowingPhotosPicker: $isShowingPhotosPicker,
                 photosPickerItem: $photosPickerItem,
-                currentVisibleContentRect: { currentVisibleContentRect }
+                currentVisibleContentRect: { currentVisibleContentRect },
+                onImageImported: selectImportedElement
             )
         )
         .modifier(
             NoteScreenFileImportAndAlertModifiers(
                 model: model,
                 isShowingFileImporter: $isShowingFileImporter,
-                currentVisibleContentRect: { currentVisibleContentRect }
+                currentVisibleContentRect: { currentVisibleContentRect },
+                onImageImported: selectImportedElement
             )
         )
         .modifier(
@@ -374,21 +376,16 @@ struct NoteScreenView: View {
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .allowsHitTesting(false)
 
-                ShapeTapSelectionSurface(
+                ElementTapSelectionSurface(
                     canvasReference: canvasReference,
                     elementsStore: model.canvasElements,
                     selectionController: selectionController,
-                    // Only the ink tools borrow a tap for shape selection. While Select is
-                    // already active its capture surface owns taps, including tapping away to
-                    // deselect, and two tap handlers on one canvas would race; the eraser and
-                    // Text each answer their own taps instead.
+                    // Only the ink tools borrow a tap for element selection. Shapes and photos
+                    // then use the same Select-tool edit flow. While Select is already active its
+                    // capture surface owns taps, including tapping away to deselect, and two tap
+                    // handlers on one canvas would race; the eraser and Text answer their own taps.
                     isEnabled: selectedTool.isInkTool,
-                    onShapeSelected: {
-                        if selectedTool != .select {
-                            toolBorrowedByShapeTap = selectedTool
-                        }
-                        selectedTool = .select
-                    }
+                    onElementSelected: borrowSelectTool
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .allowsHitTesting(false)
@@ -822,6 +819,18 @@ struct NoteScreenView: View {
         lastNonNilTool = tool
     }
 
+    private func borrowSelectTool() {
+        if selectedTool != .select {
+            toolBorrowedByElementSelection = selectedTool
+        }
+        selectedTool = .select
+    }
+
+    private func selectImportedElement(id: UUID) {
+        selectionController.selectElement(id: id, survivesNextToolChange: true)
+        borrowSelectTool()
+    }
+
     private func entityColor(for kind: EntityKind) -> Color {
         switch kind {
         case .person: VellumTheme.accent
@@ -1203,6 +1212,7 @@ private struct NoteScreenPhotoImportModifiers: ViewModifier {
     @Binding var isShowingPhotosPicker: Bool
     @Binding var photosPickerItem: PhotosPickerItem?
     let currentVisibleContentRect: () -> CGRect
+    let onImageImported: (UUID) -> Void
 
     func body(content: Content) -> some View {
         content
@@ -1215,10 +1225,12 @@ private struct NoteScreenPhotoImportModifiers: ViewModifier {
                 Task {
                     if let item = photosPickerItem,
                        let data = try? await item.loadTransferable(type: Data.self) {
-                        await model.importImage(
+                        if let id = await model.importImage(
                             data,
                             visibleContentRect: currentVisibleContentRect()
-                        )
+                        ) {
+                            onImageImported(id)
+                        }
                     }
                     photosPickerItem = nil
                 }
@@ -1230,6 +1242,7 @@ private struct NoteScreenFileImportAndAlertModifiers: ViewModifier {
     let model: NoteScreenModel
     @Binding var isShowingFileImporter: Bool
     let currentVisibleContentRect: () -> CGRect
+    let onImageImported: (UUID) -> Void
 
     func body(content: Content) -> some View {
         content
@@ -1249,10 +1262,12 @@ private struct NoteScreenFileImportAndAlertModifiers: ViewModifier {
                     do {
                         let data = try Data(contentsOf: url)
                         Task {
-                            await model.importImage(
+                            if let id = await model.importImage(
                                 data,
                                 visibleContentRect: currentVisibleContentRect()
-                            )
+                            ) {
+                                onImageImported(id)
+                            }
                         }
                     } catch {
                         model.errorMessage = error.localizedDescription
