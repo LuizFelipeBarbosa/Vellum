@@ -39,6 +39,47 @@ final class SelectionActionStripPositionTests: XCTestCase {
         XCTAssertFalse(stripFrame.intersects(avoidRect))
     }
 
+    func testPositionAvoidsTopInsetForSelectionSpanningViewportTop() {
+        let avoidRect = CGRect(x: 100, y: -50, width: 300, height: 150)
+        let stripSize = CGSize(width: 120, height: 40)
+        let viewportSize = CGSize(width: 600, height: 600)
+        let topInset: CGFloat = 60
+
+        let position = SelectionActionStripView.position(
+            avoiding: avoidRect,
+            stripSize: stripSize,
+            in: viewportSize,
+            topInset: topInset
+        )
+        let stripFrame = frame(centeredAt: position, size: stripSize)
+
+        XCTAssertGreaterThanOrEqual(stripFrame.minY, topInset + 8)
+        XCTAssertGreaterThanOrEqual(stripFrame.minY, avoidRect.maxY)
+        XCTAssertFalse(stripFrame.intersects(avoidRect))
+    }
+
+    func testPositionWithoutTopInsetPreservesExistingPlacement() {
+        let avoidRect = CGRect(x: 100, y: -50, width: 300, height: 150)
+        let stripSize = CGSize(width: 120, height: 40)
+        let viewportSize = CGSize(width: 600, height: 600)
+        let margin: CGFloat = 8
+        let gap: CGFloat = 12
+        let aboveFits = avoidRect.minY - gap - stripSize.height >= margin
+        let belowFits =
+            avoidRect.maxY + gap + stripSize.height <= viewportSize.height - margin
+        let expectedBelowY = avoidRect.maxY + gap + stripSize.height / 2
+
+        let position = SelectionActionStripView.position(
+            avoiding: avoidRect,
+            stripSize: stripSize,
+            in: viewportSize
+        )
+
+        XCTAssertFalse(aboveFits)
+        XCTAssertTrue(belowFits)
+        XCTAssertEqual(position.y, expectedBelowY, accuracy: 0.001)
+    }
+
     func testPositionPinsInsideViewportBottomWhenNeitherPlacementFits() {
         let avoidRect = CGRect(x: 100, y: 0, width: 300, height: 600)
         let stripSize = CGSize(width: 120, height: 40)
@@ -94,43 +135,11 @@ final class SelectionActionStripPositionTests: XCTestCase {
     }
 
     func testNonPinnedPlacementsNeverIntersectAvoidanceRectAcrossViewport() {
-        let viewportSize = CGSize(width: 500, height: 400)
-        let stripSize = CGSize(width: 120, height: 40)
-        let originsX: [CGFloat] = [0, 20, 190, 380, 460]
-        let originsY: [CGFloat] = [0, 20, 100, 260, 360]
-        let sizes = [
-            CGSize(width: 40, height: 40),
-            CGSize(width: 120, height: 100),
-        ]
+        assertNonPinnedPlacements(topInset: 0)
+    }
 
-        for originX in originsX {
-            for originY in originsY {
-                for size in sizes {
-                    let avoidRect = CGRect(
-                        x: originX,
-                        y: originY,
-                        width: size.width,
-                        height: size.height
-                    )
-                    let aboveFits = avoidRect.minY - 12 - stripSize.height >= 8
-                    let belowFits =
-                        avoidRect.maxY + 12 + stripSize.height <= viewportSize.height - 8
-                    guard aboveFits || belowFits else { continue }
-
-                    let position = SelectionActionStripView.position(
-                        avoiding: avoidRect,
-                        stripSize: stripSize,
-                        in: viewportSize
-                    )
-                    let stripFrame = frame(centeredAt: position, size: stripSize)
-
-                    XCTAssertFalse(
-                        stripFrame.intersects(avoidRect),
-                        "Strip \(stripFrame) intersects avoidance rect \(avoidRect)"
-                    )
-                }
-            }
-        }
+    func testNonPinnedPlacementsRespectTopInsetAcrossViewport() {
+        assertNonPinnedPlacements(topInset: 60)
     }
 
     func testUnrotatedSelectionAvoidsResizeAndRotationHandleChrome() throws {
@@ -231,6 +240,63 @@ final class SelectionActionStripPositionTests: XCTestCase {
         let harness = makeHarness(elements: [])
 
         XCTAssertNil(harness.controller.stripAvoidanceBounds)
+    }
+
+    private func assertNonPinnedPlacements(topInset: CGFloat) {
+        let viewportSize = CGSize(width: 500, height: 400)
+        let stripSize = CGSize(width: 120, height: 40)
+        let margin: CGFloat = 8
+        let gap: CGFloat = 12
+        let originsX: [CGFloat] = [0, 20, 190, 380, 460]
+        let originsY: [CGFloat] = [0, 20, 100, 260, 360]
+        let sizes = [
+            CGSize(width: 40, height: 40),
+            CGSize(width: 120, height: 100),
+        ]
+
+        for originX in originsX {
+            for originY in originsY {
+                for size in sizes {
+                    let avoidRect = CGRect(
+                        x: originX,
+                        y: originY,
+                        width: size.width,
+                        height: size.height
+                    )
+                    let aboveFits =
+                        avoidRect.minY - gap - stripSize.height >= margin + topInset
+                    let belowFits =
+                        avoidRect.maxY + gap + stripSize.height <= viewportSize.height - margin
+                    guard aboveFits || belowFits else { continue }
+
+                    let position = SelectionActionStripView.position(
+                        avoiding: avoidRect,
+                        stripSize: stripSize,
+                        in: viewportSize,
+                        topInset: topInset
+                    )
+                    let stripFrame = frame(centeredAt: position, size: stripSize)
+
+                    XCTAssertFalse(
+                        stripFrame.intersects(avoidRect),
+                        "Strip \(stripFrame) intersects avoidance rect \(avoidRect)"
+                    )
+                    if aboveFits {
+                        XCTAssertGreaterThanOrEqual(
+                            stripFrame.minY,
+                            topInset + margin,
+                            "Strip \(stripFrame) covers top inset \(topInset)"
+                        )
+                    } else {
+                        XCTAssertGreaterThanOrEqual(
+                            stripFrame.minY,
+                            avoidRect.maxY,
+                            "Strip \(stripFrame) is not below avoidance rect \(avoidRect)"
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private func frame(centeredAt point: CGPoint, size: CGSize) -> CGRect {

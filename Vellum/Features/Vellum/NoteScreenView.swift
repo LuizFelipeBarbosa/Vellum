@@ -403,7 +403,8 @@ struct NoteScreenView: View {
                         .position(SelectionActionStripView.position(
                             avoiding: canvasViewport.viewRect(fromContent: avoidanceRect),
                             stripSize: stripSize,
-                            in: canvasSize
+                            in: canvasSize,
+                            topInset: topOverlayHeight + 12
                         ))
                         .zIndex(4.5)
                 }

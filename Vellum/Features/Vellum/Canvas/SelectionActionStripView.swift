@@ -290,8 +290,13 @@ struct SelectionActionStripView: View {
     /// Places the strip fully above `avoidRect` when it fits, else fully below, else pinned
     /// inside the viewport's bottom edge (only when no non-overlapping placement exists —
     /// bottom is chosen because pinning top would cover the rotation handle).
-    /// View-space inputs. Pure; unit tested.
-    static func position(avoiding avoidRect: CGRect, stripSize: CGSize, in viewportSize: CGSize) -> CGPoint {
+    /// View-space inputs; `topInset` reserves the viewport's top chrome. Pure; unit tested.
+    static func position(
+        avoiding avoidRect: CGRect,
+        stripSize: CGSize,
+        in viewportSize: CGSize,
+        topInset: CGFloat = 0
+    ) -> CGPoint {
         let margin: CGFloat = 8
         let gap: CGFloat = 12
 
@@ -306,7 +311,7 @@ struct SelectionActionStripView: View {
         }
 
         let aboveY = avoidRect.minY - gap - stripSize.height / 2
-        let aboveFits = avoidRect.minY - gap - stripSize.height >= margin
+        let aboveFits = avoidRect.minY - gap - stripSize.height >= margin + topInset
 
         let belowY = avoidRect.maxY + gap + stripSize.height / 2
         let belowFits = avoidRect.maxY + gap + stripSize.height <= viewportSize.height - margin
