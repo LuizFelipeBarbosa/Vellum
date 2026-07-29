@@ -184,7 +184,7 @@ final class NoteScreenModel {
             let elements = loadedNote.pages.first?.elements ?? []
             note = loadedNote
             await cachePDFDocuments(for: loadedNote)
-            canvasElements.hydrate(elements.zOrderNormalized())
+            canvasElements.hydrate(elements.zOrderMaterialized())
             await cacheImages(for: elements, noteID: loadedNote.id)
             drawingData = drawing
             self.proposals = sortedProposals(proposals)
@@ -224,7 +224,7 @@ final class NoteScreenModel {
                 )
                 if migration.didMigrate {
                     drawingChanged(migration.drawing.dataRepresentation())
-                    canvasElements.hydrate(migration.elements.zOrderNormalized())
+                    canvasElements.hydrate(migration.elements.zOrderMaterialized())
                     elementsChanged(migration.elements)
                 }
 

@@ -41,8 +41,12 @@ enum ElementReorderer {
 
         switch direction {
         case .toFront:
-            guard context.sequence.suffix(context.selected.count).map(\.id)
-                    != context.selected.map(\.id) else {
+            let isTopmost = context.sequence.suffix(context.selected.count).map(\.id)
+                == context.selected.map(\.id)
+            let allAboveInk = context.selected.allSatisfy {
+                $0.effectivePlacement == .aboveInk
+            }
+            guard !(isTopmost && allAboveInk) else {
                 return nil
             }
             return result(
@@ -65,8 +69,12 @@ enum ElementReorderer {
                 }
             )
         case .toBack:
-            guard context.sequence.prefix(context.selected.count).map(\.id)
-                    != context.selected.map(\.id) else {
+            let isBottommost = context.sequence.prefix(context.selected.count).map(\.id)
+                == context.selected.map(\.id)
+            let allBelowInk = context.selected.allSatisfy {
+                $0.effectivePlacement == .belowInk
+            }
+            guard !(isBottommost && allBelowInk) else {
                 return nil
             }
             return result(

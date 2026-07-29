@@ -295,7 +295,9 @@ final class LegacyContentMigrationTests: XCTestCase {
 
         XCTAssertEqual(model.saveState, .saved)
         XCTAssertEqual(model.drawingData, originalDrawingData)
-        XCTAssertEqual(model.canvasElements.elements, [element])
+        // Hydration materializes layerPlacement in the editor; the reload below still
+        // proves that materialization alone never schedules a save.
+        XCTAssertEqual(model.canvasElements.elements, [element].zOrderMaterialized())
 
         await model.flushPendingSave()
 

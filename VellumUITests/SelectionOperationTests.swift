@@ -220,6 +220,35 @@ final class SelectionOperationTests: XCTestCase {
         XCTAssertTrue(harness.undoManager.canRedo)
     }
 
+    func testMaterializedLegacyHydrateKeepsScreenAndEffectiveZOrderAlignedAfterAppend() {
+        let legacyText = makeElement(
+            frame: CanvasRect(x: 20, y: 20, width: 80, height: 40)
+        )
+        let legacyShape = makeShapeElement(
+            frame: CanvasRect(x: 40, y: 40, width: 80, height: 60)
+        )
+        let legacyImage = makeImageElement(
+            frame: CanvasRect(x: 60, y: 60, width: 80, height: 60)
+        )
+        let legacyElements = [legacyText, legacyShape, legacyImage]
+        XCTAssertTrue(legacyElements.allSatisfy { $0.layerPlacement == nil })
+
+        let store = CanvasElementsStore()
+        store.hydrate(legacyElements.zOrderMaterialized())
+        XCTAssertTrue(store.elements.allSatisfy { $0.layerPlacement != nil })
+
+        let appendedImage = makeImageElement(
+            frame: CanvasRect(x: 80, y: 80, width: 80, height: 60)
+        )
+        store.addElement(appendedImage)
+
+        XCTAssertNil(store.elements.last?.layerPlacement)
+        let screenOrder =
+            store.elements.filter { $0.effectivePlacement == .belowInk }
+            + store.elements.filter { $0.effectivePlacement == .aboveInk }
+        XCTAssertEqual(screenOrder, store.elements.sortedByEffectiveZ())
+    }
+
     func testMoveDragRestoresStrokeAndPreservesSingleUndoEntry() {
         let harness = makeHarness(
             strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],

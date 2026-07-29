@@ -31,6 +31,63 @@ func explicitPlacementPreventsLegacyNormalization() {
     #expect(elements.zOrderNormalized() == elements)
 }
 
+@Test("Z-order materialization assigns every element an explicit placement")
+func zOrderMaterializationAssignsEveryPlacement() {
+    let elements = [
+        makeZOrderTextElement("text"),
+        makeZOrderImageElement("image", layerPlacement: .aboveInk),
+        makeZOrderShapeElement(),
+    ]
+
+    let materialized = elements.zOrderMaterialized()
+
+    #expect(materialized.allSatisfy { $0.layerPlacement != nil })
+}
+
+@Test("Z-order materialization preserves legacy normalized order")
+func zOrderMaterializationPreservesNormalizedOrder() {
+    let text = makeZOrderTextElement("text")
+    let shape = makeZOrderShapeElement()
+    let image = makeZOrderImageElement("image")
+    let elements = [text, shape, image]
+
+    #expect(
+        elements.zOrderMaterialized().map(\.id)
+            == elements.zOrderNormalized().map(\.id)
+    )
+}
+
+@Test("Z-order materialization is idempotent")
+func zOrderMaterializationIsIdempotent() {
+    let elements = [
+        makeZOrderTextElement("text"),
+        makeZOrderShapeElement(),
+        makeZOrderImageElement("image"),
+    ]
+    let materialized = elements.zOrderMaterialized()
+
+    #expect(materialized.zOrderMaterialized() == materialized)
+}
+
+@Test("Z-order materialization preserves fully explicit arrays")
+func zOrderMaterializationPreservesFullyExplicitArrays() {
+    let elements = [
+        makeZOrderTextElement("text", layerPlacement: .belowInk),
+        makeZOrderImageElement("image", layerPlacement: .aboveInk),
+        makeZOrderShapeElement(layerPlacement: .belowInk),
+        makeZOrderUnknownElement(layerPlacement: .aboveInk),
+    ]
+
+    let materialized = elements.zOrderMaterialized()
+
+    #expect(materialized == elements)
+    #expect(materialized.map(\.id) == elements.map(\.id))
+    #expect(
+        materialized.map(\.layerPlacement)
+            == elements.map { Optional($0.effectivePlacement) }
+    )
+}
+
 @Test("Effective z-order is a stable partition around the ink layer")
 func effectiveZOrderStablePartition() {
     let aboveImage = makeZOrderImageElement("above-image", layerPlacement: .aboveInk)

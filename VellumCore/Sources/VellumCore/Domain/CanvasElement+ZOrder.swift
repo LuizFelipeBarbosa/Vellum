@@ -26,6 +26,17 @@ extension Array where Element == CanvasElement {
         return images + shapesAndUnknown + texts
     }
 
+    /// `zOrderNormalized()`, then assigns every element's `effectivePlacement`
+    /// to its `layerPlacement`, preserving the normalized order while ensuring
+    /// later normalization cannot reinterpret it as a legacy array.
+    public func zOrderMaterialized() -> [CanvasElement] {
+        zOrderNormalized().map { element in
+            var element = element
+            element.layerPlacement = element.effectivePlacement
+            return element
+        }
+    }
+
     /// `zOrderNormalized()`, then a stable partition placing elements with
     /// `effectivePlacement == .belowInk` before elements with `effectivePlacement == .aboveInk`,
     /// preserving relative order within each partition. This is the paint order
