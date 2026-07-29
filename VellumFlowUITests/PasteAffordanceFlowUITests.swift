@@ -1,4 +1,5 @@
 import UIKit
+import UniformTypeIdentifiers
 import XCTest
 
 @MainActor
@@ -30,12 +31,7 @@ final class PasteAffordanceFlowUITests: XCTestCase {
         )
         pasteHere.tap()
 
-        // The cross-app-paste permission alert is owned by SpringBoard, not Vellum.
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let allowPaste = springboard.buttons["Allow Paste"]
-        if allowPaste.waitForExistence(timeout: 5) {
-            allowPaste.tap()
-        }
+        ShapeFlowTestHelpers.allowPastePermission(in: app)
 
         let topLeft = resizeHandle(label: Self.topLeftHandleLabel, in: app)
         let bottomRight = resizeHandle(label: Self.bottomRightHandleLabel, in: app)
@@ -86,6 +82,90 @@ final class PasteAffordanceFlowUITests: XCTestCase {
         XCTAssertFalse(
             app.buttons["Paste here"].waitForExistence(timeout: 2),
             "Paste here appeared without a Vellum pasteboard payload"
+        )
+    }
+
+    func testSystemImagePasteLandsImageElement() throws {
+        UIPasteboard.general.items = []
+        let imageSize = CGSize(width: 40, height: 40)
+        let image = UIGraphicsImageRenderer(size: imageSize).image { context in
+            context.cgContext.setFillColor(UIColor.systemBlue.cgColor)
+            context.cgContext.fill(CGRect(origin: .zero, size: imageSize))
+        }
+        let imageData = try XCTUnwrap(image.pngData())
+        UIPasteboard.general.setData(
+            imageData,
+            forPasteboardType: UTType.png.identifier
+        )
+
+        let app = XCUIApplication()
+        app.launch()
+
+        ShapeFlowTestHelpers.openSiteNotes(in: app)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "app window not found")
+
+        // Low enough that the ~60%-of-viewport fitted image leaves room for the action
+        // strip above the selection; near the top the strip lands under the app's own
+        // Organize/Share chrome and its Delete button becomes untappable.
+        let pastePoint = CGVector(dx: 0.70, dy: 0.45)
+        ShapeFlowTestHelpers.selectTool("Select", in: app)
+        ShapeFlowTestHelpers.clearElement(
+            at: pastePoint,
+            in: app,
+            window: window
+        )
+        // The inline cleanup below never runs when an assertion fails first, and a
+        // leftover pasted image poisons every later test on this persistent document.
+        addTeardownBlock { @MainActor in
+            UIPasteboard.general.items = []
+            // A pending permission alert swallows the cleanup taps below.
+            ShapeFlowTestHelpers.allowPastePermission(in: app, timeout: 2)
+            ShapeFlowTestHelpers.clearElement(
+                at: pastePoint,
+                in: app,
+                window: window
+            )
+        }
+        window.coordinate(withNormalizedOffset: pastePoint).tap()
+
+        let pasteHere = app.buttons["Paste here"]
+        XCTAssertTrue(
+            pasteHere.waitForExistence(timeout: 5),
+            "Paste here did not appear after tapping empty canvas with a system image"
+        )
+        pasteHere.tap()
+
+        ShapeFlowTestHelpers.allowPastePermission(in: app)
+
+        let topLeft = resizeHandle(label: Self.topLeftHandleLabel, in: app)
+        let bottomRight = resizeHandle(label: Self.bottomRightHandleLabel, in: app)
+        XCTAssertTrue(
+            topLeft.waitForExistence(timeout: 5),
+            "the pasted image's top-left resize handle did not appear"
+        )
+        XCTAssertTrue(
+            bottomRight.waitForExistence(timeout: 5),
+            "the pasted image's bottom-right resize handle did not appear"
+        )
+
+        let deleteSelection = app.buttons["Delete selection"]
+        XCTAssertTrue(
+            deleteSelection.waitForExistence(timeout: 5),
+            "Delete selection did not appear for the pasted image"
+        )
+        deleteSelection.tap()
+        XCTAssertTrue(
+            topLeft.waitForNonExistence(timeout: 5),
+            "the pasted image's top-left resize handle remained after cleanup"
+        )
+        XCTAssertTrue(
+            bottomRight.waitForNonExistence(timeout: 5),
+            "the pasted image's bottom-right resize handle remained after cleanup"
+        )
+        XCTAssertTrue(
+            deleteSelection.waitForNonExistence(timeout: 5),
+            "Delete selection remained visible after cleaning up the pasted image"
         )
     }
 
@@ -144,12 +224,7 @@ final class PasteAffordanceFlowUITests: XCTestCase {
         )
         copySelection.tap()
 
-        // Copy can also prompt when it first touches the system pasteboard.
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let allowPaste = springboard.buttons["Allow Paste"]
-        if allowPaste.waitForExistence(timeout: 2) {
-            allowPaste.tap()
-        }
+        ShapeFlowTestHelpers.allowPastePermission(in: app)
 
         // Copy preserves the selection, so the first outside tap only deselects it.
         window.coordinate(

@@ -828,8 +828,14 @@ final class CanvasSelectionController {
         dismissPasteAffordance()
         guard let payload = SelectionPasteboard.read() else {
             guard SelectionPasteboard.hasSystemImage,
-                  let data = SelectionPasteboard.readSystemImageData(),
-                  let importedID = await importSystemImage?(data, target) else { return }
+                  let data = await SelectionPasteboard.readSystemImageData(),
+                  let importedID = await importSystemImage?(data, target) else {
+                if target != nil,
+                   SelectionPasteboard.hasPayload || SelectionPasteboard.hasSystemImage {
+                    onOperationFailed?("Couldn't read the copied content.")
+                }
+                return
+            }
             selectElement(id: importedID)
             return
         }

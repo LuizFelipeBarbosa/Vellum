@@ -169,12 +169,7 @@ final class PhotoInteractionFlowUITests: XCTestCase {
         )
         pasteHere.tap()
 
-        // The cross-app-paste permission alert is owned by SpringBoard, not Vellum.
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let allowPaste = springboard.buttons["Allow Paste"]
-        if allowPaste.waitForExistence(timeout: 5) {
-            allowPaste.tap()
-        }
+        ShapeFlowTestHelpers.allowPastePermission(in: app)
 
         let handles = assertResizeHandlesAppear(in: app, timeout: 10)
         let center = CGPoint(

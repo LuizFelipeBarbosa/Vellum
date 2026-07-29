@@ -190,14 +190,31 @@ final class SelectionPasteboardTests: XCTestCase {
         XCTAssertTrue(harness.controller.canPaste)
     }
 
-    func testReadSystemImageDataReturnsExactBytesForRawDataType() throws {
+    func testReadSystemImageDataReturnsExactBytesForRawDataType() async throws {
         let imageData = try XCTUnwrap(makePNGData())
         UIPasteboard.general.setData(
             imageData,
             forPasteboardType: UTType.png.identifier
         )
 
-        XCTAssertEqual(SelectionPasteboard.readSystemImageData(), imageData)
+        let readData = await SelectionPasteboard.readSystemImageData()
+        XCTAssertEqual(readData, imageData)
+    }
+
+    func testReadSystemImageDataLoadsPromisedImageProvider() async {
+        let promisedData = Data("promised image data".utf8)
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.image.identifier,
+            visibility: .all
+        ) { completion in
+            completion(promisedData, nil)
+            return nil
+        }
+        UIPasteboard.general.itemProviders = [provider]
+
+        let readData = await SelectionPasteboard.readSystemImageData()
+        XCTAssertEqual(readData, promisedData)
     }
 
     func testPasteFromPasteboardFallsBackToSystemImageAndSelectsResult() async throws {
@@ -235,6 +252,44 @@ final class SelectionPasteboardTests: XCTestCase {
         XCTAssertEqual(receivedData, imageData)
         XCTAssertEqual(receivedTarget, target)
         XCTAssertEqual(harness.controller.selection?.elementIDs, Set([importedID]))
+    }
+
+    func testTargetedPasteReportsClaimedUnreadableContent() async {
+        let harness = makeHarness(strokes: [], elements: [])
+        UIPasteboard.general.setData(
+            Data("not a Vellum payload".utf8),
+            forPasteboardType: SelectionPasteboard.pasteboardType
+        )
+        var failureMessage: String?
+        harness.controller.onOperationFailed = { failureMessage = $0 }
+
+        await harness.controller.pasteFromPasteboard(at: CGPoint(x: 150, y: 220))
+
+        XCTAssertEqual(failureMessage, "Couldn't read the copied content.")
+    }
+
+    func testUntargetedPasteDoesNotReportClaimedUnreadableContent() async {
+        let harness = makeHarness(strokes: [], elements: [])
+        UIPasteboard.general.setData(
+            Data("not a Vellum payload".utf8),
+            forPasteboardType: SelectionPasteboard.pasteboardType
+        )
+        var failureMessage: String?
+        harness.controller.onOperationFailed = { failureMessage = $0 }
+
+        await harness.controller.pasteFromPasteboard()
+
+        XCTAssertNil(failureMessage)
+    }
+
+    func testTargetedPasteDoesNotReportEmptyPasteboard() async {
+        let harness = makeHarness(strokes: [], elements: [])
+        var failureMessage: String?
+        harness.controller.onOperationFailed = { failureMessage = $0 }
+
+        await harness.controller.pasteFromPasteboard(at: CGPoint(x: 150, y: 220))
+
+        XCTAssertNil(failureMessage)
     }
 
     func testPasteFromPasteboardPrefersVellumPayloadOverSystemImage() async throws {
