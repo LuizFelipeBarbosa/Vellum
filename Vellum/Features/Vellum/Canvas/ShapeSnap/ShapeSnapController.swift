@@ -148,7 +148,8 @@ final class ShapeSnapController {
                     content: .shape(builtElement.content),
                     frame: builtElement.frame,
                     rotation: builtElement.rotation,
-                    createdAt: existingElement.createdAt
+                    createdAt: existingElement.createdAt,
+                    layerPlacement: existingElement.layerPlacement
                 )
             )
             if enteredAxisSnap {

@@ -71,27 +71,64 @@ final class ElementTapHitTesterTests: XCTestCase {
         XCTAssertNil(result)
     }
 
-    func testTopmostOverlappingShapeOrImageWins() {
+    func testLastOverlappingImageWinsWithinLegacyBand() {
+        let frame = CanvasRect(x: 100, y: 100, width: 100, height: 40)
+        let firstImage = makeImage(frame: frame)
+        let secondImage = makeImage(frame: frame)
+        let sharedPoint = CGPoint(x: 150, y: 120)
+
+        let result = ElementTapHitTester.hitTest(
+            elements: [firstImage, secondImage],
+            at: sharedPoint,
+            minimumHitWidth: 4,
+            extraRadius: 12
+        )
+
+        XCTAssertEqual(result?.id, secondImage.id)
+    }
+
+    func testLegacyShapeWinsOverImageRegardlessOfArrayOrder() {
         let frame = CanvasRect(x: 100, y: 100, width: 100, height: 40)
         let image = makeImage(frame: frame)
         let shape = makePolylineShape(frame: frame)
         let sharedPoint = CGPoint(x: 150, y: 120)
 
-        let shapeOnTop = ElementTapHitTester.hitTest(
+        let imageThenShape = ElementTapHitTester.hitTest(
             elements: [image, shape],
             at: sharedPoint,
             minimumHitWidth: 4,
             extraRadius: 12
         )
-        let imageOnTop = ElementTapHitTester.hitTest(
+        let shapeThenImage = ElementTapHitTester.hitTest(
             elements: [shape, image],
             at: sharedPoint,
             minimumHitWidth: 4,
             extraRadius: 12
         )
 
-        XCTAssertEqual(shapeOnTop?.id, shape.id)
-        XCTAssertEqual(imageOnTop?.id, image.id)
+        XCTAssertEqual(imageThenShape?.id, shape.id)
+        XCTAssertEqual(shapeThenImage?.id, shape.id)
+    }
+
+    func testAboveInkImageWinsOverLaterBelowInkImage() {
+        let frame = CanvasRect(x: 100, y: 100, width: 100, height: 40)
+        let aboveInkImage = makeImage(
+            frame: frame,
+            layerPlacement: .aboveInk
+        )
+        let belowInkImage = makeImage(
+            frame: frame,
+            layerPlacement: .belowInk
+        )
+
+        let result = ElementTapHitTester.hitTest(
+            elements: [aboveInkImage, belowInkImage],
+            at: CGPoint(x: 150, y: 120),
+            minimumHitWidth: 4,
+            extraRadius: 12
+        )
+
+        XCTAssertEqual(result?.id, aboveInkImage.id)
     }
 
     func testTapInsideTextReturnsNil() {
@@ -111,7 +148,8 @@ final class ElementTapHitTesterTests: XCTestCase {
 
     private func makeImage(
         frame: CanvasRect,
-        rotation: Double = 0
+        rotation: Double = 0,
+        layerPlacement: LayerPlacement? = nil
     ) -> CanvasElement {
         CanvasElement(
             content: .image(
@@ -121,7 +159,8 @@ final class ElementTapHitTesterTests: XCTestCase {
                 )
             ),
             frame: frame,
-            rotation: rotation
+            rotation: rotation,
+            layerPlacement: layerPlacement
         )
     }
 

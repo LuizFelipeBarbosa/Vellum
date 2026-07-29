@@ -78,25 +78,14 @@ enum NotePageRenderer {
             }
         }
 
-        for element in content.elements {
-            guard case .image(let imageContent) = element.content else { continue }
-            drawImage(
-                imageContent,
-                for: element,
+        let orderedElements = content.elements.sortedByEffectiveZ()
+
+        for element in orderedElements where element.effectivePlacement == .belowInk {
+            drawElement(
+                element,
                 pageRect: pageRect,
                 pageBounds: pageBounds,
                 imagesByAssetPath: content.imagesByAssetPath,
-                in: ctx
-            )
-        }
-
-        for element in content.elements {
-            guard case .shape(let shapeContent) = element.content else { continue }
-            drawShape(
-                shapeContent,
-                for: element,
-                pageRect: pageRect,
-                pageBounds: pageBounds,
                 interfaceStyle: content.interfaceStyle,
                 in: ctx
             )
@@ -110,13 +99,13 @@ enum NotePageRenderer {
             in: ctx
         )
 
-        for element in content.elements {
-            guard case .text(let textContent) = element.content else { continue }
-            drawText(
-                textContent,
-                for: element,
+        for element in orderedElements where element.effectivePlacement == .aboveInk {
+            drawElement(
+                element,
                 pageRect: pageRect,
                 pageBounds: pageBounds,
+                imagesByAssetPath: content.imagesByAssetPath,
+                interfaceStyle: content.interfaceStyle,
                 in: ctx
             )
         }
@@ -388,6 +377,46 @@ enum NotePageRenderer {
         UIGraphicsPopContext()
     }
 
+    private static func drawElement(
+        _ element: CanvasElement,
+        pageRect: CGRect,
+        pageBounds: CGRect,
+        imagesByAssetPath: [String: UIImage],
+        interfaceStyle: UIUserInterfaceStyle,
+        in ctx: CGContext
+    ) {
+        switch element.content {
+        case .image(let imageContent):
+            drawImage(
+                imageContent,
+                for: element,
+                pageRect: pageRect,
+                pageBounds: pageBounds,
+                imagesByAssetPath: imagesByAssetPath,
+                in: ctx
+            )
+        case .shape(let shapeContent):
+            drawShape(
+                shapeContent,
+                for: element,
+                pageRect: pageRect,
+                pageBounds: pageBounds,
+                interfaceStyle: interfaceStyle,
+                in: ctx
+            )
+        case .text(let textContent):
+            drawText(
+                textContent,
+                for: element,
+                pageRect: pageRect,
+                pageBounds: pageBounds,
+                in: ctx
+            )
+        case .unknown:
+            break
+        }
+    }
+
     private static func drawImage(
         _ imageContent: ImageContent,
         for element: CanvasElement,
@@ -424,6 +453,12 @@ enum NotePageRenderer {
         ctx.clip(to: pageBounds)
         ctx.translateBy(x: frame.midX, y: frame.midY)
         ctx.rotate(by: CGFloat(element.rotation))
+        if imageContent.flippedHorizontally || imageContent.flippedVertically {
+            ctx.scaleBy(
+                x: imageContent.flippedHorizontally ? -1 : 1,
+                y: imageContent.flippedVertically ? -1 : 1
+            )
+        }
         UIGraphicsPushContext(ctx)
         image.draw(in: fittedRect)
         UIGraphicsPopContext()

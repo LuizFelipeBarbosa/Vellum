@@ -68,43 +68,106 @@ final class PhotoInteractionFlowUITests: XCTestCase {
         wait(for: [penRestored], timeout: 5)
     }
 
+    func testSelectedPhotoStripHasArrangeAndLacksStyleAndPaste() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        ShapeFlowTestHelpers.openSiteNotes(in: app)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "app window not found")
+
+        _ = try seedPhoto(in: app, window: window)
+
+        XCTAssertTrue(
+            app.buttons["Arrange selection"].exists,
+            "the selected photo's action strip did not include Arrange"
+        )
+        XCTAssertFalse(
+            app.buttons["Style selection"].exists,
+            "the selected photo's action strip unexpectedly included Style"
+        )
+        XCTAssertFalse(
+            app.buttons["Paste selection"].exists,
+            "the selected photo's action strip still included the removed Paste action"
+        )
+    }
+
+    func testSelectedPhotoCanMoveAcrossInkZOrder() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        ShapeFlowTestHelpers.openSiteNotes(in: app)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "app window not found")
+
+        ShapeFlowTestHelpers.selectTool("Pen", in: app)
+        window.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.25, dy: 0.62)
+        ).press(
+            forDuration: 0.05,
+            thenDragTo: window.coordinate(
+                withNormalizedOffset: CGVector(dx: 0.45, dy: 0.62)
+            )
+        )
+
+        _ = try seedPhoto(in: app, window: window)
+
+        let arrangeSelection = app.buttons["Arrange selection"]
+        XCTAssertTrue(
+            arrangeSelection.waitForExistence(timeout: 5),
+            "Arrange did not appear for the selected photo"
+        )
+        arrangeSelection.tap()
+
+        let bringToFront = app.buttons["Bring selection to front"]
+        XCTAssertTrue(
+            bringToFront.waitForExistence(timeout: 5),
+            "Bring to Front did not appear in the Arrange popover"
+        )
+        XCTAssertTrue(
+            bringToFront.isEnabled,
+            "Bring to Front was disabled for a photo-only selection"
+        )
+        bringToFront.tap()
+        assertResizeHandlesAppear(in: app)
+
+        // Arrange actions deliberately keep the popover open for repeated taps, so
+        // Send to Back is reachable directly — re-tapping Arrange would close it.
+        let sendToBack = app.buttons["Send selection to back"]
+        XCTAssertTrue(
+            sendToBack.waitForExistence(timeout: 5),
+            "Send to Back did not appear in the Arrange popover"
+        )
+        XCTAssertTrue(
+            sendToBack.isEnabled,
+            "Send to Back was disabled for a photo-only selection"
+        )
+        sendToBack.tap()
+        assertResizeHandlesAppear(in: app)
+    }
+
     private func seedPhoto(
         in app: XCUIApplication,
         window: XCUIElement
     ) throws -> CGVector {
         try writePhotoPayloadToPasteboard()
 
-        ShapeFlowTestHelpers.selectTool("Pen", in: app)
-        window.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.30, dy: 0.62)
-        ).press(
-            forDuration: 0.05,
-            thenDragTo: window.coordinate(
-                withNormalizedOffset: CGVector(dx: 0.40, dy: 0.62)
-            )
-        )
-
-        ShapeFlowTestHelpers.boxSelect(
+        ShapeFlowTestHelpers.selectTool("Select", in: app)
+        clearElement(
+            at: CGVector(dx: 0.35, dy: 0.62),
             in: app,
-            window: window,
-            around: CGRect(
-                x: window.frame.width * 0.26,
-                y: window.frame.height * 0.56,
-                width: window.frame.width * 0.20,
-                height: window.frame.height * 0.12
-            )
+            window: window
         )
+        window.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.35, dy: 0.62)
+        ).tap()
 
-        let pasteSelection = app.buttons["Paste selection"]
+        let pasteHere = app.buttons["Paste here"]
         XCTAssertTrue(
-            pasteSelection.waitForExistence(timeout: 5),
-            "Paste selection did not appear after selecting the scratch stroke"
+            pasteHere.waitForExistence(timeout: 5),
+            "Paste here did not appear after tapping empty canvas"
         )
-        XCTAssertTrue(
-            pasteSelection.isEnabled,
-            "Paste selection was disabled despite the seeded Vellum payload"
-        )
-        pasteSelection.tap()
+        pasteHere.tap()
 
         // The cross-app-paste permission alert is owned by SpringBoard, not Vellum.
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -129,6 +192,25 @@ final class PhotoInteractionFlowUITests: XCTestCase {
             "the pasted photo center was outside the visible app window"
         )
         return normalizedCenter
+    }
+
+    /// Leftover elements from earlier test runs can occupy the seed point because the
+    /// Site Notes document persists across runs. Clear any selected element there so
+    /// the next tap can raise the paste bubble; ink is not hit-tested by this tap path.
+    private func clearElement(
+        at point: CGVector,
+        in app: XCUIApplication,
+        window: XCUIElement,
+        maxAttempts: Int = 5
+    ) {
+        let deleteSelection = app.buttons["Delete selection"]
+        for _ in 0..<maxAttempts {
+            window.coordinate(withNormalizedOffset: point).tap()
+            guard deleteSelection.waitForExistence(timeout: 1.5) else { return }
+
+            deleteSelection.tap()
+            _ = deleteSelection.waitForNonExistence(timeout: 1.5)
+        }
     }
 
     @discardableResult

@@ -259,49 +259,18 @@ struct NoteScreenView: View {
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .allowsHitTesting(false)
 
-                ImageElementsLayer(
+                CanvasElementsBandLayer(
                     store: model.canvasElements,
                     selectionController: selectionController,
-                    viewport: canvasViewport
+                    placement: .belowInk
                 )
-                .frame(
-                    width: PageLayout.contentWidth,
-                    height: pageState.contentHeight,
-                    alignment: .topLeading
+                .contentViewportFrame(
+                    contentWidth: PageLayout.contentWidth,
+                    contentHeight: pageState.contentHeight,
+                    zoom: canvasViewport.zoomScale,
+                    contentOffset: canvasViewport.contentOffset,
+                    viewportSize: geometry.size
                 )
-                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
-                .offset(
-                    x: -canvasViewport.contentOffset.x,
-                    y: -canvasViewport.contentOffset.y
-                )
-                .frame(
-                    width: geometry.size.width,
-                    height: geometry.size.height,
-                    alignment: .topLeading
-                )
-                .clipped()
-
-                ShapeElementsLayer(
-                    store: model.canvasElements,
-                    selectionController: selectionController,
-                    viewport: canvasViewport
-                )
-                .frame(
-                    width: PageLayout.contentWidth,
-                    height: pageState.contentHeight,
-                    alignment: .topLeading
-                )
-                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
-                .offset(
-                    x: -canvasViewport.contentOffset.x,
-                    y: -canvasViewport.contentOffset.y
-                )
-                .frame(
-                    width: geometry.size.width,
-                    height: geometry.size.height,
-                    alignment: .topLeading
-                )
-                .clipped()
 
                 PencilCanvasView(
                     drawingData: model.drawingData,
@@ -390,28 +359,20 @@ struct NoteScreenView: View {
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .allowsHitTesting(false)
 
-                TextElementsLayer(
+                CanvasElementsBandLayer(
                     store: model.canvasElements,
+                    selectionController: selectionController,
+                    placement: .aboveInk,
                     textDefaults: app.toolPreferences.preferences.text,
-                    viewport: canvasViewport,
-                    isActive: selectedTool == .text
+                    isTextToolActive: selectedTool == .text
                 )
-                .frame(
-                    width: PageLayout.contentWidth,
-                    height: pageState.contentHeight,
-                    alignment: .topLeading
+                .contentViewportFrame(
+                    contentWidth: PageLayout.contentWidth,
+                    contentHeight: pageState.contentHeight,
+                    zoom: canvasViewport.zoomScale,
+                    contentOffset: canvasViewport.contentOffset,
+                    viewportSize: geometry.size
                 )
-                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
-                .offset(
-                    x: -canvasViewport.contentOffset.x,
-                    y: -canvasViewport.contentOffset.y
-                )
-                .frame(
-                    width: geometry.size.width,
-                    height: geometry.size.height,
-                    alignment: .topLeading
-                )
-                .clipped()
 
                 SelectionOverlayView(
                     controller: selectionController,
@@ -420,35 +381,49 @@ struct NoteScreenView: View {
                         || selectedTool == .select,
                     isSelectToolActive: selectedTool == .select
                 )
-                .frame(
-                    width: PageLayout.contentWidth,
-                    height: pageState.contentHeight,
-                    alignment: .topLeading
+                .contentViewportFrame(
+                    contentWidth: PageLayout.contentWidth,
+                    contentHeight: pageState.contentHeight,
+                    zoom: canvasViewport.zoomScale,
+                    contentOffset: canvasViewport.contentOffset,
+                    viewportSize: geometry.size
                 )
-                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
-                .offset(
-                    x: -canvasViewport.contentOffset.x,
-                    y: -canvasViewport.contentOffset.y
-                )
-                .frame(
-                    width: geometry.size.width,
-                    height: geometry.size.height,
-                    alignment: .topLeading
-                )
-                .clipped()
 
                 // Not gated on the Select tool: tapping a shape selects it while an ink tool is
                 // active, and that is exactly when the actions need to be reachable.
                 if selectionController.selection != nil,
                    selectionController.strokesSnapshot == nil,
                    selectionController.dragTranslation == .zero,
-                   let bounds = selectionController.selectionBounds {
+                   let avoidanceRect = selectionController.stripAvoidanceBounds {
+                    let stripSize = SelectionActionStripView.stripSize(
+                        includesStyle: selectionController.selectionSupportsStyling
+                    )
                     SelectionActionStripView(controller: selectionController)
                         .position(SelectionActionStripView.position(
-                            for: canvasViewport.viewRect(fromContent: bounds),
+                            avoiding: canvasViewport.viewRect(fromContent: avoidanceRect),
+                            stripSize: stripSize,
                             in: canvasSize
                         ))
                         .zIndex(4.5)
+                }
+
+                if selectionController.selection == nil,
+                   let target = selectionController.pendingPasteTarget {
+                    let tapViewPoint = canvasViewport.viewPoint(fromContent: target)
+                    if CGRect(origin: .zero, size: canvasSize)
+                        .insetBy(dx: -20, dy: -20)
+                        .contains(tapViewPoint) {
+                        SelectionPasteBubbleView {
+                            Task {
+                                await selectionController.pasteFromPasteboard(at: target)
+                            }
+                        }
+                        .position(SelectionPasteBubbleView.position(
+                            forTapAt: tapViewPoint,
+                            in: canvasSize
+                        ))
+                        .zIndex(4.5)
+                    }
                 }
 
                 backlinksRail
@@ -938,6 +913,54 @@ struct NoteScreenView: View {
         guard let directory = exportDirectoryToCleanUp else { return }
         try? FileManager.default.removeItem(at: directory)
         exportDirectoryToCleanUp = nil
+    }
+}
+
+private struct ContentViewportFrameModifier: ViewModifier {
+    let contentWidth: CGFloat
+    let contentHeight: CGFloat
+    let zoom: CGFloat
+    let contentOffset: CGPoint
+    let viewportSize: CGSize
+
+    func body(content: Content) -> some View {
+        content
+            .frame(
+                width: contentWidth,
+                height: contentHeight,
+                alignment: .topLeading
+            )
+            .scaleEffect(zoom, anchor: .topLeading)
+            .offset(
+                x: -contentOffset.x,
+                y: -contentOffset.y
+            )
+            .frame(
+                width: viewportSize.width,
+                height: viewportSize.height,
+                alignment: .topLeading
+            )
+            .clipped()
+    }
+}
+
+private extension View {
+    func contentViewportFrame(
+        contentWidth: CGFloat,
+        contentHeight: CGFloat,
+        zoom: CGFloat,
+        contentOffset: CGPoint,
+        viewportSize: CGSize
+    ) -> some View {
+        modifier(
+            ContentViewportFrameModifier(
+                contentWidth: contentWidth,
+                contentHeight: contentHeight,
+                zoom: zoom,
+                contentOffset: contentOffset,
+                viewportSize: viewportSize
+            )
+        )
     }
 }
 

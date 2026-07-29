@@ -36,13 +36,47 @@ public struct TextBoxContent: Codable, Equatable, Sendable {
     }
 }
 
-public struct ImageContent: Codable, Equatable, Sendable {
+public struct ImageContent: Encodable, Decodable, Equatable, Sendable {
     public var assetPath: String
     public var originalPixelSize: CanvasSize
+    public var flippedHorizontally: Bool
+    public var flippedVertically: Bool
 
-    public init(assetPath: String, originalPixelSize: CanvasSize) {
+    public init(
+        assetPath: String,
+        originalPixelSize: CanvasSize,
+        flippedHorizontally: Bool = false,
+        flippedVertically: Bool = false
+    ) {
         self.assetPath = assetPath
         self.originalPixelSize = originalPixelSize
+        self.flippedHorizontally = flippedHorizontally
+        self.flippedVertically = flippedVertically
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        assetPath = try container.decode(String.self, forKey: .assetPath)
+        originalPixelSize = try container.decode(CanvasSize.self, forKey: .originalPixelSize)
+        flippedHorizontally =
+            try container.decodeIfPresent(Bool.self, forKey: .flippedHorizontally) ?? false
+        flippedVertically =
+            try container.decodeIfPresent(Bool.self, forKey: .flippedVertically) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(assetPath, forKey: .assetPath)
+        try container.encode(originalPixelSize, forKey: .originalPixelSize)
+        try container.encode(flippedHorizontally, forKey: .flippedHorizontally)
+        try container.encode(flippedVertically, forKey: .flippedVertically)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case assetPath
+        case originalPixelSize
+        case flippedHorizontally
+        case flippedVertically
     }
 }
 
@@ -54,6 +88,11 @@ public struct UnknownContent: Equatable, Sendable {
         self.kind = kind
         self.payload = payload
     }
+}
+
+public enum LayerPlacement: String, Codable, Sendable {
+    case belowInk
+    case aboveInk
 }
 
 public struct CanvasElement: Identifiable, Codable, Equatable, Sendable {
@@ -69,19 +108,33 @@ public struct CanvasElement: Identifiable, Codable, Equatable, Sendable {
     public var frame: CanvasRect
     public var rotation: Double
     public let createdAt: Date
+    public var layerPlacement: LayerPlacement?
 
     public init(
         id: UUID = UUID(),
         content: Content,
         frame: CanvasRect,
         rotation: Double = 0,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        layerPlacement: LayerPlacement? = nil
     ) {
         self.id = id
         self.content = content
         self.frame = frame
         self.rotation = rotation
         self.createdAt = createdAt
+        self.layerPlacement = layerPlacement
+    }
+
+    public var effectivePlacement: LayerPlacement {
+        if let layerPlacement { return layerPlacement }
+
+        switch content {
+        case .text:
+            return .aboveInk
+        case .image, .shape, .unknown:
+            return .belowInk
+        }
     }
 
     public init(from decoder: Decoder) throws {
@@ -105,6 +158,11 @@ public struct CanvasElement: Identifiable, Codable, Equatable, Sendable {
         frame = try container.decode(CanvasRect.self, forKey: .frame)
         rotation = try container.decode(Double.self, forKey: .rotation)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
+        if let rawPlacement = try container.decodeIfPresent(String.self, forKey: .layerPlacement) {
+            layerPlacement = LayerPlacement(rawValue: rawPlacement)
+        } else {
+            layerPlacement = nil
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -130,6 +188,7 @@ public struct CanvasElement: Identifiable, Codable, Equatable, Sendable {
         try container.encode(frame, forKey: .frame)
         try container.encode(rotation, forKey: .rotation)
         try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(layerPlacement, forKey: .layerPlacement)
     }
 
     private static func decodeUnknownContent(kind: String, from decoder: Decoder) throws -> Content {
@@ -150,6 +209,7 @@ public struct CanvasElement: Identifiable, Codable, Equatable, Sendable {
         case frame
         case rotation
         case createdAt
+        case layerPlacement
     }
 }
 

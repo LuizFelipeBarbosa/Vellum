@@ -21,6 +21,39 @@ final class SelectionOperationTests: XCTestCase {
         XCTAssertNotNil(harness.controller.selectionBounds)
     }
 
+    func testSelectionSupportsStylingTruthTable() {
+        let frame = CanvasRect(x: 60, y: 20, width: 30, height: 30)
+        let stroke = makeStroke(
+            locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
+        )
+
+        let strokesOnly = makeHarness(strokes: [stroke], elements: [])
+        selectMixedContent(in: strokesOnly)
+        XCTAssertTrue(strokesOnly.controller.selectionSupportsStyling)
+
+        let shape = makeShapeElement(frame: frame)
+        let shapeOnly = makeHarness(strokes: [], elements: [shape])
+        shapeOnly.controller.selectElement(id: shape.id)
+        XCTAssertTrue(shapeOnly.controller.selectionSupportsStyling)
+
+        let text = makeElement(frame: frame)
+        let textOnly = makeHarness(strokes: [], elements: [text])
+        textOnly.controller.selectElement(id: text.id)
+        XCTAssertTrue(textOnly.controller.selectionSupportsStyling)
+
+        let image = makeImageElement(frame: frame)
+        let imageOnly = makeHarness(strokes: [], elements: [image])
+        imageOnly.controller.selectElement(id: image.id)
+        XCTAssertFalse(imageOnly.controller.selectionSupportsStyling)
+
+        let imageAndStroke = makeHarness(strokes: [stroke], elements: [image])
+        selectMixedContent(in: imageAndStroke)
+        XCTAssertTrue(imageAndStroke.controller.selectionSupportsStyling)
+
+        let noSelection = makeHarness(strokes: [], elements: [])
+        XCTAssertFalse(noSelection.controller.selectionSupportsStyling)
+    }
+
     func testBeginMoveDragHidesSelectedStrokeAndCreatesSnapshot() {
         let harness = makeHarness(
             strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
@@ -157,6 +190,34 @@ final class SelectionOperationTests: XCTestCase {
         XCTAssertEqual(redoneElement.frame.x, 90, accuracy: 0.001)
         XCTAssertEqual(redoneElement.frame.y, 60, accuracy: 0.001)
         XCTAssertFalse(harness.undoManager.canRedo)
+    }
+
+    func testReorderSelectionUsesOneUndoAndRestoresOriginalPlacements() {
+        let frame = CanvasRect(x: 60, y: 20, width: 30, height: 30)
+        let selected = makeElement(frame: frame)
+        let front = makeElement(frame: frame)
+        let originalElements = [selected, front]
+        let harness = makeHarness(strokes: [], elements: originalElements)
+        harness.controller.selectElement(id: selected.id)
+
+        XCTAssertTrue(harness.controller.canReorderSelection)
+        harness.controller.reorderSelection(.toFront)
+
+        XCTAssertEqual(harness.store.elements.map(\.id), [front.id, selected.id])
+        XCTAssertTrue(harness.store.elements.allSatisfy {
+            $0.layerPlacement == .aboveInk
+        })
+        XCTAssertEqual(harness.undoManager.undoActionName, ReorderDirection.toFront.undoLabel)
+
+        harness.undoManager.undo()
+
+        XCTAssertEqual(harness.store.elements, originalElements)
+        XCTAssertTrue(harness.store.elements.allSatisfy { $0.layerPlacement == nil })
+        XCTAssertFalse(
+            harness.undoManager.canUndo,
+            "Reorder must register exactly one undo entry"
+        )
+        XCTAssertTrue(harness.undoManager.canRedo)
     }
 
     func testMoveDragRestoresStrokeAndPreservesSingleUndoEntry() {
@@ -357,6 +418,22 @@ final class SelectionOperationTests: XCTestCase {
         XCTAssertFalse(harness.undoManager.canRedo)
     }
 
+    func testDuplicatePreservesLayerPlacement() throws {
+        var element = makeElement(
+            frame: CanvasRect(x: 60, y: 20, width: 30, height: 30)
+        )
+        element.layerPlacement = .aboveInk
+        let harness = makeHarness(strokes: [], elements: [element])
+        harness.controller.selectElement(id: element.id)
+
+        harness.controller.duplicateSelection()
+
+        let duplicate = try XCTUnwrap(
+            harness.store.elements.first(where: { $0.id != element.id })
+        )
+        XCTAssertEqual(duplicate.layerPlacement, .aboveInk)
+    }
+
     func testExternalDrawingChangeClearsSelection() {
         let harness = makeHarness(
             strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
@@ -458,6 +535,37 @@ final class SelectionOperationTests: XCTestCase {
                     text: "Selected",
                     fontSize: 18,
                     color: CodableColor(red: 0, green: 0, blue: 0)
+                )
+            ),
+            frame: frame
+        )
+    }
+
+    private func makeShapeElement(frame: CanvasRect) -> CanvasElement {
+        CanvasElement(
+            content: .shape(
+                ShapeContent(
+                    geometry: .polyline(
+                        vertices: [
+                            CanvasPoint(x: 0, y: 0),
+                            CanvasPoint(x: 1, y: 1),
+                        ],
+                        isClosed: false
+                    ),
+                    strokeColor: CodableColor(red: 0, green: 0, blue: 0),
+                    strokeWidth: 4
+                )
+            ),
+            frame: frame
+        )
+    }
+
+    private func makeImageElement(frame: CanvasRect) -> CanvasElement {
+        CanvasElement(
+            content: .image(
+                ImageContent(
+                    assetPath: "assets/test.jpg",
+                    originalPixelSize: CanvasSize(width: 800, height: 600)
                 )
             ),
             frame: frame

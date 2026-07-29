@@ -132,11 +132,13 @@ public struct NotePage: Identifiable, Codable, Sendable {
     public var background: PageBackground
     /// The source PDF page when `background == .pdf`; otherwise nil.
     public var pdfPage: PDFPageReference?
-    /// Rendering composites in three bands: image elements (in array order), then the
-    /// page's ink drawing, then text elements (in array order). Cross-kind array
-    /// interleaving is not visually significant in this schema version. Writers must
-    /// not rely on cross-kind ordering; readers may re-render interleaved arrays per
-    /// the band rule without normalizing the stored array.
+    /// Rendering composites elements whose effective placement is below ink in array order,
+    /// then the page's ink drawing, then elements above ink in array order. Array order is
+    /// significant across element kinds within each placement. A missing placement uses the
+    /// kind default: text above ink and image, shape, or unknown content below ink. If no
+    /// element has an explicit placement, readers must apply `zOrderNormalized()` before
+    /// painting to preserve the legacy stable band order. Writers that reorder elements must
+    /// materialize a placement on every element so that legacy normalization cannot recur.
     public var elements: [CanvasElement]
 
     public init(
