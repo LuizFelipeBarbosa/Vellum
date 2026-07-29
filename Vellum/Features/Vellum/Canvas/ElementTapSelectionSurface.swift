@@ -61,8 +61,6 @@ struct ElementTapSelectionSurface: UIViewRepresentable {
         weak var installedCanvas: PKCanvasView?
 
         private static let maximumTapMovement: CGFloat = 10
-        private static let minimumHitWidth: CGFloat = 4
-        private static let touchHitRadius: CGFloat = 12
 
         private var firstLocation: CGPoint?
         private var lastLocation: CGPoint?
@@ -171,9 +169,7 @@ struct ElementTapSelectionSurface: UIViewRepresentable {
             )
             if let element = ElementTapHitTester.hitTest(
                 elements: elementsStore.elements,
-                at: contentPoint,
-                minimumHitWidth: Self.minimumHitWidth,
-                extraRadius: Self.touchHitRadius
+                at: contentPoint
             ) {
                 selectionController.selectElement(
                     id: element.id,

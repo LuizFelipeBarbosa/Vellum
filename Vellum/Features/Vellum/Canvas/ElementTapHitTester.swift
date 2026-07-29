@@ -2,11 +2,15 @@ import CoreGraphics
 import VellumCore
 
 enum ElementTapHitTester {
+    /// Shared by every tap surface so finger-tap hit behavior can't drift between tool modes.
+    static let defaultMinimumHitWidth: CGFloat = 4
+    static let defaultTouchHitRadius: CGFloat = 12
+
     static func hitTest(
         elements: [CanvasElement],
         at point: CGPoint,
-        minimumHitWidth: CGFloat,
-        extraRadius: CGFloat
+        minimumHitWidth: CGFloat = ElementTapHitTester.defaultMinimumHitWidth,
+        extraRadius: CGFloat = ElementTapHitTester.defaultTouchHitRadius
     ) -> CanvasElement? {
         // Elements paint in array order, so the later hittable element is on top and wins.
         elements.last { element in

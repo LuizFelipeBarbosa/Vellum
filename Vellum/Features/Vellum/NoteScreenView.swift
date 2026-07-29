@@ -157,13 +157,7 @@ struct NoteScreenView: View {
                 isShowingPhotosPicker: $isShowingPhotosPicker,
                 photosPickerItem: $photosPickerItem,
                 currentVisibleContentRect: { currentVisibleContentRect },
-                onImageImported: { id in
-                    selectionController.selectElement(id: id, survivesNextToolChange: true)
-                    if selectedTool != .select {
-                        toolBorrowedByElementSelection = selectedTool
-                    }
-                    selectedTool = .select
-                }
+                onImageImported: selectImportedElement
             )
         )
         .modifier(
@@ -171,13 +165,7 @@ struct NoteScreenView: View {
                 model: model,
                 isShowingFileImporter: $isShowingFileImporter,
                 currentVisibleContentRect: { currentVisibleContentRect },
-                onImageImported: { id in
-                    selectionController.selectElement(id: id, survivesNextToolChange: true)
-                    if selectedTool != .select {
-                        toolBorrowedByElementSelection = selectedTool
-                    }
-                    selectedTool = .select
-                }
+                onImageImported: selectImportedElement
             )
         )
         .modifier(
@@ -397,12 +385,7 @@ struct NoteScreenView: View {
                     // capture surface owns taps, including tapping away to deselect, and two tap
                     // handlers on one canvas would race; the eraser and Text answer their own taps.
                     isEnabled: selectedTool.isInkTool,
-                    onElementSelected: {
-                        if selectedTool != .select {
-                            toolBorrowedByElementSelection = selectedTool
-                        }
-                        selectedTool = .select
-                    }
+                    onElementSelected: borrowSelectTool
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .allowsHitTesting(false)
@@ -834,6 +817,18 @@ struct NoteScreenView: View {
             preferences: app.toolPreferences.preferences
         ) else { return }
         lastNonNilTool = tool
+    }
+
+    private func borrowSelectTool() {
+        if selectedTool != .select {
+            toolBorrowedByElementSelection = selectedTool
+        }
+        selectedTool = .select
+    }
+
+    private func selectImportedElement(id: UUID) {
+        selectionController.selectElement(id: id, survivesNextToolChange: true)
+        borrowSelectTool()
     }
 
     private func entityColor(for kind: EntityKind) -> Color {

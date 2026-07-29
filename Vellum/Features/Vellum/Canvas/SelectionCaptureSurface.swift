@@ -70,9 +70,6 @@ struct SelectionCaptureSurface: UIViewRepresentable {
         private var autoScrollDisplayLink: CADisplayLink?
         private var lastDragScreenLocation: CGPoint?
 
-        private static let minimumHitWidth: CGFloat = 4
-        private static let touchHitRadius: CGFloat = 12
-
         init(
             controller: CanvasSelectionController,
             selectionMode: SelectionMode,
@@ -326,9 +323,7 @@ struct SelectionCaptureSurface: UIViewRepresentable {
 
             if let element = ElementTapHitTester.hitTest(
                 elements: controller.elementsStore?.elements ?? [],
-                at: location,
-                minimumHitWidth: Self.minimumHitWidth,
-                extraRadius: Self.touchHitRadius
+                at: location
             ) {
                 controller.selectElement(id: element.id)
                 return
