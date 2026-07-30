@@ -23,7 +23,7 @@ struct PaneHeaderFramesKey: PreferenceKey {
 private enum SidebarDropResolution {
     case cancelZone
     case capacityFull
-    case target(SplitDropTarget)
+    case target(SplitGridDropTarget)
 }
 
 @MainActor
@@ -42,19 +42,39 @@ struct NoteSplitContainerView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let columns = app.split.columns
             let panes = app.split.panes
             let focusedPane = app.split.focusedPane
-            let paneWidths = SplitLayoutPolicy.paneWidths(
-                fractions: panes.map(\.widthFraction),
+            let grid = app.split.gridSnapshot
+            let columnWidths = SplitGridPolicy.columnWidths(
+                grid: grid,
                 containerWidth: geometry.size.width
             )
-            let focusedPaneIndex = panes.firstIndex {
-                $0.id == app.split.focusedPaneID
-            } ?? -1
+            let rowHeights = grid.columns.map {
+                SplitGridPolicy.rowHeights(
+                    column: $0,
+                    containerHeight: geometry.size.height
+                )
+            }
+            let focusedPaneIndex = app.split.focusedPaneID.flatMap {
+                app.split.paneIndex(of: $0)
+            }
             let containerGlobalOrigin = geometry.frame(in: .global).origin
-            let firstPaneHeaderFrames = panes.first.flatMap {
+            let headerPane = focusedPaneIndex.flatMap { index in
+                columns.indices.contains(index.column)
+                    ? columns[index.column].panes.first
+                    : nil
+            } ?? columns.first?.panes.first
+            let firstPaneHeaderFrames = headerPane.flatMap {
                 paneHeaderFrames[$0.id]
             }
+            let topLeftPaneHeaderFrames = columns.first?.panes.first.flatMap {
+                paneHeaderFrames[$0.id]
+            }
+            let toggleCenter = sidebarToggleCenter(
+                for: topLeftPaneHeaderFrames,
+                containerGlobalOrigin: containerGlobalOrigin
+            )
 
             ZStack(alignment: .topLeading) {
                 if panes.isEmpty {
@@ -62,34 +82,55 @@ struct NoteSplitContainerView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     HStack(spacing: 0) {
-                        ForEach(Array(panes.enumerated()), id: \.element.id) { entry in
-                            let index = entry.offset
-                            let pane = entry.element
-                            let paneID = pane.id
-                            let appModel = app
+                        ForEach(
+                            Array(columns.enumerated()),
+                            id: \.element.id
+                        ) { columnEntry in
+                            let columnIndex = columnEntry.offset
+                            let column = columnEntry.element
 
-                            NoteScreenView(
-                                model: pane.noteModel,
-                                app: appModel,
-                                paneContext: PaneContext(
-                                    pane: pane,
-                                    isFocused: app.split.focusedPaneID == paneID,
-                                    isFirstPane: index == 0,
-                                    paneWidth: paneWidths[index],
-                                    paneCount: panes.count,
-                                    onClose: { [weak appModel] in
-                                        guard let appModel else { return }
-                                        Task {
-                                            await appModel.closePane(paneID)
-                                        }
-                                    },
-                                    onFocus: { [weak appModel] in
-                                        appModel?.split.focus(paneID)
-                                    }
-                                )
+                            VStack(spacing: 0) {
+                                ForEach(
+                                    Array(column.panes.enumerated()),
+                                    id: \.element.id
+                                ) { paneEntry in
+                                    let rowIndex = paneEntry.offset
+                                    let pane = paneEntry.element
+                                    let paneID = pane.id
+                                    let appModel = app
+
+                                    NoteScreenView(
+                                        model: pane.noteModel,
+                                        app: appModel,
+                                        paneContext: PaneContext(
+                                            pane: pane,
+                                            isFocused: app.split.focusedPaneID == paneID,
+                                            paneWidth: columnWidths[columnIndex],
+                                            paneHeight: rowHeights[columnIndex][rowIndex],
+                                            paneCount: panes.count,
+                                            onClose: { [weak appModel] in
+                                                guard let appModel else { return }
+                                                Task {
+                                                    await appModel.closePane(paneID)
+                                                }
+                                            },
+                                            onFocus: { [weak appModel] in
+                                                appModel?.split.focus(paneID)
+                                            }
+                                        )
+                                    )
+                                    .frame(
+                                        width: columnWidths[columnIndex],
+                                        height: rowHeights[columnIndex][rowIndex]
+                                    )
+                                    .clipped()
+                                }
+                            }
+                            .frame(
+                                width: columnWidths[columnIndex],
+                                height: geometry.size.height,
+                                alignment: .top
                             )
-                            .frame(width: paneWidths[index])
-                            .clipped()
                         }
                     }
                     .frame(
@@ -99,18 +140,50 @@ struct NoteSplitContainerView: View {
                     )
                 }
 
-                if panes.count > 1 {
-                    ForEach(0..<(panes.count - 1), id: \.self) { dividerIndex in
-                        PaneDividerView(
+                if columns.count > 1 {
+                    ForEach(0..<(columns.count - 1), id: \.self) { dividerIndex in
+                        ColumnDividerView(
                             app: app,
                             dividerIndex: dividerIndex,
                             containerWidth: geometry.size.width
                         )
                         .frame(height: geometry.size.height)
                         .position(
-                            x: paneWidths.prefix(dividerIndex + 1).reduce(0, +),
+                            x: columnWidths
+                                .prefix(dividerIndex + 1)
+                                .reduce(0, +),
                             y: geometry.size.height / 2
                         )
+                    }
+                }
+
+                ForEach(
+                    Array(columns.enumerated()),
+                    id: \.element.id
+                ) { columnEntry in
+                    let columnIndex = columnEntry.offset
+                    let column = columnEntry.element
+
+                    if column.panes.count > 1 {
+                        ForEach(
+                            0..<(column.panes.count - 1),
+                            id: \.self
+                        ) { dividerIndex in
+                            RowDividerView(
+                                app: app,
+                                columnIndex: columnIndex,
+                                dividerIndex: dividerIndex,
+                                containerHeight: geometry.size.height
+                            )
+                            .frame(width: columnWidths[columnIndex])
+                            .position(
+                                x: columnWidths.prefix(columnIndex).reduce(0, +)
+                                    + columnWidths[columnIndex] / 2,
+                                y: rowHeights[columnIndex]
+                                    .prefix(dividerIndex + 1)
+                                    .reduce(0, +)
+                            )
+                        }
                     }
                 }
 
@@ -118,7 +191,7 @@ struct NoteSplitContainerView: View {
                     store: app.toolPreferences,
                     containerSize: geometry.size,
                     topObstructions: topDockObstructions(
-                        for: app.split.focusedPaneID.flatMap { paneHeaderFrames[$0] },
+                        for: firstPaneHeaderFrames,
                         containerGlobalOrigin: geometry.frame(in: .global).origin
                     )
                 ) { dockEdge, availableAxisLength in
@@ -152,26 +225,31 @@ struct NoteSplitContainerView: View {
                 }
                 .zIndex(4)
 
-                edgeSwipeSurface(containerHeight: geometry.size.height)
-                    .zIndex(5)
+                EdgeSwipeDetector(isEnabled: !isShowingNoteSidebar) {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        isShowingNoteSidebar = true
+                    }
+                }
+                .frame(width: 20, height: geometry.size.height)
+                .zIndex(5)
 
                 noteSidebarToggle
-                    .position(
-                        sidebarToggleCenter(
-                            for: firstPaneHeaderFrames,
-                            containerGlobalOrigin: containerGlobalOrigin
-                        )
+                    .position(toggleCenter)
+                    .animation(
+                        .easeOut(duration: 0.2),
+                        value: isShowingNoteSidebar
                     )
-                    .zIndex(isShowingNoteSidebar ? 9 : 5)
+                    .animation(.easeOut(duration: 0.2), value: toggleCenter)
+                    .zIndex(9)
 
                 dragDropIndicator(
-                    paneWidths: paneWidths,
+                    columnWidths: columnWidths,
                     containerSize: geometry.size
                 )
                 .zIndex(6)
 
                 if isShowingNoteSidebar {
-                    noteSidebarOverlay(containerWidth: geometry.size.width)
+                    noteSidebarOverlay(containerSize: geometry.size)
                         .transition(.move(edge: .leading).combined(with: .opacity))
                         .zIndex(8)
                 }
@@ -192,17 +270,21 @@ struct NoteSplitContainerView: View {
                     .accessibilityIdentifier("vellum-split-state")
                     .accessibilityValue(
                         "panes:\(panes.count);"
-                            + "fractions:\(formattedFractions(panes));"
-                            + "focused:\(focusedPaneIndex);"
+                            + "columns:\(columns.count);"
+                            + "grid:\(formattedGrid(grid));"
+                            + "focused:\(formattedPaneIndex(focusedPaneIndex));"
                             + "dragging:\(dragState == nil ? 0 : 1);"
-                            + "target:\(formattedDragTarget(dragState?.target))"
+                            + "target:\(formattedDragTarget(dragState));"
+                            + "size:\(Int(geometry.size.width.rounded()))x\(Int(geometry.size.height.rounded()))"
                     )
             }
             .coordinateSpace(name: "splitContainer")
             .onPreferenceChange(PaneHeaderFramesKey.self) {
                 paneHeaderFrames = $0
             }
-            .animation(.easeOut(duration: 0.2), value: isShowingNoteSidebar)
+            .onChange(of: geometry.size, initial: true) { _, newSize in
+                app.handleSplitContainerResize(newSize)
+            }
         }
         .task {
             app.split.selectedTool = app.toolPreferences.preferences.lastSelectedTool
@@ -216,46 +298,33 @@ struct NoteSplitContainerView: View {
 
     private var noteSidebarToggle: some View {
         Button {
-            isShowingNoteSidebar.toggle()
+            withAnimation(.easeOut(duration: 0.2)) {
+                isShowingNoteSidebar.toggle()
+            }
         } label: {
             Image(systemName: "sidebar.left")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(VellumTheme.accentDark)
                 .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+                .background(
+                    VellumTheme.popover,
+                    in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(VellumTheme.ink(0.12), lineWidth: 1)
+                }
+                .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+                .contentShape(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                )
         }
         .buttonStyle(.plain)
-        .background(
-            VellumTheme.popover,
-            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(VellumTheme.ink(0.12), lineWidth: 1)
-        }
-        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+        .geometryGroup()
         .accessibilityLabel("Show notes sidebar")
     }
 
-    private func edgeSwipeSurface(containerHeight: CGFloat) -> some View {
-        Color.clear
-            .frame(width: 20, height: containerHeight)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(
-                    minimumDistance: 0,
-                    coordinateSpace: .named("splitContainer")
-                )
-                .onChanged { value in
-                    if value.translation.width > 30 {
-                        isShowingNoteSidebar = true
-                    }
-                }
-            )
-            .allowsHitTesting(!isShowingNoteSidebar)
-    }
-
-    private func noteSidebarOverlay(containerWidth: CGFloat) -> some View {
+    private func noteSidebarOverlay(containerSize: CGSize) -> some View {
         ZStack(alignment: .leading) {
             Color.black.opacity(0.001)
                 .contentShape(Rectangle())
@@ -265,7 +334,7 @@ struct NoteSplitContainerView: View {
 
             NoteSplitSidebarView(
                 app: app,
-                containerWidth: containerWidth,
+                containerWidth: containerSize.width,
                 onDismiss: dismissNoteSidebar,
                 onDragBegan: { summary, spaceColor, location in
                     beginSidebarDrag(
@@ -273,17 +342,17 @@ struct NoteSplitContainerView: View {
                         title: summary.title.isEmpty ? "Untitled" : summary.title,
                         spaceColor: spaceColor,
                         location: location,
-                        containerWidth: containerWidth
+                        containerSize: containerSize
                     )
                 },
                 onDragMoved: { location in
                     moveSidebarDrag(
                         to: location,
-                        containerWidth: containerWidth
+                        containerSize: containerSize
                     )
                 },
                 onDragEnded: {
-                    endSidebarDrag(containerWidth: containerWidth)
+                    endSidebarDrag(containerSize: containerSize)
                 },
                 onDragCancelled: cancelSidebarDrag
             )
@@ -295,33 +364,58 @@ struct NoteSplitContainerView: View {
 
     @ViewBuilder
     private func dragDropIndicator(
-        paneWidths: [CGFloat],
+        columnWidths: [CGFloat],
         containerSize: CGSize
     ) -> some View {
         switch dragState?.target {
-        case .insertBetween(let index):
+        case .insertColumn(let index):
             Rectangle()
                 .fill(VellumTheme.accent)
                 .frame(width: 3, height: containerSize.height)
                 .position(
                     x: insertionBoundaryX(
                         at: index,
-                        paneWidths: paneWidths
+                        columnWidths: columnWidths
                     ),
                     y: containerSize.height / 2
                 )
                 .allowsHitTesting(false)
-        case .existingPane(let index):
-            if let rect = paneRect(
-                at: index,
-                paneWidths: paneWidths,
-                containerHeight: containerSize.height
+        case .insertRow(let column, let row):
+            if columnWidths.indices.contains(column),
+               app.split.gridSnapshot.columns.indices.contains(column) {
+                let rowHeights = SplitGridPolicy.rowHeights(
+                    column: app.split.gridSnapshot.columns[column],
+                    containerHeight: containerSize.height
+                )
+                if row >= 0, row <= rowHeights.count {
+                    let columnX = columnWidths.prefix(column).reduce(0, +)
+                    Rectangle()
+                        .fill(VellumTheme.accent)
+                        .frame(width: columnWidths[column], height: 3)
+                        .position(
+                            x: columnX + columnWidths[column] / 2,
+                            y: rowHeights.prefix(row).reduce(0, +)
+                        )
+                        .allowsHitTesting(false)
+                } else {
+                    EmptyView()
+                }
+            } else {
+                EmptyView()
+            }
+        case .existingPane(let paneIndex):
+            if let rect = SplitGridPolicy.paneFrame(
+                at: paneIndex,
+                grid: app.split.gridSnapshot,
+                containerSize: containerSize
             ) {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(VellumTheme.accent(0.55), lineWidth: 1.5)
                     .frame(width: rect.width, height: rect.height)
                     .position(x: rect.midX, y: rect.midY)
                     .allowsHitTesting(false)
+            } else {
+                EmptyView()
             }
         case nil:
             EmptyView()
@@ -333,7 +427,7 @@ struct NoteSplitContainerView: View {
         title: String,
         spaceColor: Color?,
         location: CGPoint,
-        containerWidth: CGFloat
+        containerSize: CGSize
     ) {
         dragState = SplitDragState(
             dragID: UUID(),
@@ -344,31 +438,31 @@ struct NoteSplitContainerView: View {
             target: sidebarDropResolution(
                 for: noteID,
                 at: location,
-                containerWidth: containerWidth
+                containerSize: containerSize
             ).target
         )
     }
 
     private func moveSidebarDrag(
         to location: CGPoint,
-        containerWidth: CGFloat
+        containerSize: CGSize
     ) {
         guard var state = dragState else { return }
         state.location = location
         state.target = sidebarDropResolution(
             for: state.noteID,
             at: location,
-            containerWidth: containerWidth
+            containerSize: containerSize
         ).target
         dragState = state
     }
 
-    private func endSidebarDrag(containerWidth: CGFloat) {
+    private func endSidebarDrag(containerSize: CGSize) {
         guard let state = dragState else { return }
         let resolution = sidebarDropResolution(
             for: state.noteID,
             at: state.location,
-            containerWidth: containerWidth
+            containerSize: containerSize
         )
 
         switch resolution {
@@ -377,22 +471,55 @@ struct NoteSplitContainerView: View {
         case .capacityFull:
             dragState = nil
             app.showToast("Not enough room for another pane")
-        case .target(.existingPane(let index)):
-            let panes = app.split.panes
-            guard panes.indices.contains(index) else {
+        case .target(.existingPane(let paneIndex)):
+            if let pane = app.split.pane(for: state.noteID) {
                 dragState = nil
-                return
+                app.split.focus(pane.id)
+            } else {
+                guard app.split.columns.indices.contains(paneIndex.column),
+                      app.split.columns[paneIndex.column].panes.indices
+                        .contains(paneIndex.row) else {
+                    dragState = nil
+                    return
+                }
+                let pane = app.split.columns[paneIndex.column].panes[paneIndex.row]
+                let noteID = state.noteID
+                dragState = nil
+                withAnimation(.easeOut(duration: 0.2)) {
+                    isShowingNoteSidebar = false
+                }
+                Task {
+                    await app.openNote(
+                        noteID,
+                        placement: .replacePane(id: pane.id)
+                    )
+                }
             }
-            dragState = nil
-            app.split.focus(panes[index].id)
-        case .target(.insertBetween(let index)):
+        case .target(.insertColumn(let index)):
             let noteID = state.noteID
             dragState = nil
-            isShowingNoteSidebar = false
+            withAnimation(.easeOut(duration: 0.2)) {
+                isShowingNoteSidebar = false
+            }
             Task {
                 await app.openNote(
                     noteID,
-                    placement: .newPane(at: index)
+                    placement: .newColumn(at: index)
+                )
+            }
+        case .target(.insertRow(let column, let row)):
+            let noteID = state.noteID
+            dragState = nil
+            withAnimation(.easeOut(duration: 0.2)) {
+                isShowingNoteSidebar = false
+            }
+            Task {
+                await app.openNote(
+                    noteID,
+                    placement: .stackInColumn(
+                        column: column,
+                        at: row
+                    )
                 )
             }
         }
@@ -404,44 +531,45 @@ struct NoteSplitContainerView: View {
 
     private func dismissNoteSidebar() {
         dragState = nil
-        isShowingNoteSidebar = false
+        withAnimation(.easeOut(duration: 0.2)) {
+            isShowingNoteSidebar = false
+        }
     }
 
     private func sidebarDropResolution(
         for noteID: UUID,
         at location: CGPoint,
-        containerWidth: CGFloat
+        containerSize: CGSize
     ) -> SidebarDropResolution {
         guard location.x > noteSidebarCancelZoneMaxX else {
             return .cancelZone
         }
 
-        let panes = app.split.panes
-        if let existingPaneIndex = panes.firstIndex(
-            where: { $0.noteID == noteID }
-        ) {
-            return .target(.existingPane(index: existingPaneIndex))
+        if let existingPane = app.split.pane(for: noteID),
+           let existingPaneIndex = app.split.paneIndex(of: existingPane.id) {
+            return .target(.existingPane(existingPaneIndex))
         }
 
-        let rawTarget = SplitLayoutPolicy.dropTarget(
-            forX: location.x,
-            fractions: panes.map(\.widthFraction),
-            containerWidth: containerWidth
+        let grid = app.split.gridSnapshot
+        let target = SplitGridPolicy.dropTarget(
+            at: location,
+            grid: grid,
+            containerSize: containerSize
         )
-        let insertionIndex = switch rawTarget {
-        case .insertBetween(let index):
-            index
-        case .existingPane(let index):
-            index
-        }
 
-        guard panes.count
-            < SplitLayoutPolicy.maxPaneCount(
-                forContainerWidth: containerWidth
+        switch target {
+        case .existingPane:
+            return .target(target)
+        case .insertColumn, .insertRow:
+            guard SplitGridPolicy.allows(
+                target,
+                grid: grid,
+                containerSize: containerSize
             ) else {
-            return .capacityFull
+                return .capacityFull
+            }
+            return .target(target)
         }
-        return .target(.insertBetween(index: insertionIndex))
     }
 
     private func sidebarToggleCenter(
@@ -481,23 +609,11 @@ struct NoteSplitContainerView: View {
 
     private func insertionBoundaryX(
         at index: Int,
-        paneWidths: [CGFloat]
+        columnWidths: [CGFloat]
     ) -> CGFloat {
-        paneWidths.prefix(min(max(index, 0), paneWidths.count)).reduce(0, +)
-    }
-
-    private func paneRect(
-        at index: Int,
-        paneWidths: [CGFloat],
-        containerHeight: CGFloat
-    ) -> CGRect? {
-        guard paneWidths.indices.contains(index) else { return nil }
-        return CGRect(
-            x: paneWidths.prefix(index).reduce(0, +),
-            y: 0,
-            width: paneWidths[index],
-            height: containerHeight
-        )
+        columnWidths
+            .prefix(min(max(index, 0), columnWidths.count))
+            .reduce(0, +)
     }
 
     private func topDockObstructions(
@@ -517,32 +633,46 @@ struct NoteSplitContainerView: View {
         )
     }
 
-    private func formattedFractions(_ panes: [NotePane]) -> String {
-        panes
-            .map {
-                String(
-                    format: "%.2f",
-                    locale: Locale(identifier: "en_US_POSIX"),
-                    Double($0.widthFraction)
-                )
-            }
-            .joined(separator: ",")
+    private func formattedGrid(_ grid: SplitGridSnapshot) -> String {
+        grid.columns.map { column in
+            let width = formattedFraction(column.widthFraction)
+            let rows = column.rowFractions
+                .map { formattedFraction($0) }
+                .joined(separator: ",")
+            return "\(width)[\(rows)]"
+        }
+        .joined(separator: "|")
     }
 
-    private func formattedDragTarget(_ target: SplitDropTarget?) -> String {
-        switch target {
-        case .insertBetween(let index):
-            "insert-\(index)"
-        case .existingPane(let index):
-            "pane-\(index)"
+    private func formattedPaneIndex(_ index: PaneIndex?) -> String {
+        guard let index else { return "-1" }
+        return "\(index.column).\(index.row)"
+    }
+
+    private func formattedDragTarget(_ state: SplitDragState?) -> String {
+        switch state?.target {
+        case .insertColumn(let index):
+            "col-\(index)"
+        case .insertRow(let column, let row):
+            "row-\(column).\(row)"
+        case .existingPane(let paneIndex):
+            "pane-\(paneIndex.column).\(paneIndex.row)"
         case nil:
             "none"
         }
     }
+
+    private func formattedFraction(_ fraction: CGFloat) -> String {
+        String(
+            format: "%.2f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            Double(fraction)
+        )
+    }
 }
 
 private extension SidebarDropResolution {
-    var target: SplitDropTarget? {
+    var target: SplitGridDropTarget? {
         if case .target(let target) = self {
             return target
         }
@@ -551,12 +681,12 @@ private extension SidebarDropResolution {
 }
 
 @MainActor
-struct PaneDividerView: View {
+struct ColumnDividerView: View {
     let app: VellumAppModel
     let dividerIndex: Int
     let containerWidth: CGFloat
 
-    @State private var fractionsAtDragStart: [CGFloat]?
+    @State private var gridAtDragStart: SplitGridSnapshot?
     @State private var isDragging = false
 
     var body: some View {
@@ -569,7 +699,7 @@ struct PaneDividerView: View {
                 .fill(isDragging ? VellumTheme.accent : VellumTheme.ink(0.18))
                 .frame(width: 4, height: 36)
         }
-        .frame(width: SplitLayoutPolicy.dividerHitWidth)
+        .frame(width: SplitGridPolicy.dividerHitThickness)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(
@@ -577,22 +707,71 @@ struct PaneDividerView: View {
                 coordinateSpace: .named("splitContainer")
             )
             .onChanged { value in
-                let startFractions = fractionsAtDragStart
-                    ?? app.split.panes.map(\.widthFraction)
-                if fractionsAtDragStart == nil {
-                    fractionsAtDragStart = startFractions
+                let startGrid = gridAtDragStart ?? app.split.gridSnapshot
+                if gridAtDragStart == nil {
+                    gridAtDragStart = startGrid
                     isDragging = true
                 }
-                let fractions = SplitLayoutPolicy.fractionsResizing(
-                    startFractions,
+                let grid = SplitGridPolicy.resizingColumnDivider(
+                    startGrid,
                     dividerIndex: dividerIndex,
                     byTranslation: value.translation.width,
                     containerWidth: containerWidth
                 )
-                app.split.applyFractions(fractions)
+                app.split.applyGrid(grid)
             }
             .onEnded { _ in
-                fractionsAtDragStart = nil
+                gridAtDragStart = nil
+                isDragging = false
+            }
+        )
+    }
+}
+
+@MainActor
+struct RowDividerView: View {
+    let app: VellumAppModel
+    let columnIndex: Int
+    let dividerIndex: Int
+    let containerHeight: CGFloat
+
+    @State private var gridAtDragStart: SplitGridSnapshot?
+    @State private var isDragging = false
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(VellumTheme.ink(0.09))
+                .frame(height: 1)
+
+            RoundedRectangle(cornerRadius: 2)
+                .fill(isDragging ? VellumTheme.accent : VellumTheme.ink(0.18))
+                .frame(width: 36, height: 4)
+        }
+        .frame(height: SplitGridPolicy.dividerHitThickness)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(
+                minimumDistance: 0,
+                coordinateSpace: .named("splitContainer")
+            )
+            .onChanged { value in
+                let startGrid = gridAtDragStart ?? app.split.gridSnapshot
+                if gridAtDragStart == nil {
+                    gridAtDragStart = startGrid
+                    isDragging = true
+                }
+                let grid = SplitGridPolicy.resizingRowDivider(
+                    startGrid,
+                    column: columnIndex,
+                    dividerIndex: dividerIndex,
+                    byTranslation: value.translation.height,
+                    containerHeight: containerHeight
+                )
+                app.split.applyGrid(grid)
+            }
+            .onEnded { _ in
+                gridAtDragStart = nil
                 isDragging = false
             }
         )

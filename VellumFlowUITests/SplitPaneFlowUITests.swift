@@ -10,34 +10,45 @@ final class SplitPaneFlowUITests: XCTestCase {
         let context = launchApp(splitPaneCount: 2)
 
         let state = waitForState(context.stateElement) { state in
-            let fractions = self.fractions(from: state)
+            let grid = self.grid(from: state)
             guard state["panes"] == "2",
-                  fractions.count == 2,
-                  fractions.allSatisfy({ abs($0 - 0.5) <= 0.02 }),
-                  let focused = state["focused"].flatMap(Int.init) else {
+                  state["columns"] == "2",
+                  grid.count == 2,
+                  grid.allSatisfy({
+                      abs($0.width - 0.5) <= 0.02
+                          && $0.rows.count == 1
+                          && abs($0.rows[0] - 1) <= 0.02
+                  }),
+                  let focused = self.focusedIndex(from: state) else {
                 return false
             }
-            return (0...1).contains(focused)
+            return (0...1).contains(focused.column) && focused.row == 0
         }
-        let fractions = fractions(from: state)
+        let grid = grid(from: state)
 
         XCTAssertEqual(state["panes"], "2", "state: \(state)")
-        XCTAssertEqual(fractions.count, 2, "state: \(state)")
-        for fraction in fractions {
-            XCTAssertEqual(fraction, 0.5, accuracy: 0.02, "state: \(state)")
+        XCTAssertEqual(state["columns"], "2", "state: \(state)")
+        XCTAssertEqual(grid.count, 2, "state: \(state)")
+        for column in grid {
+            XCTAssertEqual(column.width, 0.5, accuracy: 0.02, "state: \(state)")
+            XCTAssertEqual(column.rows.count, 1, "state: \(state)")
+            guard let row = column.rows.first else { continue }
+            XCTAssertEqual(row, 1, accuracy: 0.02, "state: \(state)")
         }
-        guard let focused = state["focused"].flatMap(Int.init) else {
+        guard let focused = focusedIndex(from: state) else {
             return XCTFail("focused pane index is invalid: \(state)")
         }
-        XCTAssertTrue((0...1).contains(focused), "state: \(state)")
+        XCTAssertTrue((0...1).contains(focused.column), "state: \(state)")
+        XCTAssertEqual(focused.row, 0, "state: \(state)")
     }
 
     func testSidebarDragCreatesPane() {
         let context = launchApp(splitPaneCount: 1)
         let initialState = waitForState(context.stateElement) {
-            $0["panes"] == "1"
+            $0["panes"] == "1" && $0["columns"] == "1"
         }
         XCTAssertEqual(initialState["panes"], "1", "state: \(initialState)")
+        XCTAssertEqual(initialState["columns"], "1", "state: \(initialState)")
 
         addTeardownBlock { @MainActor in
             self.closePanesAddedAbove(
@@ -81,9 +92,12 @@ final class SplitPaneFlowUITests: XCTestCase {
         XCTAssertEqual(settledState["dragging"], "0", "state: \(settledState)")
 
         let createdState = waitForState(context.stateElement) {
-            $0["panes"] == "2" && $0["dragging"] == "0"
+            $0["panes"] == "2"
+                && $0["columns"] == "2"
+                && $0["dragging"] == "0"
         }
         XCTAssertEqual(createdState["panes"], "2", "state: \(createdState)")
+        XCTAssertEqual(createdState["columns"], "2", "state: \(createdState)")
 
         closePanesAddedAbove(
             1,
@@ -95,12 +109,15 @@ final class SplitPaneFlowUITests: XCTestCase {
     func testDragAlreadyOpenNoteFocusesPane() {
         let context = launchApp(splitPaneCount: 2)
         let initialState = waitForState(context.stateElement) {
-            $0["panes"] == "2" && $0["focused"].flatMap(Int.init) != nil
+            $0["panes"] == "2"
+                && $0["columns"] == "2"
+                && self.focusedIndex(from: $0) != nil
         }
-        guard let initialFocused = initialState["focused"].flatMap(Int.init) else {
+        guard let initialFocused = focusedIndex(from: initialState) else {
             return XCTFail("initial focused pane index is invalid: \(initialState)")
         }
-        XCTAssertTrue((0...1).contains(initialFocused), "state: \(initialState)")
+        XCTAssertTrue((0...1).contains(initialFocused.column), "state: \(initialState)")
+        XCTAssertEqual(initialFocused.row, 0, "state: \(initialState)")
 
         let titleFields = sortedTitleFields(in: context.app, expectedCount: 2)
         guard let paneZeroTitleField = titleFields.first else {
@@ -136,16 +153,25 @@ final class SplitPaneFlowUITests: XCTestCase {
         XCTAssertEqual(settledState["dragging"], "0", "state: \(settledState)")
 
         let focusedState = waitForState(context.stateElement) {
-            $0["panes"] == "2"
-                && $0["focused"] == "0"
-                && $0["dragging"] == "0"
+            guard $0["panes"] == "2",
+                  $0["columns"] == "2",
+                  $0["dragging"] == "0",
+                  let focused = self.focusedIndex(from: $0) else {
+                return false
+            }
+            return focused.column == 0 && focused.row == 0
         }
         XCTAssertEqual(focusedState["panes"], "2", "state: \(focusedState)")
+        XCTAssertEqual(focusedState["columns"], "2", "state: \(focusedState)")
+        guard let focused = focusedIndex(from: focusedState) else {
+            return XCTFail("final focused pane index is invalid: \(focusedState)")
+        }
         XCTAssertEqual(
-            focusedState["focused"],
-            "0",
+            focused.column,
+            0,
             "initial focus was \(initialFocused), final state: \(focusedState)"
         )
+        XCTAssertEqual(focused.row, 0, "state: \(focusedState)")
     }
 
     func testClosePaneRenormalizesFractions() throws {
@@ -167,27 +193,32 @@ final class SplitPaneFlowUITests: XCTestCase {
             in: context.app,
             expectedCount: 3
         )
-        guard let rightmostClose = closeButtons.max(
-            by: { $0.frame.minX < $1.frame.minX }
+        guard let bottomRightmostClose = closeButtons.max(
+            by: { first, second in
+                first.frame.minX != second.frame.minX
+                    ? first.frame.minX < second.frame.minX
+                    : first.frame.minY < second.frame.minY
+            }
         ) else {
             return XCTFail("no Close pane button found")
         }
-        tapByCoordinate(rightmostClose)
+        tapByCoordinate(bottomRightmostClose)
 
         let closedState = waitForState(context.stateElement) {
             $0["panes"] == "2"
         }
-        let fractions = fractions(from: closedState)
+        let grid = grid(from: closedState)
         XCTAssertEqual(closedState["panes"], "2", "state: \(closedState)")
-        XCTAssertEqual(fractions.count, 2, "state: \(closedState)")
-        XCTAssertEqual(fractions.reduce(0, +), 1.0, accuracy: 0.02)
+        XCTAssertEqual(closedState["columns"], "2", "state: \(closedState)")
+        XCTAssertEqual(grid.count, 2, "state: \(closedState)")
+        XCTAssertEqual(grid.map(\.width).reduce(0, +), 1.0, accuracy: 0.02)
 
         let minimumFraction = 320 / Double(context.window.frame.width)
-        for fraction in fractions {
+        for column in grid {
             XCTAssertGreaterThanOrEqual(
-                fraction,
+                column.width,
                 minimumFraction - 0.02,
-                "fraction \(fraction) violates the 320pt minimum, state: \(closedState)"
+                "width \(column.width) violates the 320pt minimum, state: \(closedState)"
             )
         }
     }
@@ -195,16 +226,18 @@ final class SplitPaneFlowUITests: XCTestCase {
     func testDividerDragResizesAndClamps() {
         let context = launchApp(splitPaneCount: 2)
         let initialState = waitForState(context.stateElement) {
-            $0["panes"] == "2" && self.fractions(from: $0).count == 2
+            $0["panes"] == "2"
+                && $0["columns"] == "2"
+                && self.grid(from: $0).count == 2
         }
-        let initialFractions = fractions(from: initialState)
-        guard initialFractions.count == 2 else {
-            return XCTFail("initial fractions are invalid: \(initialState)")
+        let initialWidths = grid(from: initialState).map(\.width)
+        guard initialWidths.count == 2 else {
+            return XCTFail("initial grid widths are invalid: \(initialState)")
         }
 
         let windowWidth = Double(context.window.frame.width)
         let dividerY = context.window.frame.height * 0.60
-        let initialPaneZeroWidth = initialFractions[0] * windowWidth
+        let initialPaneZeroWidth = initialWidths[0] * windowWidth
         let targetPaneZeroWidth = min(
             initialPaneZeroWidth + 200,
             windowWidth - 320
@@ -214,12 +247,12 @@ final class SplitPaneFlowUITests: XCTestCase {
         var phaseAState = initialState
 
         while phaseAAttempts < maximumPhaseAAttempts {
-            let currentFractions = fractions(from: phaseAState)
-            guard currentFractions.count == 2 else {
-                return XCTFail("current fractions are invalid: \(phaseAState)")
+            let currentWidths = grid(from: phaseAState).map(\.width)
+            guard currentWidths.count == 2 else {
+                return XCTFail("current grid widths are invalid: \(phaseAState)")
             }
 
-            let currentPaneZeroWidth = currentFractions[0] * windowWidth
+            let currentPaneZeroWidth = currentWidths[0] * windowWidth
             let remaining = targetPaneZeroWidth - currentPaneZeroWidth
             if abs(remaining) <= 5 {
                 break
@@ -227,7 +260,7 @@ final class SplitPaneFlowUITests: XCTestCase {
 
             phaseAAttempts += 1
             let chunkDistance = max(-30.0, min(30.0, remaining))
-            let dividerX = currentFractions[0] * windowWidth
+            let dividerX = currentWidths[0] * windowWidth
             guard let record = makeSlowDividerDragGestureRecord(
                 in: context.app,
                 window: context.window,
@@ -245,21 +278,21 @@ final class SplitPaneFlowUITests: XCTestCase {
                 "failed to synthesize phase A divider drag \(phaseAAttempts)"
             )
 
-            let previousFractions = phaseAState["fractions"]
+            let previousGrid = phaseAState["grid"]
             phaseAState = waitForState(context.stateElement, timeout: 3) {
-                $0["panes"] == "2" && $0["fractions"] != previousFractions
+                $0["panes"] == "2" && $0["grid"] != previousGrid
             }
         }
 
-        let resizedFractions = fractions(from: phaseAState)
-        guard resizedFractions.count == 2 else {
-            return XCTFail("resized fractions are invalid: \(phaseAState)")
+        let resizedWidths = grid(from: phaseAState).map(\.width)
+        guard resizedWidths.count == 2 else {
+            return XCTFail("resized grid widths are invalid: \(phaseAState)")
         }
-        let resizedPaneZeroWidth = resizedFractions[0] * windowWidth
+        let resizedPaneZeroWidth = resizedWidths[0] * windowWidth
         let paneZeroIncrease = resizedPaneZeroWidth - initialPaneZeroWidth
         XCTAssertGreaterThan(
-            resizedFractions[0],
-            initialFractions[0],
+            resizedWidths[0],
+            initialWidths[0],
             "pane 0 did not grow, state: \(phaseAState)"
         )
         XCTAssertGreaterThanOrEqual(
@@ -279,18 +312,18 @@ final class SplitPaneFlowUITests: XCTestCase {
         var requestedPhaseBDistance = 0.0
         var unchangedPolls = 0
         var phaseBState = phaseAState
-        var minimumObservedFractionOne = resizedFractions[1]
+        var minimumObservedFractionOne = resizedWidths[1]
 
         while phaseBAttempts < maximumPhaseBAttempts,
               requestedPhaseBDistance < 2_000,
               unchangedPolls < 2 {
-            let currentFractions = fractions(from: phaseBState)
-            guard currentFractions.count == 2 else {
-                return XCTFail("phase B fractions are invalid: \(phaseBState)")
+            let currentWidths = grid(from: phaseBState).map(\.width)
+            guard currentWidths.count == 2 else {
+                return XCTFail("phase B grid widths are invalid: \(phaseBState)")
             }
 
             let chunkDistance = min(30.0, 2_000 - requestedPhaseBDistance)
-            let dividerX = currentFractions[0] * windowWidth
+            let dividerX = currentWidths[0] * windowWidth
             phaseBAttempts += 1
             requestedPhaseBDistance += chunkDistance
 
@@ -311,20 +344,20 @@ final class SplitPaneFlowUITests: XCTestCase {
                 "failed to synthesize phase B divider drag \(phaseBAttempts)"
             )
 
-            let previousFractions = phaseBState["fractions"]
+            let previousGrid = phaseBState["grid"]
             let polledState = waitForState(context.stateElement, timeout: 1.5) {
-                $0["panes"] == "2" && $0["fractions"] != previousFractions
+                $0["panes"] == "2" && $0["grid"] != previousGrid
             }
-            let polledFractions = fractions(from: polledState)
-            guard polledFractions.count == 2 else {
-                return XCTFail("polled phase B fractions are invalid: \(polledState)")
+            let polledWidths = grid(from: polledState).map(\.width)
+            guard polledWidths.count == 2 else {
+                return XCTFail("polled phase B grid widths are invalid: \(polledState)")
             }
 
             minimumObservedFractionOne = min(
                 minimumObservedFractionOne,
-                polledFractions[1]
+                polledWidths[1]
             )
-            if polledFractions[1] == currentFractions[1] {
+            if polledWidths[1] == currentWidths[1] {
                 unchangedPolls += 1
             } else {
                 unchangedPolls = 0
@@ -332,12 +365,12 @@ final class SplitPaneFlowUITests: XCTestCase {
             phaseBState = polledState
         }
 
-        let finalFractions = fractions(from: phaseBState)
-        guard finalFractions.count == 2 else {
-            return XCTFail("final fractions are invalid: \(phaseBState)")
+        let finalWidths = grid(from: phaseBState).map(\.width)
+        guard finalWidths.count == 2 else {
+            return XCTFail("final grid widths are invalid: \(phaseBState)")
         }
         XCTAssertEqual(
-            finalFractions[1],
+            finalWidths[1],
             minimumFraction,
             accuracy: 0.02,
             "right pane did not settle at the 320pt clamp, state: \(phaseBState)"
@@ -349,12 +382,13 @@ final class SplitPaneFlowUITests: XCTestCase {
         )
     }
 
-    func testTapSidebarRowFocusesOrOpens() {
+    func testTapSidebarRowFocusesOpenNote() {
         let context = launchApp(splitPaneCount: 2)
         let initialState = waitForState(context.stateElement) {
-            $0["panes"] == "2"
+            $0["panes"] == "2" && $0["columns"] == "2"
         }
         XCTAssertEqual(initialState["panes"], "2", "state: \(initialState)")
+        XCTAssertEqual(initialState["columns"], "2", "state: \(initialState)")
 
         let titleFields = sortedTitleFields(in: context.app, expectedCount: 2)
         guard let paneOneTitleField = titleFields.last else {
@@ -373,13 +407,473 @@ final class SplitPaneFlowUITests: XCTestCase {
         tapByCoordinate(row)
 
         let focusedState = waitForState(context.stateElement) {
-            $0["focused"] == "1" && $0["panes"] == "2"
+            guard $0["panes"] == "2",
+                  $0["columns"] == "2",
+                  let focused = self.focusedIndex(from: $0) else {
+                return false
+            }
+            return focused.column == 1 && focused.row == 0
         }
-        XCTAssertEqual(focusedState["focused"], "1", "state: \(focusedState)")
+        guard let focused = focusedIndex(from: focusedState) else {
+            return XCTFail("focused pane index is invalid: \(focusedState)")
+        }
+        XCTAssertEqual(focused.column, 1, "state: \(focusedState)")
+        XCTAssertEqual(focused.row, 0, "state: \(focusedState)")
         XCTAssertEqual(focusedState["panes"], "2", "state: \(focusedState)")
+        XCTAssertEqual(focusedState["columns"], "2", "state: \(focusedState)")
         XCTAssertTrue(
             sidebar.exists,
             "sidebar closed after tapping an already-open note row"
+        )
+    }
+
+    func testTapSidebarRowReplacesFocusedPane() throws {
+        let context = launchApp(splitPaneCount: 2)
+        let initialState = waitForState(context.stateElement) {
+            $0["panes"] == "2"
+                && $0["columns"] == "2"
+                && self.focusedIndex(from: $0) != nil
+        }
+        guard let focused = focusedIndex(from: initialState) else {
+            return XCTFail("initial focused pane index is invalid: \(initialState)")
+        }
+
+        let initialGrid = grid(from: initialState)
+        guard initialGrid.indices.contains(focused.column),
+              initialGrid[focused.column].rows.indices.contains(focused.row) else {
+            return XCTFail(
+                "focused pane is outside the decoded grid: \(initialState)"
+            )
+        }
+
+        let titleFields = sortedTitleFields(in: context.app, expectedCount: 2)
+        guard titleFields.count >= 2 else {
+            return XCTFail("two pane title fields were not found")
+        }
+        let openTitles = titleFields.prefix(2).map(displayTitle)
+        let focusedTitleFieldIndex = initialGrid
+            .prefix(focused.column)
+            .reduce(0) { $0 + $1.rows.count } + focused.row
+        guard titleFields.indices.contains(focusedTitleFieldIndex) else {
+            return XCTFail(
+                "focused title field is outside the decoded grid: \(initialState)"
+            )
+        }
+        let originalFocusedTitle = displayTitle(
+            of: titleFields[focusedTitleFieldIndex]
+        )
+
+        let sidebar = showSidebar(in: context.app)
+        guard let row = waitForSidebarRow(in: sidebar, matching: { label in
+            label != openTitles[0] && label != openTitles[1]
+        }) else {
+            throw XCTSkip(
+                "no sidebar row found that differs from both open pane titles"
+            )
+        }
+        let replacementTitle = row.label
+        tapByCoordinate(row)
+
+        let unchangedState = waitForState(context.stateElement) {
+            $0["panes"] == "2" && $0["columns"] == "2"
+        }
+        XCTAssertEqual(unchangedState["panes"], "2", "state: \(unchangedState)")
+        XCTAssertEqual(unchangedState["columns"], "2", "state: \(unchangedState)")
+
+        let replacedTitleFields = sortedTitleFields(
+            in: context.app,
+            expectedCount: 2
+        )
+        guard replacedTitleFields.indices.contains(focusedTitleFieldIndex) else {
+            return XCTFail(
+                "focused title field disappeared after replacement, state: \(unchangedState)"
+            )
+        }
+        let replacedTitleField = replacedTitleFields[focusedTitleFieldIndex]
+        XCTAssertTrue(
+            waitUntil(timeout: 10) {
+                self.displayTitle(of: replacedTitleField) == replacementTitle
+            },
+            "focused pane '\(originalFocusedTitle)' did not become "
+                + "'\(replacementTitle)', state: "
+                + stateString(of: context.stateElement)
+        )
+        XCTAssertTrue(
+            waitUntil(timeout: 5) { !sidebar.exists },
+            "sidebar remained open after replacing the focused pane"
+        )
+        XCTAssertFalse(sidebar.exists)
+    }
+
+    func testSidebarDragToBottomEdgeStacksPane() {
+        let context = launchApp(splitPaneCount: 1)
+        let initialState = waitForState(context.stateElement) {
+            $0["panes"] == "1" && $0["columns"] == "1"
+        }
+        XCTAssertEqual(initialState["panes"], "1", "state: \(initialState)")
+        XCTAssertEqual(initialState["columns"], "1", "state: \(initialState)")
+
+        addTeardownBlock { @MainActor in
+            self.closePanesAddedAbove(
+                1,
+                in: context.app,
+                stateElement: context.stateElement
+            )
+        }
+
+        let titleFields = sortedTitleFields(in: context.app, expectedCount: 1)
+        guard let titleField = titleFields.first else {
+            return XCTFail("single pane title field not found")
+        }
+        let openTitle = displayTitle(of: titleField)
+
+        let sidebar = showSidebar(in: context.app)
+        guard let row = waitForSidebarRow(in: sidebar, matching: { label in
+            label != openTitle
+        }) else {
+            return XCTFail(
+                "no visible sidebar row differed from '\(openTitle)'"
+            )
+        }
+        guard let record = makeSidebarDragGestureRecord(
+            in: context.app,
+            window: context.window,
+            row: row,
+            dropOffset: CGVector(dx: 0.50, dy: 0.90)
+        ) else {
+            return XCTFail("XCTest synthesized pointer support is unavailable.")
+        }
+
+        let gestureFinished = XCTestExpectation(
+            description: "bottom-edge sidebar drag finished"
+        )
+        DispatchQueue.global(qos: .userInitiated).async {
+            XCTAssertTrue(
+                ShapeFlowTestHelpers.synthesize(record),
+                "failed to synthesize the bottom-edge sidebar note drag"
+            )
+            gestureFinished.fulfill()
+        }
+
+        let midDragDeadline = Date().addingTimeInterval(5)
+        var sawExpectedTarget = false
+        while Date() < midDragDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            let state = stateValues(of: context.stateElement)
+            if state["target"] == "row-0.1" {
+                sawExpectedTarget = true
+            }
+            if state["dragging"] == "0" && sawExpectedTarget {
+                break
+            }
+        }
+
+        wait(for: [gestureFinished], timeout: 15)
+        XCTContext.runActivity(
+            named: "Observed row-0.1 target mid-drag: \(sawExpectedTarget)"
+        ) { _ in }
+
+        let settledState = waitForState(context.stateElement, timeout: 5) {
+            $0["dragging"] == "0"
+        }
+        XCTAssertEqual(settledState["dragging"], "0", "state: \(settledState)")
+
+        let stackedState = waitForState(context.stateElement) {
+            $0["panes"] == "2"
+                && $0["columns"] == "1"
+                && $0["dragging"] == "0"
+        }
+        let stackedGrid = grid(from: stackedState)
+        XCTAssertEqual(stackedState["panes"], "2", "state: \(stackedState)")
+        XCTAssertEqual(stackedState["columns"], "1", "state: \(stackedState)")
+        XCTAssertEqual(stackedGrid.count, 1, "state: \(stackedState)")
+        guard let rows = stackedGrid.first?.rows else {
+            return XCTFail("stacked column is missing: \(stackedState)")
+        }
+        XCTAssertEqual(rows.count, 2, "state: \(stackedState)")
+        for row in rows {
+            XCTAssertEqual(row, 0.5, accuracy: 0.05, "state: \(stackedState)")
+        }
+
+        closePanesAddedAbove(
+            1,
+            in: context.app,
+            stateElement: context.stateElement
+        )
+    }
+
+    func testRowDividerDragResizesAndClamps() {
+        let context = launchApp(gridRows: [2])
+        let initialState = waitForState(context.stateElement) {
+            let grid = self.grid(from: $0)
+            return $0["panes"] == "2"
+                && $0["columns"] == "1"
+                && grid.count == 1
+                && grid[0].rows.count == 2
+        }
+        let initialGrid = grid(from: initialState)
+        guard initialGrid.count == 1, initialGrid[0].rows.count == 2 else {
+            return XCTFail("initial row grid is invalid: \(initialState)")
+        }
+        let initialRows = initialGrid[0].rows
+
+        guard let containerSize = containerSize(from: initialState) else {
+            return
+        }
+        let containerOrigin = context.stateElement.frame.origin
+        let containerHeight = Double(containerSize.height)
+        let containerWidth = Double(containerSize.width)
+        let initialRowZeroHeight = initialRows[0] * containerHeight
+        let targetRowZeroHeight = min(
+            initialRowZeroHeight + 150,
+            containerHeight - 280
+        )
+        let maximumPhaseAAttempts = 20
+        var phaseAAttempts = 0
+        var phaseAState = initialState
+
+        while phaseAAttempts < maximumPhaseAAttempts {
+            let currentGrid = grid(from: phaseAState)
+            guard currentGrid.count == 1,
+                  currentGrid[0].rows.count == 2 else {
+                return XCTFail("current row grid is invalid: \(phaseAState)")
+            }
+            let currentRows = currentGrid[0].rows
+            let currentRowZeroHeight = currentRows[0] * containerHeight
+            let remaining = targetRowZeroHeight - currentRowZeroHeight
+            if abs(remaining) <= 5 {
+                break
+            }
+
+            phaseAAttempts += 1
+            let chunkDistance = max(-30.0, min(30.0, remaining))
+            let columnCenterX = currentGrid[0].width * containerWidth / 2
+            let dividerY = currentRows[0] * containerHeight
+            guard let record = makeSlowDividerDragGestureRecord(
+                in: context.app,
+                window: context.window,
+                from: CGPoint(
+                    x: containerOrigin.x + CGFloat(columnCenterX),
+                    y: containerOrigin.y + CGFloat(dividerY)
+                ),
+                to: CGPoint(
+                    x: containerOrigin.x + CGFloat(columnCenterX),
+                    y: containerOrigin.y + CGFloat(dividerY + chunkDistance)
+                )
+            ) else {
+                return XCTFail("XCTest synthesized pointer support is unavailable.")
+            }
+
+            XCTAssertTrue(
+                ShapeFlowTestHelpers.synthesize(record),
+                "failed to synthesize phase A row divider drag \(phaseAAttempts)"
+            )
+
+            let previousGrid = phaseAState["grid"]
+            phaseAState = waitForState(context.stateElement, timeout: 3) {
+                $0["columns"] == "1" && $0["grid"] != previousGrid
+            }
+        }
+
+        let resizedGrid = grid(from: phaseAState)
+        guard resizedGrid.count == 1, resizedGrid[0].rows.count == 2 else {
+            return XCTFail("resized row grid is invalid: \(phaseAState)")
+        }
+        let resizedRows = resizedGrid[0].rows
+        let resizedRowZeroHeight = resizedRows[0] * containerHeight
+        let rowZeroIncrease = resizedRowZeroHeight - initialRowZeroHeight
+        XCTAssertGreaterThan(
+            resizedRows[0],
+            initialRows[0],
+            "row 0 did not grow, state: \(phaseAState)"
+        )
+        XCTAssertGreaterThanOrEqual(
+            rowZeroIncrease,
+            80,
+            "row 0 grew only \(rowZeroIncrease)pt, state: \(phaseAState)"
+        )
+        XCTAssertLessThanOrEqual(
+            rowZeroIncrease,
+            250,
+            "row 0 grew \(rowZeroIncrease)pt, state: \(phaseAState)"
+        )
+
+        let minimumFraction = 280 / containerHeight
+        let maximumPhaseBAttempts = 75
+        var phaseBAttempts = 0
+        var requestedPhaseBDistance = 0.0
+        var unchangedPolls = 0
+        var phaseBState = phaseAState
+        var minimumObservedRowOne = resizedRows[1]
+
+        while phaseBAttempts < maximumPhaseBAttempts,
+              requestedPhaseBDistance < 2_000,
+              unchangedPolls < 2 {
+            let currentGrid = grid(from: phaseBState)
+            guard currentGrid.count == 1,
+                  currentGrid[0].rows.count == 2 else {
+                return XCTFail("phase B row grid is invalid: \(phaseBState)")
+            }
+            let currentRows = currentGrid[0].rows
+            let chunkDistance = min(30.0, 2_000 - requestedPhaseBDistance)
+            let columnCenterX = currentGrid[0].width * containerWidth / 2
+            let dividerY = currentRows[0] * containerHeight
+            phaseBAttempts += 1
+            requestedPhaseBDistance += chunkDistance
+
+            guard let record = makeSlowDividerDragGestureRecord(
+                in: context.app,
+                window: context.window,
+                from: CGPoint(
+                    x: containerOrigin.x + CGFloat(columnCenterX),
+                    y: containerOrigin.y + CGFloat(dividerY)
+                ),
+                to: CGPoint(
+                    x: containerOrigin.x + CGFloat(columnCenterX),
+                    y: containerOrigin.y + CGFloat(dividerY + chunkDistance)
+                )
+            ) else {
+                return XCTFail("XCTest synthesized pointer support is unavailable.")
+            }
+
+            XCTAssertTrue(
+                ShapeFlowTestHelpers.synthesize(record),
+                "failed to synthesize phase B row divider drag \(phaseBAttempts)"
+            )
+
+            let previousGrid = phaseBState["grid"]
+            let polledState = waitForState(
+                context.stateElement,
+                timeout: 1.5
+            ) {
+                $0["columns"] == "1" && $0["grid"] != previousGrid
+            }
+            let polledGrid = grid(from: polledState)
+            guard polledGrid.count == 1,
+                  polledGrid[0].rows.count == 2 else {
+                return XCTFail(
+                    "polled phase B row grid is invalid: \(polledState)"
+                )
+            }
+            let polledRows = polledGrid[0].rows
+            minimumObservedRowOne = min(
+                minimumObservedRowOne,
+                polledRows[1]
+            )
+            if polledRows[1] == currentRows[1] {
+                unchangedPolls += 1
+            } else {
+                unchangedPolls = 0
+            }
+            phaseBState = polledState
+        }
+
+        let finalGrid = grid(from: phaseBState)
+        guard finalGrid.count == 1, finalGrid[0].rows.count == 2 else {
+            return XCTFail("final row grid is invalid: \(phaseBState)")
+        }
+        XCTAssertEqual(
+            finalGrid[0].rows[1],
+            minimumFraction,
+            accuracy: 0.02,
+            "bottom row did not settle at the 280pt clamp, state: \(phaseBState)"
+        )
+        XCTAssertGreaterThanOrEqual(
+            minimumObservedRowOne,
+            minimumFraction - 0.01,
+            "bottom row moved below the clamp, state: \(phaseBState)"
+        )
+    }
+
+    func testInteriorDropReplacesPaneNote() throws {
+        let context = launchApp(splitPaneCount: 2)
+        let initialState = waitForState(context.stateElement) {
+            $0["panes"] == "2"
+                && $0["columns"] == "2"
+                && self.grid(from: $0).count == 2
+        }
+        let widths = grid(from: initialState).map(\.width)
+        guard widths.count == 2 else {
+            return XCTFail("initial grid widths are invalid: \(initialState)")
+        }
+
+        let windowWidth = Double(context.window.frame.width)
+        let paneOneStartXFraction = widths[0]
+        let paneOneInteriorXFraction =
+            paneOneStartXFraction + widths[1] / 2
+        let paneOneInteriorX = paneOneInteriorXFraction * windowWidth
+        guard paneOneInteriorX > 0, paneOneInteriorX < windowWidth else {
+            return XCTFail(
+                "pane 1 interior x is outside the window: \(initialState)"
+            )
+        }
+
+        let titleFields = sortedTitleFields(in: context.app, expectedCount: 2)
+        guard titleFields.count >= 2 else {
+            return XCTFail("two pane title fields were not found")
+        }
+        let openTitles = titleFields.prefix(2).map(displayTitle)
+
+        let sidebar = showSidebar(in: context.app)
+        guard let row = waitForSidebarRow(in: sidebar, matching: { label in
+            label != openTitles[0] && label != openTitles[1]
+        }) else {
+            throw XCTSkip(
+                "no sidebar row found that differs from both open pane titles"
+            )
+        }
+        let replacementTitle = row.label
+        guard let record = makeSidebarDragGestureRecord(
+            in: context.app,
+            window: context.window,
+            row: row,
+            dropOffset: CGVector(
+                dx: CGFloat(paneOneInteriorXFraction),
+                dy: 0.50
+            )
+        ) else {
+            return XCTFail("XCTest synthesized pointer support is unavailable.")
+        }
+
+        XCTAssertTrue(
+            ShapeFlowTestHelpers.synthesize(record),
+            "failed to synthesize the pane-interior sidebar note drag"
+        )
+
+        let settledState = waitForState(context.stateElement, timeout: 5) {
+            $0["dragging"] == "0"
+        }
+        XCTAssertEqual(settledState["dragging"], "0", "state: \(settledState)")
+
+        let replacedState = waitForState(context.stateElement) {
+            $0["panes"] == "2"
+                && $0["columns"] == "2"
+                && $0["dragging"] == "0"
+        }
+        XCTAssertEqual(replacedState["panes"], "2", "state: \(replacedState)")
+        XCTAssertEqual(replacedState["columns"], "2", "state: \(replacedState)")
+        XCTAssertTrue(
+            waitUntil(timeout: 5) { !sidebar.exists },
+            "sidebar remained open after replacing pane 1"
+        )
+        XCTAssertFalse(sidebar.exists)
+
+        let replacedTitleFields = sortedTitleFields(
+            in: context.app,
+            expectedCount: 2
+        )
+        guard replacedTitleFields.indices.contains(1) else {
+            return XCTFail(
+                "pane 1 title field disappeared after replacement, state: \(replacedState)"
+            )
+        }
+        let paneOneTitleField = replacedTitleFields[1]
+        XCTAssertTrue(
+            waitUntil(timeout: 10) {
+                self.displayTitle(of: paneOneTitleField) == replacementTitle
+            },
+            "pane 1 title did not become '\(replacementTitle)', state: "
+                + stateString(of: context.stateElement)
         )
     }
 
@@ -394,6 +888,31 @@ final class SplitPaneFlowUITests: XCTestCase {
     ) {
         let app = XCUIApplication()
         app.launchArguments = ["-vellum-split-panes", String(splitPaneCount)]
+        app.launch()
+
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10), "app window not found")
+
+        let stateElement = app.otherElements["vellum-split-state"]
+        XCTAssertTrue(
+            stateElement.waitForExistence(timeout: 15),
+            "split state accessibility element not found"
+        )
+        return (app, window, stateElement)
+    }
+
+    private func launchApp(
+        gridRows: [Int]
+    ) -> (
+        app: XCUIApplication,
+        window: XCUIElement,
+        stateElement: XCUIElement
+    ) {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-vellum-split-grid",
+            gridRows.map(String.init).joined(separator: ","),
+        ]
         app.launch()
 
         let window = app.windows.firstMatch
@@ -442,7 +961,11 @@ final class SplitPaneFlowUITests: XCTestCase {
         )
         return query.allElementsBoundByIndex
             .filter { $0.exists }
-            .sorted { $0.frame.minX < $1.frame.minX }
+            .sorted { first, second in
+                first.frame.minX != second.frame.minX
+                    ? first.frame.minX < second.frame.minX
+                    : first.frame.minY < second.frame.minY
+            }
     }
 
     private func displayTitle(of titleField: XCUIElement) -> String {
@@ -501,14 +1024,18 @@ final class SplitPaneFlowUITests: XCTestCase {
             let closeButtons = app.buttons.matching(
                 NSPredicate(format: "label == 'Close pane'")
             ).allElementsBoundByIndex.filter { $0.exists }
-            guard let rightmostClose = closeButtons.max(
-                by: { $0.frame.minX < $1.frame.minX }
+            guard let bottomRightmostClose = closeButtons.max(
+                by: { first, second in
+                    first.frame.minX != second.frame.minX
+                        ? first.frame.minX < second.frame.minX
+                        : first.frame.minY < second.frame.minY
+                }
             ) else {
                 XCTFail("cleanup found no Close pane button, state: \(state)")
                 return
             }
 
-            tapByCoordinate(rightmostClose)
+            tapByCoordinate(bottomRightmostClose)
             state = waitForState(stateElement, timeout: 5) {
                 ($0["panes"].flatMap(Int.init) ?? paneCount) < paneCount
             }
@@ -702,27 +1229,117 @@ final class SplitPaneFlowUITests: XCTestCase {
         return state
     }
 
-    private func fractions(
+    private func grid(
         from state: [String: String],
         file: StaticString = #filePath,
         line: UInt = #line
-    ) -> [Double] {
-        guard let encoded = state["fractions"] else {
-            XCTFail("split state has no fractions: \(state)", file: file, line: line)
+    ) -> [(width: Double, rows: [Double])] {
+        guard let encoded = state["grid"] else {
+            XCTFail("split state has no grid: \(state)", file: file, line: line)
             return []
         }
-        let values = encoded.split(separator: ",").compactMap {
-            Double($0)
+
+        var columns: [(width: Double, rows: [Double])] = []
+        let tokens = encoded.split(
+            separator: "|",
+            omittingEmptySubsequences: false
+        )
+        for tokenSubstring in tokens {
+            let token = String(tokenSubstring)
+            guard let openingBracket = token.firstIndex(of: "["),
+                  token.last == "]",
+                  openingBracket != token.startIndex else {
+                XCTFail(
+                    "split grid token is malformed: '\(token)', "
+                        + "grid: '\(encoded)', state: \(state)",
+                    file: file,
+                    line: line
+                )
+                return []
+            }
+
+            let widthSubstring = token[..<openingBracket]
+            let rowsStart = token.index(after: openingBracket)
+            let rowsEnd = token.index(before: token.endIndex)
+            let rowSubstrings = token[rowsStart..<rowsEnd].split(
+                separator: ",",
+                omittingEmptySubsequences: false
+            )
+            guard let width = Double(widthSubstring),
+                  !rowSubstrings.isEmpty else {
+                XCTFail(
+                    "split grid token is malformed: '\(token)', "
+                        + "grid: '\(encoded)', state: \(state)",
+                    file: file,
+                    line: line
+                )
+                return []
+            }
+
+            let rows = rowSubstrings.compactMap(Double.init)
+            guard rows.count == rowSubstrings.count else {
+                XCTFail(
+                    "split grid token is malformed: '\(token)', "
+                        + "grid: '\(encoded)', state: \(state)",
+                    file: file,
+                    line: line
+                )
+                return []
+            }
+            columns.append((width: width, rows: rows))
         }
-        guard values.count == encoded.split(separator: ",").count else {
+        return columns
+    }
+
+    private func containerSize(
+        from state: [String: String],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> CGSize? {
+        guard let encoded = state["size"] else {
+            XCTFail("split state has no size: \(state)", file: file, line: line)
+            return nil
+        }
+        let components = encoded.split(separator: "x", omittingEmptySubsequences: false)
+        guard components.count == 2,
+              let width = Double(components[0]),
+              let height = Double(components[1]) else {
+            XCTFail("split state size is malformed: '\(encoded)', state: \(state)", file: file, line: line)
+            return nil
+        }
+        return CGSize(width: width, height: height)
+    }
+
+    private func focusedIndex(
+        from state: [String: String],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> (column: Int, row: Int)? {
+        guard let encoded = state["focused"] else {
             XCTFail(
-                "split fractions are malformed: \(encoded)",
+                "split state has no focused index: \(state)",
                 file: file,
                 line: line
             )
-            return []
+            return nil
         }
-        return values
+        guard encoded != "-1" else { return nil }
+
+        let components = encoded.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        )
+        guard components.count == 2,
+              let column = Int(components[0]),
+              let row = Int(components[1]) else {
+            XCTFail(
+                "split focused index is malformed: '\(encoded)', state: \(state)",
+                file: file,
+                line: line
+            )
+            return nil
+        }
+        return (column: column, row: row)
     }
 
     private func waitForState(

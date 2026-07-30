@@ -1,16 +1,7 @@
 import CoreGraphics
 import Foundation
 
-public enum SplitDropTarget: Equatable, Sendable {
-    case insertBetween(index: Int)
-    case existingPane(index: Int)
-}
-
 public enum SplitLayoutPolicy {
-    public static let minPaneWidth: CGFloat = 320
-    public static let dividerHitWidth: CGFloat = 24
-    public static let edgeZoneFraction: CGFloat = 0.25
-
     /// Keeping pane shares normalized makes the layout independent of container size.
     public static func normalized(_ fractions: [CGFloat]) -> [CGFloat] {
         guard !fractions.isEmpty else { return [] }
@@ -28,39 +19,49 @@ public enum SplitLayoutPolicy {
         return scaledFractions.map { $0 / scaledSum }
     }
 
-    /// The pane limit prevents a split from promising widths the container cannot provide.
-    public static func maxPaneCount(forContainerWidth width: CGFloat) -> Int {
-        guard width.isFinite, width > 0 else { return 1 }
+    /// An axis-specific limit prevents a split from promising lengths the container cannot provide.
+    public static func maxCount(
+        axisLength: CGFloat,
+        minLength: CGFloat
+    ) -> Int {
+        guard axisLength.isFinite, axisLength > 0,
+              minLength.isFinite, minLength > 0 else {
+            return 1
+        }
 
-        let fittingPaneCount = width / minPaneWidth
+        let fittingPaneCount = axisLength / minLength
         guard fittingPaneCount < CGFloat(Int.max) else { return Int.max }
         return max(1, Int(fittingPaneCount))
     }
 
-    /// Resolving normalized shares at the boundary keeps invalid container geometry from spreading.
-    public static func paneWidths(
+    /// Resolving normalized shares on either axis contains invalid geometry at the boundary.
+    public static func lengths(
         fractions: [CGFloat],
-        containerWidth: CGFloat
+        axisLength: CGFloat
     ) -> [CGFloat] {
-        let width = usableWidth(containerWidth)
-        return normalized(fractions).map { $0 * width }
+        let length = usableLength(axisLength)
+        return normalized(fractions).map { $0 * length }
     }
 
-    /// Enforcing the shared minimum keeps every feasible pane usable without changing total width.
-    public static func clampedToMinWidth(
+    /// Enforcing an axis-specific minimum preserves usable panes without changing their total share.
+    public static func clampedToMinLength(
         fractions: [CGFloat],
-        containerWidth: CGFloat
+        axisLength: CGFloat,
+        minLength: CGFloat
     ) -> [CGFloat] {
         let normalizedFractions = normalized(fractions)
         guard !normalizedFractions.isEmpty else { return [] }
+        guard minLength.isFinite, minLength > 0 else {
+            return normalizedFractions
+        }
 
-        let width = usableWidth(containerWidth)
+        let length = usableLength(axisLength)
         let paneCount = normalizedFractions.count
-        guard CGFloat(paneCount) * minPaneWidth <= width else {
+        guard CGFloat(paneCount) * minLength <= length else {
             return equalFractions(count: paneCount)
         }
 
-        let minimumFraction = minPaneWidth / width
+        let minimumFraction = minLength / length
         var result = normalizedFractions
         var deficit: CGFloat = 0
         var availableExcess: CGFloat = 0
@@ -87,12 +88,13 @@ public enum SplitLayoutPolicy {
         return normalized(result)
     }
 
-    /// Moving one divider transfers width only between its neighbors while preserving their total.
+    /// Moving one divider on either axis transfers space only between its neighboring panes.
     public static func fractionsResizing(
         _ startFractions: [CGFloat],
         dividerIndex: Int,
-        byTranslation dx: CGFloat,
-        containerWidth: CGFloat
+        byTranslation delta: CGFloat,
+        axisLength: CGFloat,
+        minLength: CGFloat
     ) -> [CGFloat] {
         guard startFractions.count >= 2,
               dividerIndex >= 0,
@@ -100,17 +102,20 @@ public enum SplitLayoutPolicy {
             return startFractions
         }
 
-        let width = usableWidth(containerWidth)
-        guard width > 0, dx.isFinite else { return startFractions }
+        let length = usableLength(axisLength)
+        guard length > 0, delta.isFinite,
+              minLength.isFinite, minLength > 0 else {
+            return startFractions
+        }
 
         let leftFraction = startFractions[dividerIndex]
         let rightFraction = startFractions[dividerIndex + 1]
-        let minimumFraction = minPaneWidth / width
+        let minimumFraction = minLength / length
         guard leftFraction + rightFraction >= 2 * minimumFraction else {
             return startFractions
         }
 
-        let proposedChange = dx / width
+        let proposedChange = delta / length
         let minimumChange = minimumFraction - leftFraction
         let maximumChange = rightFraction - minimumFraction
         let change = min(max(proposedChange, minimumChange), maximumChange)
@@ -119,47 +124,6 @@ public enum SplitLayoutPolicy {
         result[dividerIndex] = leftFraction + change
         result[dividerIndex + 1] = rightFraction - change
         return result
-    }
-
-    /// Edge zones favor insertion, with exact pane and zone boundaries tied toward insertion slots.
-    public static func dropTarget(
-        forX x: CGFloat,
-        fractions: [CGFloat],
-        containerWidth: CGFloat
-    ) -> SplitDropTarget {
-        guard !fractions.isEmpty else { return .insertBetween(index: 0) }
-
-        let width = usableWidth(containerWidth)
-        guard !x.isNaN else { return .insertBetween(index: 0) }
-        if x <= 0 {
-            return .insertBetween(index: 0)
-        }
-        if x >= width {
-            return .insertBetween(index: fractions.count)
-        }
-
-        let widths = paneWidths(fractions: fractions, containerWidth: width)
-        var paneStartX: CGFloat = 0
-
-        for (index, paneWidth) in widths.enumerated() {
-            let paneEndX = paneStartX + paneWidth
-            let leftEdgeZoneEnd = paneStartX + paneWidth * edgeZoneFraction
-            let rightEdgeZoneStart = paneEndX - paneWidth * edgeZoneFraction
-
-            if x <= leftEdgeZoneEnd {
-                return .insertBetween(index: index)
-            }
-            if x < rightEdgeZoneStart {
-                return .existingPane(index: index)
-            }
-            if x <= paneEndX {
-                return .insertBetween(index: index + 1)
-            }
-
-            paneStartX = paneEndX
-        }
-
-        return .insertBetween(index: fractions.count)
     }
 
     /// Giving a new pane one equal-count share preserves the relative sizes of existing panes.
@@ -191,9 +155,9 @@ public enum SplitLayoutPolicy {
         return normalized(survivors)
     }
 
-    private static func usableWidth(_ width: CGFloat) -> CGFloat {
-        guard width.isFinite, width > 0 else { return 0 }
-        return width
+    private static func usableLength(_ length: CGFloat) -> CGFloat {
+        guard length.isFinite, length > 0 else { return 0 }
+        return length
     }
 
     private static func equalFractions(count: Int) -> [CGFloat] {

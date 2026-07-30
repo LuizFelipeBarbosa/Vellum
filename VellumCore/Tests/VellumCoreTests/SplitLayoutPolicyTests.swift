@@ -35,9 +35,9 @@ struct SplitLayoutPolicyTests {
         ]
 
         for (fractions, containerWidth) in cases {
-            let widths = SplitLayoutPolicy.paneWidths(
+            let widths = SplitLayoutPolicy.lengths(
                 fractions: fractions,
-                containerWidth: containerWidth
+                axisLength: containerWidth
             )
             #expect(isApproximatelyEqual(widths.reduce(0, +), containerWidth))
         }
@@ -50,7 +50,8 @@ struct SplitLayoutPolicyTests {
             start,
             dividerIndex: 1,
             byTranslation: 100,
-            containerWidth: 2_000
+            axisLength: 2_000,
+            minLength: 320
         )
 
         #expect(result[0] == start[0])
@@ -67,13 +68,15 @@ struct SplitLayoutPolicyTests {
             start,
             dividerIndex: 0,
             byTranslation: 10_000,
-            containerWidth: 1_000
+            axisLength: 1_000,
+            minLength: 320
         )
         let movedLeft = SplitLayoutPolicy.fractionsResizing(
             start,
             dividerIndex: 0,
             byTranslation: -10_000,
-            containerWidth: 1_000
+            axisLength: 1_000,
+            minLength: 320
         )
 
         #expect(isApproximatelyEqual(movedRight[0], 0.68))
@@ -93,7 +96,8 @@ struct SplitLayoutPolicyTests {
                 start,
                 dividerIndex: -1,
                 byTranslation: 100,
-                containerWidth: 1_500
+                axisLength: 1_500,
+                minLength: 320
             ) == start
         )
         #expect(
@@ -101,7 +105,8 @@ struct SplitLayoutPolicyTests {
                 start,
                 dividerIndex: 2,
                 byTranslation: 100,
-                containerWidth: 1_500
+                axisLength: 1_500,
+                minLength: 320
             ) == start
         )
 
@@ -111,7 +116,8 @@ struct SplitLayoutPolicyTests {
                 singlePane,
                 dividerIndex: 0,
                 byTranslation: 100,
-                containerWidth: 1_500
+                axisLength: 1_500,
+                minLength: 320
             ) == singlePane
         )
     }
@@ -201,145 +207,22 @@ struct SplitLayoutPolicyTests {
         #expect(SplitLayoutPolicy.fractionsRemoving(at: 0, from: []).isEmpty)
     }
 
-    @Test("Drop targeting maps exact boundaries and edge thresholds to insertion")
-    func dropTargetBoundariesFavorInsertion() {
-        let fractions: [CGFloat] = [0.5, 0.5]
-
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: 0,
-                fractions: fractions,
-                containerWidth: 1_000
-            ) == .insertBetween(index: 0)
-        )
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: 125,
-                fractions: fractions,
-                containerWidth: 1_000
-            ) == .insertBetween(index: 0)
-        )
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: 375,
-                fractions: fractions,
-                containerWidth: 1_000
-            ) == .insertBetween(index: 1)
-        )
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: 500,
-                fractions: fractions,
-                containerWidth: 1_000
-            ) == .insertBetween(index: 1)
-        )
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: 625,
-                fractions: fractions,
-                containerWidth: 1_000
-            ) == .insertBetween(index: 1)
-        )
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: 875,
-                fractions: fractions,
-                containerWidth: 1_000
-            ) == .insertBetween(index: 2)
-        )
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: 1_000,
-                fractions: fractions,
-                containerWidth: 1_000
-            ) == .insertBetween(index: 2)
-        )
-    }
-
-    @Test("Drop targeting distinguishes pane edge zones from interiors")
-    func dropTargetDistinguishesEdgesAndInteriors() {
-        let fractions: [CGFloat] = [0.5, 0.5]
-        let expectedTargets: [(CGFloat, SplitDropTarget)] = [
-            (50, .insertBetween(index: 0)),
-            (250, .existingPane(index: 0)),
-            (450, .insertBetween(index: 1)),
-            (550, .insertBetween(index: 1)),
-            (750, .existingPane(index: 1)),
-            (950, .insertBetween(index: 2)),
-        ]
-
-        for (x, expected) in expectedTargets {
-            #expect(
-                SplitLayoutPolicy.dropTarget(
-                    forX: x,
-                    fractions: fractions,
-                    containerWidth: 1_000
-                ) == expected
-            )
-        }
-    }
-
-    @Test("Drop targeting handles coordinates outside the container")
-    func dropTargetHandlesOutsideCoordinates() {
-        let fractions: [CGFloat] = [0.5, 0.5]
-
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: -1,
-                fractions: fractions,
-                containerWidth: 1_000
-            ) == .insertBetween(index: 0)
-        )
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: 1_001,
-                fractions: fractions,
-                containerWidth: 1_000
-            ) == .insertBetween(index: 2)
-        )
-        #expect(
-            SplitLayoutPolicy.dropTarget(
-                forX: 200,
-                fractions: [],
-                containerWidth: 1_000
-            ) == .insertBetween(index: 0)
-        )
-    }
-
-    @Test("A single pane uses edge zones around its interior")
-    func singlePaneDropTargetUsesEdgeZones() {
-        let expectedTargets: [(CGFloat, SplitDropTarget)] = [
-            (50, .insertBetween(index: 0)),
-            (200, .existingPane(index: 0)),
-            (350, .insertBetween(index: 1)),
-        ]
-
-        for (x, expected) in expectedTargets {
-            #expect(
-                SplitLayoutPolicy.dropTarget(
-                    forX: x,
-                    fractions: [1],
-                    containerWidth: 400
-                ) == expected
-            )
-        }
-    }
-
     @Test("Maximum pane count follows the minimum pane width")
     func maximumPaneCountUsesMinimumWidth() {
-        #expect(SplitLayoutPolicy.maxPaneCount(forContainerWidth: 834) == 2)
-        #expect(SplitLayoutPolicy.maxPaneCount(forContainerWidth: 1_194) == 3)
-        #expect(SplitLayoutPolicy.maxPaneCount(forContainerWidth: 1_366) == 4)
-        #expect(SplitLayoutPolicy.maxPaneCount(forContainerWidth: 100) == 1)
-        #expect(SplitLayoutPolicy.maxPaneCount(forContainerWidth: 0) == 1)
-        #expect(SplitLayoutPolicy.maxPaneCount(forContainerWidth: -100) == 1)
+        #expect(SplitLayoutPolicy.maxCount(axisLength: 834, minLength: 320) == 2)
+        #expect(SplitLayoutPolicy.maxCount(axisLength: 1_194, minLength: 320) == 3)
+        #expect(SplitLayoutPolicy.maxCount(axisLength: 1_366, minLength: 320) == 4)
+        #expect(SplitLayoutPolicy.maxCount(axisLength: 100, minLength: 320) == 1)
+        #expect(SplitLayoutPolicy.maxCount(axisLength: 0, minLength: 320) == 1)
+        #expect(SplitLayoutPolicy.maxCount(axisLength: -100, minLength: 320) == 1)
     }
 
     @Test("Minimum clamping falls back to equal shares when the container is too small")
     func minimumClampingFallsBackWhenInfeasible() {
-        let result = SplitLayoutPolicy.clampedToMinWidth(
+        let result = SplitLayoutPolicy.clampedToMinLength(
             fractions: [0.8, 0.1, 0.1],
-            containerWidth: 900
+            axisLength: 900,
+            minLength: 320
         )
 
         #expect(result.allSatisfy { isApproximatelyEqual($0, 1 / 3) })
@@ -348,9 +231,10 @@ struct SplitLayoutPolicyTests {
 
     @Test("Minimum clamping takes deficits proportionally from wider panes")
     func minimumClampingRedistributesDeficit() {
-        let result = SplitLayoutPolicy.clampedToMinWidth(
+        let result = SplitLayoutPolicy.clampedToMinLength(
             fractions: [0.2, 0.4, 0.4],
-            containerWidth: 1_000
+            axisLength: 1_000,
+            minLength: 320
         )
 
         #expect(isApproximatelyEqual(result[0], 0.32))

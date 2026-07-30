@@ -4,8 +4,8 @@ import CoreGraphics
 struct PaneContext {
     let pane: NotePane
     let isFocused: Bool
-    let isFirstPane: Bool
     let paneWidth: CGFloat
+    let paneHeight: CGFloat
     let paneCount: Int
     let onClose: () -> Void
     let onFocus: () -> Void

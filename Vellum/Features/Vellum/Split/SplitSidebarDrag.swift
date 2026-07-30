@@ -9,7 +9,7 @@ struct SplitDragState {
     let title: String
     let spaceColor: Color?
     var location: CGPoint
-    var target: SplitDropTarget?
+    var target: SplitGridDropTarget?
 }
 
 @MainActor

@@ -44,12 +44,14 @@ struct NoteScreenView: View {
     private var showsBacklinksRail: Bool {
         paneContext.map {
             $0.paneWidth >= PaneChromeThresholds.backlinksRailMinWidth
+                && $0.paneHeight >= PaneChromeThresholds.backlinksRailMinHeight
         } ?? true
     }
 
     private var showsSuggestionsAndThumbnails: Bool {
         paneContext.map {
             $0.paneWidth >= PaneChromeThresholds.suggestionsAndThumbnailsMinWidth
+                && $0.paneHeight >= PaneChromeThresholds.suggestionsAndThumbnailsMinHeight
                 && $0.isFocused
         } ?? true
     }

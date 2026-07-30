@@ -91,20 +91,9 @@ struct NoteSplitSidebarView: View {
             Task {
                 if let openPane = app.split.pane(for: summary.id) {
                     app.split.focus(openPane.id)
-                    return
+                    return                        // sidebar stays open
                 }
-
-                if app.split.panes.count
-                    < SplitLayoutPolicy.maxPaneCount(
-                        forContainerWidth: containerWidth
-                    ) {
-                    await app.openNote(
-                        summary.id,
-                        placement: .newPane(at: nil)
-                    )
-                } else {
-                    await app.openNote(summary.id)
-                }
+                await app.openNote(summary.id)    // default .replaceFocused placement
                 onDismiss()
             }
         } label: {

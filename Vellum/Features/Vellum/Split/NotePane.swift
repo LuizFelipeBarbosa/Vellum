@@ -8,12 +8,12 @@ final class NotePane: Identifiable {
     let noteModel: NoteScreenModel
     let undoManager: UndoManager = UndoManager()
     let canvasReference: NoteCanvasReference = NoteCanvasReference()
-    var widthFraction: CGFloat
+    var heightFraction: CGFloat
 
     var noteID: UUID { noteModel.noteID }
 
-    init(noteModel: NoteScreenModel, widthFraction: CGFloat = 1) {
+    init(noteModel: NoteScreenModel, heightFraction: CGFloat = 1) {
         self.noteModel = noteModel
-        self.widthFraction = widthFraction
+        self.heightFraction = heightFraction
     }
 }

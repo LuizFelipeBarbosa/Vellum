@@ -10,7 +10,9 @@ enum AppScreen: Hashable {
 
 enum PanePlacement {
     case replaceFocused
-    case newPane(at: Int?)
+    case replacePane(id: UUID)
+    case newColumn(at: Int?)
+    case stackInColumn(column: Int, at: Int?)
 }
 
 struct Toast: Equatable, Identifiable {
@@ -59,12 +61,16 @@ final class VellumAppModel {
 
     private var toastTask: Task<Void, Never>?
     private var askNavigationTask: Task<Void, Never>?
+    private var openingNoteIDs: Set<UUID> = []
+    private var lastSplitContainerSize: CGSize = .zero
+    private var resizeOverflowTask: Task<Void, Never>?
     private var didBootstrap = false
 
     #if DEBUG
     private let debugAskQuestion: String?
     private let debugAutoOpenMostRecentNote: Bool
     private let debugSplitPaneCount: Int?
+    private let debugSplitGridRows: [Int]?
     #endif
 
     init(
@@ -95,6 +101,20 @@ final class VellumAppModel {
             debugSplitPaneCount = count
         } else {
             debugSplitPaneCount = nil
+        }
+        if let flagIndex = arguments.firstIndex(of: "-vellum-split-grid"),
+           arguments.indices.contains(flagIndex + 1) {
+            let components = arguments[flagIndex + 1]
+                .split(separator: ",", omittingEmptySubsequences: false)
+            let rowCounts = components
+                .compactMap { Int($0) }
+            debugSplitGridRows = rowCounts.count == components.count
+                && !rowCounts.isEmpty
+                && rowCounts.allSatisfy { $0 > 0 }
+                ? rowCounts
+                : []
+        } else {
+            debugSplitGridRows = nil
         }
         #endif
         if let flagIndex = arguments.firstIndex(of: "-prototypeStartView"),
@@ -127,17 +147,44 @@ final class VellumAppModel {
         }
 
         #if DEBUG
-        if let debugSplitPaneCount, debugSplitPaneCount > 0 {
+        if let debugSplitGridRows {
+            let notes = library.summaries.sorted { $0.updatedAt > $1.updatedAt }
+            var noteIterator = notes.makeIterator()
+
+            for (columnIndex, rowCount) in debugSplitGridRows.enumerated() {
+                guard let firstNote = noteIterator.next() else { break }
+                if columnIndex == 0 {
+                    await openNote(firstNote.id)
+                } else {
+                    await openNote(
+                        firstNote.id,
+                        placement: .newColumn(at: nil)
+                    )
+                }
+
+                for _ in 1..<rowCount {
+                    guard let note = noteIterator.next() else { break }
+                    await openNote(
+                        note.id,
+                        placement: .stackInColumn(
+                            column: columnIndex,
+                            at: nil
+                        )
+                    )
+                }
+            }
+        } else if let debugSplitPaneCount, debugSplitPaneCount > 0 {
             let notes = library.summaries.sorted { $0.updatedAt > $1.updatedAt }
             if let mostRecentNote = notes.first {
                 await openNote(mostRecentNote.id)
             }
             for note in notes.dropFirst().prefix(debugSplitPaneCount - 1) {
-                await openNote(note.id, placement: .newPane(at: nil))
+                await openNote(note.id, placement: .newColumn(at: nil))
             }
         }
 
-        if debugSplitPaneCount == nil,
+        if debugSplitGridRows == nil,
+           debugSplitPaneCount == nil,
            debugAutoOpenMostRecentNote,
            let note = library.summaries.max(by: { $0.updatedAt < $1.updatedAt }) {
             await openNote(note.id)
@@ -219,6 +266,10 @@ final class VellumAppModel {
         isNewlyCreated: Bool = false,
         placement: PanePlacement = .replaceFocused
     ) async {
+        guard !openingNoteIDs.contains(id) else { return }
+        openingNoteIDs.insert(id)
+        defer { openingNoteIDs.remove(id) }
+
         do {
             let note = try await container.workspace.loadNote(id: id)
             if note.isTrashed {
@@ -256,13 +307,97 @@ final class VellumAppModel {
                 await focusedPane.noteModel.flushPendingSave()
                 split.replacePane(id: focusedPane.id, with: newPane)
             } else {
-                split.insertPane(newPane, at: 0)
+                split.insertColumn(with: newPane, at: 0)
             }
-        case .newPane(let index):
-            split.insertPane(newPane, at: index)
+        case .replacePane(let paneID):
+            if let pane = split.panes.first(where: { $0.id == paneID }) {
+                await pane.noteModel.flushPendingSave()
+            }
+            if split.panes.contains(where: { $0.id == paneID }) {
+                split.replacePane(id: paneID, with: newPane)
+            } else if let focusedPane = split.focusedPane {
+                await focusedPane.noteModel.flushPendingSave()
+                split.replacePane(id: focusedPane.id, with: newPane)
+            } else {
+                split.insertColumn(with: newPane, at: 0)
+            }
+        case .newColumn(let index):
+            split.insertColumn(with: newPane, at: index)
+        case .stackInColumn(let column, let row):
+            split.stackPane(newPane, inColumn: column, at: row)
         }
 
         screen = .note
+    }
+
+    func handleSplitContainerResize(_ size: CGSize) {
+        lastSplitContainerSize = size
+        guard !split.columns.isEmpty else { return }
+
+        let result = SplitGridPolicy.reclamped(
+            split.gridSnapshot,
+            containerSize: size
+        )
+        guard !result.overflow.isEmpty else {
+            resizeOverflowTask?.cancel()
+            resizeOverflowTask = nil
+            split.applyGrid(result.grid)
+            return
+        }
+
+        resizeOverflowTask?.cancel()
+        resizeOverflowTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+
+            var closedPaneCount = 0
+            while true {
+                guard !Task.isCancelled else { return }
+
+                let result = SplitGridPolicy.reclamped(
+                    self.split.gridSnapshot,
+                    containerSize: self.lastSplitContainerSize
+                )
+                guard !result.overflow.isEmpty else {
+                    self.split.applyGrid(result.grid)
+                    break
+                }
+
+                let overflowPaneIDs = result.overflow.compactMap { index -> UUID? in
+                    guard self.split.columns.indices.contains(index.column),
+                          self.split.columns[index.column].panes.indices.contains(index.row)
+                    else {
+                        return nil
+                    }
+                    return self.split.columns[index.column].panes[index.row].id
+                }
+
+                for paneID in overflowPaneIDs {
+                    guard !Task.isCancelled else { return }
+                    guard let pane = self.split.panes.first(
+                        where: { $0.id == paneID }
+                    ) else {
+                        continue
+                    }
+                    await pane.noteModel.flushPendingSave()
+                    guard !Task.isCancelled else { return }
+                    guard self.split.panes.contains(
+                        where: { $0.id == paneID }
+                    ) else {
+                        continue
+                    }
+                    self.split.removePane(id: paneID)
+                    closedPaneCount += 1
+                }
+            }
+
+            if closedPaneCount > 0 {
+                self.showToast(
+                    "Closed \(closedPaneCount) pane\(closedPaneCount == 1 ? "" : "s") to fit"
+                )
+            }
+            self.resizeOverflowTask = nil
+        }
     }
 
     func closePane(_ paneID: UUID) async {
