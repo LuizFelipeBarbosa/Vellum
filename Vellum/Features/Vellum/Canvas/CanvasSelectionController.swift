@@ -22,6 +22,7 @@ final class CanvasSelectionController {
     private(set) var dragTranslation: CGSize = .zero
     private(set) var strokesSnapshot: UIImage?
     private(set) var handleScale = CGSize(width: 1, height: 1)
+    private(set) var handleAnchor = SelectionResizeMath.centerUnit
     private(set) var handleRotation: Double = 0
     private(set) var isHandleDragging = false
     private(set) var isVertexDragging = false
@@ -335,6 +336,7 @@ final class CanvasSelectionController {
 
         handleDragBounds = bounds
         handleScale = CGSize(width: 1, height: 1)
+        handleAnchor = SelectionResizeMath.centerUnit
         handleRotation = 0
         isHandleDragging = true
         dragTranslation = .zero
@@ -342,9 +344,14 @@ final class CanvasSelectionController {
         hideSelectedStrokes()
     }
 
-    func setHandleTransform(scale: CGSize, rotation: Double) {
+    func setHandleTransform(
+        scale: CGSize,
+        rotation: Double,
+        anchor: CGPoint = SelectionResizeMath.centerUnit
+    ) {
         guard isHandleDragging else { return }
         handleScale = scale
+        handleAnchor = anchor
         handleRotation = rotation
     }
 
@@ -365,26 +372,19 @@ final class CanvasSelectionController {
 
         let scale = clampedScale(handleScale, for: dragBounds)
         let rotation = handleRotation
+        let committedRotation = committedChromeRotation
         guard scale != CGSize(width: 1, height: 1) || rotation != 0 else {
             strokesSnapshot = nil
             resetHandleDrag()
             return
         }
 
-        let center = CGPoint(x: dragBounds.midX, y: dragBounds.midY)
-        // CGAffineTransform uses row-vector concatenation: p * T(-c) * S * R * T(c).
-        // Applying these operations in this order first moves c to zero and finally restores it,
-        // so the selection center is invariant under the scale-and-rotation composite.
-        let composite = CGAffineTransform(
-            translationX: -center.x,
-            y: -center.y
-        )
-        .concatenating(
-            CGAffineTransform(scaleX: scale.width, y: scale.height)
-        )
-        .concatenating(CGAffineTransform(rotationAngle: rotation))
-        .concatenating(
-            CGAffineTransform(translationX: center.x, y: center.y)
+        let composite = SelectionResizeMath.transform(
+            bounds: dragBounds,
+            anchorUnit: handleAnchor,
+            scale: scale,
+            rotationDelta: rotation,
+            committedRotation: committedRotation
         )
 
         elementsStore.performTransaction("Transform Selection") {
@@ -404,6 +404,8 @@ final class CanvasSelectionController {
                     x: element.frame.x + element.frame.width / 2,
                     y: element.frame.y + element.frame.height / 2
                 )
+                // Transform the canvas-space center so a rotated element pins the same visual
+                // anchor as the selection chrome; local-space center math would drift here.
                 let transformedCenter = oldCenter.applying(composite)
                 element.frame.width *= Double(scale.width)
                 element.frame.height *= Double(scale.height)
@@ -441,31 +443,17 @@ final class CanvasSelectionController {
                 y: dragTranslation.height
             )
         }
-        guard let bounds = selectionBounds else { return .identity }
+        guard let bounds = handleDragBounds ?? selectionBounds else { return .identity }
 
-        // Same composition as endHandleDrag, using the raw handle scale so the preview matches
-        // the stroke snapshot; endHandleDrag clamps only when it commits.
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let scale = CGAffineTransform(
-            scaleX: handleScale.width,
-            y: handleScale.height
+        // Use the raw handle scale so the preview matches the stroke snapshot; the overlay
+        // clamps resize-handle input live, while endHandleDrag remains the commit backstop.
+        return SelectionResizeMath.transform(
+            bounds: bounds,
+            anchorUnit: handleAnchor,
+            scale: handleScale,
+            rotationDelta: handleRotation,
+            committedRotation: committedChromeRotation
         )
-        let committedRotation = committedChromeRotation
-        let previewScale: CGAffineTransform
-        if committedRotation != 0 {
-            // The element paints in its own rotated axes, so an asymmetric live resize must use
-            // those axes too or its preview will disagree with the locally sized commit.
-            previewScale = CGAffineTransform(rotationAngle: -committedRotation)
-                .concatenating(scale)
-                .concatenating(CGAffineTransform(rotationAngle: committedRotation))
-        } else {
-            previewScale = scale
-        }
-
-        return CGAffineTransform(translationX: -center.x, y: -center.y)
-            .concatenating(previewScale)
-            .concatenating(CGAffineTransform(rotationAngle: handleRotation))
-            .concatenating(CGAffineTransform(translationX: center.x, y: center.y))
     }
 
     /// The single selected `.shape` polyline element eligible for vertex editing, or nil.
@@ -1138,18 +1126,20 @@ final class CanvasSelectionController {
     }
 
     private func clampedScale(_ scale: CGSize, for bounds: CGRect) -> CGSize {
-        let minimumWidthScale = 12 / bounds.width
-        let minimumHeightScale = 12 / bounds.height
-        let width = scale.width.isFinite ? scale.width : 1
-        let height = scale.height.isFinite ? scale.height : 1
-        return CGSize(
-            width: max(width, minimumWidthScale),
-            height: max(height, minimumHeightScale)
+        let finiteScale = CGSize(
+            width: scale.width.isFinite ? scale.width : 1,
+            height: scale.height.isFinite ? scale.height : 1
+        )
+        return SelectionResizeMath.clampedScale(
+            finiteScale,
+            in: bounds,
+            uniform: false
         )
     }
 
     private func resetHandleDrag() {
         handleScale = CGSize(width: 1, height: 1)
+        handleAnchor = SelectionResizeMath.centerUnit
         handleRotation = 0
         isHandleDragging = false
         handleDragBounds = nil

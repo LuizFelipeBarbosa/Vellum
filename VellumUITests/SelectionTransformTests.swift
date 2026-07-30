@@ -7,7 +7,7 @@ import XCTest
 
 @MainActor
 final class SelectionTransformTests: XCTestCase {
-    func testScaleTwoXKeepsSelectionCenterInvariant() throws {
+    func testPinchScaleTwoXKeepsSelectionCenterInvariant() throws {
         let harness = makeHarness(
             strokes: [
                 makeStroke(
@@ -35,6 +35,37 @@ final class SelectionTransformTests: XCTestCase {
         // geometry transform — allow a few points around the doubled size.
         XCTAssertEqual(selectionBounds.width, originalBounds.width * 2, accuracy: 3)
         XCTAssertEqual(selectionBounds.height, originalBounds.height * 2, accuracy: 3)
+    }
+
+    func testCornerDragScaleTwoXPinsTheOppositeCorner() throws {
+        let element = makeElement(
+            frame: CanvasRect(x: 30, y: 40, width: 60, height: 36)
+        )
+        let harness = makeHarness(strokes: [], elements: [element])
+        select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 120))
+        let originalBounds = try XCTUnwrap(harness.controller.selectionBounds)
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: CGSize(width: 2, height: 2),
+            rotation: 0,
+            anchor: .zero
+        )
+        harness.controller.endHandleDrag()
+
+        let transformedBounds = try XCTUnwrap(harness.controller.selectionBounds)
+        XCTAssertEqual(transformedBounds.minX, originalBounds.minX, accuracy: 0.000_001)
+        XCTAssertEqual(transformedBounds.minY, originalBounds.minY, accuracy: 0.000_001)
+        XCTAssertEqual(
+            transformedBounds.width,
+            originalBounds.width * 2,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformedBounds.height,
+            originalBounds.height * 2,
+            accuracy: 0.000_001
+        )
     }
 
     func testRotationNinetyDegreesUsesVerifiedCompositeOrder() throws {
@@ -140,6 +171,61 @@ final class SelectionTransformTests: XCTestCase {
         XCTAssertEqual(
             shape.strokeWidth,
             originalStrokeWidth * Double(min(scale.width, scale.height)),
+            accuracy: 0.000_001
+        )
+    }
+
+    func testRotatedElementCornerDragPinsTheAnchorInCanvasSpace() throws {
+        let rotation = 0.4
+        let factor: CGFloat = 1.5
+        let element = makeElement(
+            frame: CanvasRect(x: 35, y: 45, width: 80, height: 48),
+            rotation: rotation
+        )
+        let harness = makeHarness(strokes: [], elements: [element])
+        harness.controller.selectElement(id: element.id)
+        let originalFrame = CGRect(
+            x: element.frame.x,
+            y: element.frame.y,
+            width: element.frame.width,
+            height: element.frame.height
+        )
+        let originalAnchor = SelectionResizeMath.point(
+            atUnit: .zero,
+            in: originalFrame,
+            rotation: rotation
+        )
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: CGSize(width: factor, height: factor),
+            rotation: 0,
+            anchor: .zero
+        )
+        harness.controller.endHandleDrag()
+
+        let transformed = try XCTUnwrap(harness.store.elements.first)
+        let transformedFrame = CGRect(
+            x: transformed.frame.x,
+            y: transformed.frame.y,
+            width: transformed.frame.width,
+            height: transformed.frame.height
+        )
+        let transformedAnchor = SelectionResizeMath.point(
+            atUnit: .zero,
+            in: transformedFrame,
+            rotation: rotation
+        )
+        XCTAssertEqual(transformedAnchor.x, originalAnchor.x, accuracy: 0.000_001)
+        XCTAssertEqual(transformedAnchor.y, originalAnchor.y, accuracy: 0.000_001)
+        XCTAssertEqual(
+            transformed.frame.width,
+            element.frame.width * Double(factor),
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformed.frame.height,
+            element.frame.height * Double(factor),
             accuracy: 0.000_001
         )
     }
@@ -294,7 +380,7 @@ final class SelectionTransformTests: XCTestCase {
         )
     }
 
-    func testLiveTransformScalesAboutTheSelectionCenterDuringAHandleDrag() throws {
+    func testLiveTransformScalesAboutTheCenterDuringAPinch() throws {
         let element = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
         let harness = makeHarness(strokes: [], elements: [element])
         select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 120))
@@ -316,6 +402,115 @@ final class SelectionTransformTests: XCTestCase {
         let corner = CGPoint(x: bounds.minX, y: bounds.minY).applying(transform)
         XCTAssertEqual(corner.x, center.x - bounds.width, accuracy: 0.001)
         XCTAssertEqual(corner.y, center.y - bounds.height, accuracy: 0.001)
+    }
+
+    func testLiveTransformPinsTheAnchorDuringAHandleDrag() throws {
+        let element = makeShapeElement(
+            frame: CanvasRect(x: 20, y: 30, width: 60, height: 40)
+        )
+        let harness = makeHarness(strokes: [], elements: [element])
+        harness.controller.selectElement(id: element.id)
+        let bounds = try XCTUnwrap(harness.controller.selectionBounds)
+        let anchor = bounds.origin
+        let oppositeCorner = CGPoint(x: bounds.maxX, y: bounds.maxY)
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: CGSize(width: 2, height: 2),
+            rotation: 0,
+            anchor: .zero
+        )
+
+        let transform = harness.controller.liveTransform(forElementWith: element.id)
+        let transformedAnchor = anchor.applying(transform)
+        XCTAssertEqual(transformedAnchor.x, anchor.x, accuracy: 0.000_001)
+        XCTAssertEqual(transformedAnchor.y, anchor.y, accuracy: 0.000_001)
+
+        let transformedOppositeCorner = oppositeCorner.applying(transform)
+        XCTAssertEqual(
+            transformedOppositeCorner.x,
+            anchor.x + bounds.width * 2,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            transformedOppositeCorner.y,
+            anchor.y + bounds.height * 2,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testPreviewMatchesCommitForARotatedAnchoredDrag() throws {
+        let element = makeShapeElement(
+            frame: CanvasRect(x: 30, y: 40, width: 70, height: 45),
+            rotation: 0.4
+        )
+        let harness = makeHarness(strokes: [], elements: [element])
+        harness.controller.selectElement(id: element.id)
+        let originalCenter = CGPoint(
+            x: element.frame.x + element.frame.width / 2,
+            y: element.frame.y + element.frame.height / 2
+        )
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: CGSize(width: 1.5, height: 1.5),
+            rotation: 0,
+            anchor: .zero
+        )
+        let previewCenter = originalCenter.applying(
+            harness.controller.liveTransform(forElementWith: element.id)
+        )
+        harness.controller.endHandleDrag()
+
+        let transformed = try XCTUnwrap(harness.store.elements.first)
+        let committedCenter = CGPoint(
+            x: transformed.frame.x + transformed.frame.width / 2,
+            y: transformed.frame.y + transformed.frame.height / 2
+        )
+        XCTAssertEqual(previewCenter.x, committedCenter.x, accuracy: 0.000_001)
+        XCTAssertEqual(previewCenter.y, committedCenter.y, accuracy: 0.000_001)
+    }
+
+    func testAnchoredShrinkNeverFlipsAndFloorsAtMinimumExtent() throws {
+        let element = makeElement(
+            frame: CanvasRect(x: 30, y: 40, width: 60, height: 36)
+        )
+        let harness = makeHarness(strokes: [], elements: [element])
+        harness.controller.selectElement(id: element.id)
+        let originalBounds = try XCTUnwrap(harness.controller.selectionBounds)
+        let anchor = originalBounds.origin
+
+        harness.controller.beginHandleDrag()
+        harness.controller.setHandleTransform(
+            scale: CGSize(width: -0.5, height: -0.5),
+            rotation: 0,
+            anchor: .zero
+        )
+        harness.controller.endHandleDrag()
+
+        let transformedBounds = try XCTUnwrap(harness.controller.selectionBounds)
+        XCTAssertGreaterThanOrEqual(
+            transformedBounds.width,
+            SelectionResizeMath.minimumExtent
+        )
+        XCTAssertGreaterThanOrEqual(
+            transformedBounds.height,
+            SelectionResizeMath.minimumExtent
+        )
+        XCTAssertGreaterThan(transformedBounds.width, 0)
+        XCTAssertGreaterThan(transformedBounds.height, 0)
+        XCTAssertEqual(transformedBounds.minX, anchor.x, accuracy: 0.000_001)
+        XCTAssertEqual(transformedBounds.minY, anchor.y, accuracy: 0.000_001)
+        XCTAssertGreaterThan(transformedBounds.maxX, anchor.x)
+        XCTAssertGreaterThan(transformedBounds.maxY, anchor.y)
+    }
+
+    func testHandleAnchorTableMatchesOppositeCorner() {
+        XCTAssertEqual(SelectionHandle.bottomRight.anchorUnit, CGPoint(x: 0, y: 0))
+        XCTAssertEqual(SelectionHandle.topLeft.anchorUnit, CGPoint(x: 1, y: 1))
+        XCTAssertEqual(SelectionHandle.right.anchorUnit, CGPoint(x: 0, y: 0.5))
+        XCTAssertEqual(SelectionHandle.top.anchorUnit, CGPoint(x: 0.5, y: 1))
+        XCTAssertEqual(SelectionHandle.rotation.anchorUnit, CGPoint(x: 0.5, y: 0.5))
     }
 
     func testDraggingAShapeSnapsItToThePageLattice() throws {

@@ -6,27 +6,6 @@ enum SelectionHandleGeometry {
     static let rotationHitSize: CGFloat = 32
     static let rotationOffset: CGFloat = 28
 
-    /// Edge drags follow the chrome's local axes so a rotated element resizes in the direction
-    /// indicated by the handle instead of against the canvas axes.
-    static func edgeResizeFactor(
-        current: CGPoint,
-        center: CGPoint,
-        rotation: Double,
-        axisIsX: Bool,
-        halfExtent: CGFloat
-    ) -> CGFloat {
-        guard halfExtent > 0 else { return 1 }
-
-        let cosine = CGFloat(cos(rotation))
-        let sine = CGFloat(sin(rotation))
-        let deltaX = current.x - center.x
-        let deltaY = current.y - center.y
-        let projection = axisIsX
-            ? deltaX * cosine + deltaY * sine
-            : deltaX * -sine + deltaY * cosine
-        return abs(projection) / halfExtent
-    }
-
     /// Snapping the combined orientation makes cardinal targets reachable from elements that
     /// already have a committed rotation while still returning the live delta the controller owns.
     static func snappedRotation(committed: Double, delta: Double) -> Double {
@@ -45,6 +24,91 @@ enum SelectionHandleGeometry {
             return nearest - committed
         }
         return normalizedTotal - committed
+    }
+}
+
+enum SelectionHandle: CaseIterable, Hashable, Identifiable {
+    case topLeft
+    case top
+    case topRight
+    case left
+    case right
+    case bottomLeft
+    case bottom
+    case bottomRight
+    case rotation
+
+    static let resizeHandles: [SelectionHandle] = [
+        .topLeft,
+        .top,
+        .topRight,
+        .left,
+        .right,
+        .bottomLeft,
+        .bottom,
+        .bottomRight,
+    ]
+
+    var id: Self { self }
+
+    var unitPoint: CGPoint {
+        switch self {
+        case .topLeft:
+            CGPoint(x: 0, y: 0)
+        case .top, .rotation:
+            CGPoint(x: 0.5, y: 0)
+        case .topRight:
+            CGPoint(x: 1, y: 0)
+        case .left:
+            CGPoint(x: 0, y: 0.5)
+        case .right:
+            CGPoint(x: 1, y: 0.5)
+        case .bottomLeft:
+            CGPoint(x: 0, y: 1)
+        case .bottom:
+            CGPoint(x: 0.5, y: 1)
+        case .bottomRight:
+            CGPoint(x: 1, y: 1)
+        }
+    }
+
+    var anchorUnit: CGPoint {
+        switch self {
+        case .rotation:
+            SelectionResizeMath.centerUnit
+        default:
+            SelectionResizeMath.oppositeUnit(of: unitPoint)
+        }
+    }
+
+    func anchorPoint(in bounds: CGRect) -> CGPoint {
+        CGPoint(
+            x: bounds.minX + unitPoint.x * bounds.width,
+            y: bounds.minY + unitPoint.y * bounds.height
+        )
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .topLeft:
+            "Resize handle, top left corner"
+        case .top:
+            "Resize handle, top edge"
+        case .topRight:
+            "Resize handle, top right corner"
+        case .left:
+            "Resize handle, left edge"
+        case .right:
+            "Resize handle, right edge"
+        case .bottomLeft:
+            "Resize handle, bottom left corner"
+        case .bottom:
+            "Resize handle, bottom edge"
+        case .bottomRight:
+            "Resize handle, bottom right corner"
+        case .rotation:
+            "Rotate selection"
+        }
     }
 }
 
@@ -127,24 +191,42 @@ struct SelectionOverlayView: View {
         .accessibilityLabel("Canvas selection area")
     }
 
+    // The geometry effects below do not drive hit testing: both chrome views are non-interactive,
+    // while the handles use real layout positions from livePoint.
     @ViewBuilder
     private func selectionSnapshot(_ snapshot: UIImage, in bounds: CGRect) -> some View {
+        let localBounds = CGRect(origin: .zero, size: bounds.size)
         let framed = Image(uiImage: snapshot)
             .resizable()
             .frame(width: bounds.width, height: bounds.height)
 
         if controller.isHandleDragging {
             framed
-                .scaleEffect(controller.handleScale)
-                // Snapshot pixels already contain the committed rotation — use only the live delta.
-                .rotationEffect(.radians(controller.handleRotation))
+                // Snapshot pixels already contain committed rotation, so use the interaction
+                // transform; chromeTransform would rotate that baked orientation a second time.
+                .transformEffect(
+                    SelectionResizeMath.transform(
+                        bounds: localBounds,
+                        anchorUnit: controller.handleAnchor,
+                        scale: controller.handleScale,
+                        rotationDelta: controller.handleRotation,
+                        committedRotation: controller.committedChromeRotation
+                    )
+                )
                 .position(x: bounds.midX, y: bounds.midY)
                 .opacity(0.9)
                 .allowsHitTesting(false)
         } else {
             framed
-                .scaleEffect(CGSize(width: 1, height: 1))
-                .rotationEffect(.radians(0))
+                .transformEffect(
+                    SelectionResizeMath.transform(
+                        bounds: localBounds,
+                        anchorUnit: SelectionResizeMath.centerUnit,
+                        scale: CGSize(width: 1, height: 1),
+                        rotationDelta: 0,
+                        committedRotation: controller.committedChromeRotation
+                    )
+                )
                 .position(x: bounds.midX, y: bounds.midY)
                 .offset(controller.dragTranslation)
                 .opacity(0.9)
@@ -154,8 +236,7 @@ struct SelectionOverlayView: View {
 
     @ViewBuilder
     private func selectionOutline(in bounds: CGRect) -> some View {
-        let rotation = controller.committedChromeRotation
-            + (controller.isHandleDragging ? controller.handleRotation : 0)
+        let localBounds = CGRect(origin: .zero, size: bounds.size)
         let framed = RoundedRectangle(cornerRadius: 8)
             .stroke(
                 VellumTheme.accentDark,
@@ -165,14 +246,30 @@ struct SelectionOverlayView: View {
 
         if controller.isHandleDragging {
             framed
-                .scaleEffect(controller.handleScale)
-                .rotationEffect(.radians(rotation))
+                // The outline starts unrotated, unlike the snapshot, so chromeTransform supplies
+                // both the committed orientation and the shared anchored interaction transform.
+                .transformEffect(
+                    SelectionResizeMath.chromeTransform(
+                        bounds: localBounds,
+                        anchorUnit: controller.handleAnchor,
+                        scale: controller.handleScale,
+                        rotationDelta: controller.handleRotation,
+                        committedRotation: controller.committedChromeRotation
+                    )
+                )
                 .position(x: bounds.midX, y: bounds.midY)
                 .allowsHitTesting(false)
         } else {
             framed
-                .scaleEffect(CGSize(width: 1, height: 1))
-                .rotationEffect(.radians(rotation))
+                .transformEffect(
+                    SelectionResizeMath.chromeTransform(
+                        bounds: localBounds,
+                        anchorUnit: SelectionResizeMath.centerUnit,
+                        scale: CGSize(width: 1, height: 1),
+                        rotationDelta: 0,
+                        committedRotation: controller.committedChromeRotation
+                    )
+                )
                 .position(x: bounds.midX, y: bounds.midY)
                 .offset(controller.dragTranslation)
                 .allowsHitTesting(false)
@@ -324,7 +421,8 @@ struct SelectionOverlayView: View {
                 )
                 controller.setHandleTransform(
                     scale: transform.scale,
-                    rotation: transform.rotation
+                    rotation: transform.rotation,
+                    anchor: transform.anchor
                 )
             }
             .onEnded { _ in
@@ -339,42 +437,62 @@ struct SelectionOverlayView: View {
         bounds: CGRect,
         start: CGPoint,
         current: CGPoint
-    ) -> (scale: CGSize, rotation: Double) {
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+    ) -> (scale: CGSize, rotation: Double, anchor: CGPoint) {
+        let committedRotation = controller.committedChromeRotation
 
         switch handle {
         case .topLeft, .topRight, .bottomLeft, .bottomRight:
-            let original = handle.anchorPoint(in: bounds)
-            let originalDistance = hypot(original.x - center.x, original.y - center.y)
-            let currentDistance = hypot(current.x - center.x, current.y - center.y)
-            let factor = originalDistance > 0 ? currentDistance / originalDistance : 1
-            return (CGSize(width: factor, height: factor), 0)
+            let factor = SelectionResizeMath.cornerFactor(
+                handleUnit: handle.unitPoint,
+                anchorUnit: handle.anchorUnit,
+                bounds: bounds,
+                rotation: committedRotation,
+                current: current
+            )
+            let scale = SelectionResizeMath.clampedScale(
+                CGSize(width: factor, height: factor),
+                in: bounds,
+                uniform: true
+            )
+            return (scale, 0, handle.anchorUnit)
         case .left, .right:
-            let halfWidth = bounds.width / 2
-            let factor = SelectionHandleGeometry.edgeResizeFactor(
+            let factor = SelectionResizeMath.edgeFactor(
+                handleUnit: handle.unitPoint,
+                anchorUnit: handle.anchorUnit,
+                bounds: bounds,
+                rotation: committedRotation,
                 current: current,
-                center: center,
-                rotation: controller.committedChromeRotation,
-                axisIsX: true,
-                halfExtent: halfWidth
+                axisIsX: true
             )
-            return (CGSize(width: factor, height: 1), 0)
+            let scale = SelectionResizeMath.clampedScale(
+                CGSize(width: factor, height: 1),
+                in: bounds,
+                uniform: false
+            )
+            return (scale, 0, handle.anchorUnit)
         case .top, .bottom:
-            let halfHeight = bounds.height / 2
-            let factor = SelectionHandleGeometry.edgeResizeFactor(
+            let factor = SelectionResizeMath.edgeFactor(
+                handleUnit: handle.unitPoint,
+                anchorUnit: handle.anchorUnit,
+                bounds: bounds,
+                rotation: committedRotation,
                 current: current,
-                center: center,
-                rotation: controller.committedChromeRotation,
-                axisIsX: false,
-                halfExtent: halfHeight
+                axisIsX: false
             )
-            return (CGSize(width: 1, height: factor), 0)
+            let scale = SelectionResizeMath.clampedScale(
+                CGSize(width: 1, height: factor),
+                in: bounds,
+                uniform: false
+            )
+            return (scale, 0, handle.anchorUnit)
         case .rotation:
+            let center = CGPoint(x: bounds.midX, y: bounds.midY)
             let startAngle = atan2(start.y - center.y, start.x - center.x)
             let currentAngle = atan2(current.y - center.y, current.x - center.x)
             return (
                 CGSize(width: 1, height: 1),
-                snappedRotation(Double(currentAngle - startAngle))
+                snappedRotation(Double(currentAngle - startAngle)),
+                SelectionResizeMath.centerUnit
             )
         }
     }
@@ -387,117 +505,37 @@ struct SelectionOverlayView: View {
     }
 
     private func livePoint(for handle: SelectionHandle, in bounds: CGRect) -> CGPoint {
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let scale = controller.isHandleDragging
+        let isDragging = controller.isHandleDragging
+        let scale = isDragging
             ? controller.handleScale
             : CGSize(width: 1, height: 1)
-        let rotation = controller.committedChromeRotation
-            + (controller.isHandleDragging ? controller.handleRotation : 0)
-
-        let topPoint = transformed(
-            SelectionHandle.top.anchorPoint(in: bounds),
-            around: center,
-            scale: scale,
-            rotation: rotation
+        let anchorUnit = isDragging
+            ? controller.handleAnchor
+            : SelectionResizeMath.centerUnit
+        let rotationDelta = isDragging ? controller.handleRotation : 0
+        let committedRotation = controller.committedChromeRotation
+        let transformedPoint = SelectionResizeMath.point(
+            atUnit: handle.unitPoint,
+            in: bounds,
+            rotation: 0
+        ).applying(
+            SelectionResizeMath.chromeTransform(
+                bounds: bounds,
+                anchorUnit: anchorUnit,
+                scale: scale,
+                rotationDelta: rotationDelta,
+                committedRotation: committedRotation
+            )
         )
         if handle == .rotation {
+            let rotation = committedRotation + rotationDelta
             return CGPoint(
-                x: topPoint.x
+                x: transformedPoint.x
                     + CGFloat(sin(rotation)) * SelectionHandleGeometry.rotationOffset,
-                y: topPoint.y
+                y: transformedPoint.y
                     - CGFloat(cos(rotation)) * SelectionHandleGeometry.rotationOffset
             )
         }
-        return transformed(
-            handle.anchorPoint(in: bounds),
-            around: center,
-            scale: scale,
-            rotation: rotation
-        )
-    }
-
-    private func transformed(
-        _ point: CGPoint,
-        around center: CGPoint,
-        scale: CGSize,
-        rotation: Double
-    ) -> CGPoint {
-        let scaledX = (point.x - center.x) * scale.width
-        let scaledY = (point.y - center.y) * scale.height
-        let cosine = CGFloat(cos(rotation))
-        let sine = CGFloat(sin(rotation))
-        return CGPoint(
-            x: center.x + scaledX * cosine - scaledY * sine,
-            y: center.y + scaledX * sine + scaledY * cosine
-        )
-    }
-
-    private enum SelectionHandle: CaseIterable, Hashable, Identifiable {
-        case topLeft
-        case top
-        case topRight
-        case left
-        case right
-        case bottomLeft
-        case bottom
-        case bottomRight
-        case rotation
-
-        static let resizeHandles: [SelectionHandle] = [
-            .topLeft,
-            .top,
-            .topRight,
-            .left,
-            .right,
-            .bottomLeft,
-            .bottom,
-            .bottomRight,
-        ]
-
-        var id: Self { self }
-
-        func anchorPoint(in bounds: CGRect) -> CGPoint {
-            switch self {
-            case .topLeft:
-                CGPoint(x: bounds.minX, y: bounds.minY)
-            case .top, .rotation:
-                CGPoint(x: bounds.midX, y: bounds.minY)
-            case .topRight:
-                CGPoint(x: bounds.maxX, y: bounds.minY)
-            case .left:
-                CGPoint(x: bounds.minX, y: bounds.midY)
-            case .right:
-                CGPoint(x: bounds.maxX, y: bounds.midY)
-            case .bottomLeft:
-                CGPoint(x: bounds.minX, y: bounds.maxY)
-            case .bottom:
-                CGPoint(x: bounds.midX, y: bounds.maxY)
-            case .bottomRight:
-                CGPoint(x: bounds.maxX, y: bounds.maxY)
-            }
-        }
-
-        var accessibilityLabel: String {
-            switch self {
-            case .topLeft:
-                "Resize handle, top left corner"
-            case .top:
-                "Resize handle, top edge"
-            case .topRight:
-                "Resize handle, top right corner"
-            case .left:
-                "Resize handle, left edge"
-            case .right:
-                "Resize handle, right edge"
-            case .bottomLeft:
-                "Resize handle, bottom left corner"
-            case .bottom:
-                "Resize handle, bottom edge"
-            case .bottomRight:
-                "Resize handle, bottom right corner"
-            case .rotation:
-                "Rotate selection"
-            }
-        }
+        return transformedPoint
     }
 }
