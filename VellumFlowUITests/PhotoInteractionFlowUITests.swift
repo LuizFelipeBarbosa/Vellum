@@ -146,6 +146,83 @@ final class PhotoInteractionFlowUITests: XCTestCase {
         assertResizeHandlesAppear(in: app)
     }
 
+    func testCornerDragPinsTheOppositeHandleInScreenSpace() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        ShapeFlowTestHelpers.openSiteNotes(in: app)
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 5), "app window not found")
+
+        let photoCenter = try seedPhoto(in: app, window: window)
+        let handlesBefore = assertResizeHandlesAppear(in: app)
+        let topLeftBefore = CGPoint(
+            x: handlesBefore.topLeft.frame.midX,
+            y: handlesBefore.topLeft.frame.midY
+        )
+        let bottomRightFrameBefore = handlesBefore.bottomRight.frame
+        let bottomRightBefore = CGPoint(
+            x: bottomRightFrameBefore.midX,
+            y: bottomRightFrameBefore.midY
+        )
+
+        let pressPoint = handlesBefore.bottomRight.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        )
+        pressPoint.press(
+            forDuration: 0.05,
+            thenDragTo: pressPoint.withOffset(CGVector(dx: 80, dy: 80))
+        )
+
+        let resized = expectation(
+            for: NSPredicate(
+                format: "frame != %@",
+                NSValue(cgRect: bottomRightFrameBefore)
+            ),
+            evaluatedWith: handlesBefore.bottomRight
+        )
+        wait(for: [resized], timeout: 5)
+
+        let handlesAfter = assertResizeHandlesAppear(in: app)
+        let topLeftAfter = CGPoint(
+            x: handlesAfter.topLeft.frame.midX,
+            y: handlesAfter.topLeft.frame.midY
+        )
+        let bottomRightAfter = CGPoint(
+            x: handlesAfter.bottomRight.frame.midX,
+            y: handlesAfter.bottomRight.frame.midY
+        )
+
+        XCTAssertEqual(
+            topLeftAfter.x,
+            topLeftBefore.x,
+            accuracy: 3,
+            "the anchor (top-left) handle moved horizontally during a bottom-right corner drag; expected it to stay fixed"
+        )
+        XCTAssertEqual(
+            topLeftAfter.y,
+            topLeftBefore.y,
+            accuracy: 3,
+            "the anchor (top-left) handle moved vertically during a bottom-right corner drag; expected it to stay fixed"
+        )
+        XCTAssertGreaterThan(
+            bottomRightAfter.x - bottomRightBefore.x,
+            50,
+            "the dragged bottom-right handle did not move outward by the expected horizontal amount"
+        )
+        XCTAssertGreaterThan(
+            bottomRightAfter.y - bottomRightBefore.y,
+            50,
+            "the dragged bottom-right handle did not move outward by the expected vertical amount"
+        )
+
+        ShapeFlowTestHelpers.clearElement(
+            at: photoCenter,
+            in: app,
+            window: window
+        )
+    }
+
     private func seedPhoto(
         in app: XCUIApplication,
         window: XCUIElement

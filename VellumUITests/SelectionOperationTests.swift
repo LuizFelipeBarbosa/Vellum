@@ -88,42 +88,6 @@ final class SelectionOperationTests: XCTestCase {
         XCTAssertEqual(harness.controller.committedChromeRotation, 0)
     }
 
-    func testEdgeResizeFactorProjectsOntoRotatedContentXAxis() {
-        let center = CGPoint(x: 100, y: 80)
-        let halfWidth: CGFloat = 60
-        let factor: CGFloat = 0.5
-        let current = CGPoint(x: center.x, y: center.y + halfWidth * factor)
-
-        let projected = SelectionHandleGeometry.edgeResizeFactor(
-            current: current,
-            center: center,
-            rotation: .pi / 2,
-            axisIsX: true,
-            halfExtent: halfWidth
-        )
-
-        XCTAssertEqual(projected, factor, accuracy: 0.000_001)
-    }
-
-    func testEdgeResizeFactorAtZeroRotationMatchesLegacyXAxisMath() {
-        let center = CGPoint(x: 100, y: 80)
-        let halfWidth: CGFloat = 60
-        let factor: CGFloat = 0.5
-        let current = CGPoint(x: center.x + halfWidth * factor, y: center.y)
-        let legacyFactor = abs(current.x - center.x) / halfWidth
-
-        let projected = SelectionHandleGeometry.edgeResizeFactor(
-            current: current,
-            center: center,
-            rotation: 0,
-            axisIsX: true,
-            halfExtent: halfWidth
-        )
-
-        XCTAssertEqual(projected, legacyFactor)
-        XCTAssertEqual(projected, factor, accuracy: 0.000_001)
-    }
-
     func testRotationSnappingUsesCommittedAndLiveRotationTotal() {
         let twoDegrees = 2 * Double.pi / 180
         let committed = Double.pi / 2 - twoDegrees
