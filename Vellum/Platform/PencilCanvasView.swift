@@ -43,6 +43,9 @@ struct CanvasViewport: Equatable, Sendable {
 }
 
 final class PagedCanvasView: PKCanvasView {
+    var paneUndoManager: UndoManager?
+    override var undoManager: UndoManager? { paneUndoManager ?? super.undoManager }
+
     let haptics = CanvasHaptics()
     private(set) var isAnimatingZoomSnap = false
     private var zoomSnapDisplayLink: CADisplayLink?
@@ -264,6 +267,7 @@ struct PencilCanvasView: UIViewRepresentable {
     var tool: (any PKTool)? = nil
     var showsSystemToolPicker: Bool = true
     var onCanvasReady: ((PKCanvasView) -> Void)? = nil
+    var paneUndoManager: UndoManager? = nil
     var isDrawingEnabled: Bool = true
     // Placeholder overridden by NoteScreenView from NotePageState.
     var contentHeight: CGFloat = PageGeometry.a4.pageHeight
@@ -293,6 +297,7 @@ struct PencilCanvasView: UIViewRepresentable {
             canvasView.contentHeightInContentSpace = contentHeight
             canvasView.topContentInset = topContentInset
             canvasView.delegate = context.coordinator
+            canvasView.paneUndoManager = paneUndoManager
 #if targetEnvironment(simulator)
             #if DEBUG
             canvasView.drawingPolicy = ProcessInfo.processInfo.arguments.contains("-vellum-force-pencil-only")
@@ -362,6 +367,7 @@ struct PencilCanvasView: UIViewRepresentable {
             context.coordinator.onPencilSqueeze = onPencilSqueeze
             context.coordinator.onTwoFingerTap = onTwoFingerTap
             context.coordinator.onThreeFingerTap = onThreeFingerTap
+            (canvasView as? PagedCanvasView)?.paneUndoManager = paneUndoManager
             canvasView.backgroundColor = isTransparent ? .clear : .white
             canvasView.isOpaque = !isTransparent
             canvasView.drawingGestureRecognizer.isEnabled = isDrawingEnabled

@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import SwiftUI
 
@@ -10,6 +11,18 @@ struct VellumRootView: View {
     }
 
     var body: some View {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-vellum-split-spike") {
+            SplitSpikeView()
+        } else {
+            normalContent
+        }
+#else
+        normalContent
+#endif
+    }
+
+    private var normalContent: some View {
         ZStack(alignment: .bottom) {
             VellumTheme.paper.ignoresSafeArea()
 
@@ -25,12 +38,7 @@ struct VellumRootView: View {
                     case .library:
                         VellumLibraryView(model: model)
                     case .note:
-                        if let noteModel = model.currentNote {
-                            NoteScreenView(model: noteModel, app: model)
-                        } else {
-                            ProgressView("Loading note…")
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
+                        NoteSplitContainerView(app: model)
                     case .graph:
                         VellumGraphView(model: model)
                     case .ask:
@@ -75,7 +83,7 @@ struct VellumRootView: View {
         .task { await model.bootstrap() }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .inactive || newPhase == .background {
-                Task { await model.currentNote?.flushPendingSave() }
+                Task { await model.split.flushAll() }
             }
             if newPhase == .background {
                 model.toolPreferences.flush()

@@ -5,7 +5,12 @@ import VellumCore
 
 enum AppScreen: Hashable {
     case library, graph, ask, trash
-    case note(UUID?)
+    case note
+}
+
+enum PanePlacement {
+    case replaceFocused
+    case newPane(at: Int?)
 }
 
 struct Toast: Equatable, Identifiable {
@@ -26,6 +31,7 @@ final class VellumAppModel {
     let askScreen: AskScreenModel
     let trashScreen: TrashScreenModel
     let toolPreferences: ToolPreferencesStore
+    let split = NoteSplitState()
     var appearanceMode: AppearanceMode {
         didSet {
             UserDefaults.standard.set(appearanceMode.rawValue, forKey: "vellum.appearanceMode")
@@ -41,7 +47,7 @@ final class VellumAppModel {
             }
         }
     }
-    var currentNote: NoteScreenModel?
+    var currentNote: NoteScreenModel? { split.focusedPane?.noteModel }
     var toast: Toast?
     var showAgent = true
     var noteCount = 0
@@ -58,6 +64,7 @@ final class VellumAppModel {
     #if DEBUG
     private let debugAskQuestion: String?
     private let debugAutoOpenMostRecentNote: Bool
+    private let debugSplitPaneCount: Int?
     #endif
 
     init(
@@ -82,12 +89,19 @@ final class VellumAppModel {
             debugAskQuestion = nil
         }
         debugAutoOpenMostRecentNote = arguments.contains("-vellum-auto-open-note")
+        if let flagIndex = arguments.firstIndex(of: "-vellum-split-panes"),
+           arguments.indices.contains(flagIndex + 1),
+           let count = Int(arguments[flagIndex + 1]) {
+            debugSplitPaneCount = count
+        } else {
+            debugSplitPaneCount = nil
+        }
         #endif
         if let flagIndex = arguments.firstIndex(of: "-prototypeStartView"),
            arguments.indices.contains(flagIndex + 1) {
             screen = switch arguments[flagIndex + 1] {
             case "library": .library
-            case "canvas": .note(nil)
+            case "canvas": .note
             case "graph": .graph
             case "ask": .ask
             default: .library
@@ -104,7 +118,7 @@ final class VellumAppModel {
         await library.refresh()
         await graphScreen.refresh()
 
-        if case .note(nil) = screen {
+        if case .note = screen {
             if let noteID = library.summaries.first?.id {
                 await openNote(noteID)
             } else {
@@ -113,7 +127,18 @@ final class VellumAppModel {
         }
 
         #if DEBUG
-        if debugAutoOpenMostRecentNote,
+        if let debugSplitPaneCount, debugSplitPaneCount > 0 {
+            let notes = library.summaries.sorted { $0.updatedAt > $1.updatedAt }
+            if let mostRecentNote = notes.first {
+                await openNote(mostRecentNote.id)
+            }
+            for note in notes.dropFirst().prefix(debugSplitPaneCount - 1) {
+                await openNote(note.id, placement: .newPane(at: nil))
+            }
+        }
+
+        if debugSplitPaneCount == nil,
+           debugAutoOpenMostRecentNote,
            let note = library.summaries.max(by: { $0.updatedAt < $1.updatedAt }) {
             await openNote(note.id)
         }
@@ -161,24 +186,21 @@ final class VellumAppModel {
     }
 
     func navigate(to newScreen: AppScreen) async {
-        if case .note(let requestedID) = newScreen {
-            if let requestedID {
-                await openNote(requestedID)
-            } else if let firstNoteID = library.summaries.first?.id {
-                await openNote(firstNoteID)
-            } else {
-                if case .note = screen {
-                    await currentNote?.flushPendingSave()
-                    currentNote = nil
+        if newScreen == .note {
+            if split.panes.isEmpty {
+                if let firstNoteID = library.summaries.first?.id {
+                    await openNote(firstNoteID)
+                } else {
+                    screen = .library
                 }
-                screen = .library
+            } else {
+                screen = .note
             }
             return
         }
 
         if case .note = screen {
-            await currentNote?.flushPendingSave()
-            currentNote = nil
+            await split.closeAll()
         }
 
         if screen != newScreen {
@@ -192,7 +214,11 @@ final class VellumAppModel {
         }
     }
 
-    func openNote(_ id: UUID, isNewlyCreated: Bool = false) async {
+    func openNote(
+        _ id: UUID,
+        isNewlyCreated: Bool = false,
+        placement: PanePlacement = .replaceFocused
+    ) async {
         do {
             let note = try await container.workspace.loadNote(id: id)
             if note.isTrashed {
@@ -204,8 +230,11 @@ final class VellumAppModel {
             return
         }
 
-        await currentNote?.flushPendingSave()
-        currentNote = nil
+        if let existingPane = split.pane(for: id) {
+            split.focus(existingPane.id)
+            screen = .note
+            return
+        }
 
         let noteModel = NoteScreenModel(
             noteID: id,
@@ -219,15 +248,45 @@ final class VellumAppModel {
                 }
             }
         )
-        currentNote = noteModel
-        screen = .note(id)
+        let newPane = NotePane(noteModel: noteModel)
+
+        switch placement {
+        case .replaceFocused:
+            if let focusedPane = split.focusedPane {
+                await focusedPane.noteModel.flushPendingSave()
+                split.replacePane(id: focusedPane.id, with: newPane)
+            } else {
+                split.insertPane(newPane, at: 0)
+            }
+        case .newPane(let index):
+            split.insertPane(newPane, at: index)
+        }
+
+        screen = .note
     }
 
-    func deleteCurrentNote(id: UUID) async throws {
-        await currentNote?.flushPendingSave()
+    func closePane(_ paneID: UUID) async {
+        if let pane = split.panes.first(where: { $0.id == paneID }) {
+            await pane.noteModel.flushPendingSave()
+        }
+        split.removePane(id: paneID)
+        if split.panes.isEmpty {
+            await navigate(to: .library)
+        }
+    }
+
+    func deleteNote(id: UUID) async throws {
+        let pane = split.pane(for: id)
+        if let pane {
+            await pane.noteModel.flushPendingSave()
+        }
         try await container.workspace.deleteNote(id: id)
-        currentNote = nil
-        await navigate(to: .library)
+        if let pane {
+            split.removePane(id: pane.id)
+        }
+        if split.panes.isEmpty {
+            await navigate(to: .library)
+        }
         await library.refresh()
         await refreshStats()
         notifyTrashed([id])

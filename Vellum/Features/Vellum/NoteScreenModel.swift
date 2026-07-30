@@ -70,6 +70,8 @@ final class NoteScreenModel {
     var noteEntities: [Entity] = []
     var isShowingSuggestions = false
     var isShowingBackgroundChooser = false
+    var isShowingPhotosPicker = false
+    var isShowingFileImporter = false
     var selectedEntity: Entity?
     var noteTitles: [UUID: String] = [:]
     var onScrollToPage: ((Int) -> Void)?
