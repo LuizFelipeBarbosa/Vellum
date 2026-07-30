@@ -76,6 +76,7 @@ struct NoteSplitSidebarView: View {
                 .stroke(VellumTheme.ink(0.14), lineWidth: 1)
         }
         .shadow(color: VellumTheme.ink(0.18), radius: 18, x: -4, y: 12)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("vellum-note-sidebar")
         .task {
             await app.library.refresh()

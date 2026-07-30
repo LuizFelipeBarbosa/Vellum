@@ -91,7 +91,10 @@ struct NoteScreenView: View {
                     onClusterFrames: {
                         leftClusterFrame = $0
                         rightClusterFrame = $1
-                    }
+                    },
+                    isCompact: paneContext.map {
+                        $0.paneWidth < PaneChromeThresholds.fullHeaderMinWidth
+                    } ?? false
                 )
 
                 if !model.noteEntities.isEmpty && showsEntityChips {

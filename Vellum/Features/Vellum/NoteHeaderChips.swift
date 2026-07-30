@@ -9,6 +9,8 @@ struct NoteHeaderChips: View {
     var onConfirmDelete: () -> Void
     var onExport: (NoteExporter.Format) -> Void
     var onClusterFrames: ((_ leading: CGRect, _ trailing: CGRect) -> Void)? = nil
+    // Narrow split panes cannot fit the trailing cluster; it overflows the pane bounds.
+    var isCompact: Bool = false
 
     @FocusState private var isTitleFocused: Bool
     @State private var reportedLeadingFrame: CGRect?
@@ -28,15 +30,17 @@ struct NoteHeaderChips: View {
 
             Spacer()
 
-            rightCluster
-                .onGeometryChange(
-                    for: CGRect.self,
-                    of: { $0.frame(in: .global) },
-                    action: { frame in
-                        reportedTrailingFrame = frame
-                        notifyClusterFramesIfNeeded()
-                    }
-                )
+            if !isCompact {
+                rightCluster
+                    .onGeometryChange(
+                        for: CGRect.self,
+                        of: { $0.frame(in: .global) },
+                        action: { frame in
+                            reportedTrailingFrame = frame
+                            notifyClusterFramesIfNeeded()
+                        }
+                    )
+            }
         }
     }
 
@@ -243,8 +247,12 @@ struct NoteHeaderChips: View {
     }
 
     private func notifyClusterFramesIfNeeded() {
-        guard let leading = reportedLeadingFrame,
-              let trailing = reportedTrailingFrame else { return }
+        guard let leading = reportedLeadingFrame else { return }
+        if isCompact {
+            onClusterFrames?(leading, .zero)
+            return
+        }
+        guard let trailing = reportedTrailingFrame else { return }
         onClusterFrames?(leading, trailing)
     }
 }

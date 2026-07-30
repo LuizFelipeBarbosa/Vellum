@@ -89,6 +89,7 @@ struct NoteSplitContainerView: View {
                                 )
                             )
                             .frame(width: paneWidths[index])
+                            .clipped()
                         }
                     }
                     .frame(
