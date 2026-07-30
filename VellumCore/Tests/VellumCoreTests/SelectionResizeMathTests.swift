@@ -398,6 +398,54 @@ struct SelectionResizeMathTests {
         )
     }
 
+    @Test("A selection thinner than the minimum extent is never inflated by the floor")
+    func clampedScaleNeverInflatesASubMinimumExtent() {
+        // 8pt is what `ShapeElementBuilder` floors a flat shape's frame to, and a thin stroke's
+        // render bounds can be thinner still — both sit below `minimumExtent`.
+        let thinBounds = CGRect(x: 0, y: 0, width: 100, height: 8)
+
+        for uniform in [true, false] {
+            let resting = SelectionResizeMath.clampedScale(
+                CGSize(width: 1, height: 1),
+                in: thinBounds,
+                uniform: uniform
+            )
+            expectPoint(
+                CGPoint(x: resting.width, y: resting.height),
+                equal: CGPoint(x: 1, y: 1),
+                accuracy: mathAccuracy
+            )
+        }
+
+        // The axis with room still floors at the minimum; the thin axis holds at 1, so it neither
+        // shrinks past the floor nor grows to reach it.
+        let shrunk = SelectionResizeMath.clampedScale(
+            CGSize(width: 0.5, height: 0.5),
+            in: thinBounds,
+            uniform: false
+        )
+        expectScalar(shrunk.width, equal: 0.5, accuracy: mathAccuracy)
+        expectScalar(shrunk.height, equal: 1, accuracy: mathAccuracy)
+    }
+
+    @Test("Degenerate bounds floor the scale at 1 rather than infinity")
+    func clampedScaleHandlesDegenerateBounds() {
+        let empty = CGRect(x: 20, y: 30, width: 0, height: 0)
+
+        for uniform in [true, false] {
+            let clamped = SelectionResizeMath.clampedScale(
+                CGSize(width: 1, height: 1),
+                in: empty,
+                uniform: uniform
+            )
+            expectPoint(
+                CGPoint(x: clamped.width, y: clamped.height),
+                equal: CGPoint(x: 1, y: 1),
+                accuracy: mathAccuracy
+            )
+        }
+    }
+
     private func expectScalar(
         _ actual: CGFloat,
         equal expected: CGFloat,

@@ -70,13 +70,16 @@ public enum SelectionResizeMath {
     }
 
     /// A shared floor for uniform scaling prevents a corner drag from changing aspect at the limit.
+    /// Capping each floor at 1 keeps it a floor: a selection already thinner than `minimumExtent`
+    /// must be left alone rather than inflated up to it, and a degenerate extent yields 1 instead
+    /// of infinity.
     public static func clampedScale(
         _ scale: CGSize,
         in bounds: CGRect,
         uniform: Bool
     ) -> CGSize {
-        let minimumXScale = minimumExtent / bounds.width
-        let minimumYScale = minimumExtent / bounds.height
+        let minimumXScale = min(1, minimumExtent / bounds.width)
+        let minimumYScale = min(1, minimumExtent / bounds.height)
         if uniform {
             let minimumScale = max(minimumXScale, minimumYScale)
             return CGSize(
