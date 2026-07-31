@@ -42,6 +42,198 @@ final class SplitPaneFlowUITests: XCTestCase {
         XCTAssertEqual(focused.row, 0, "state: \(state)")
     }
 
+    func testTapPaneCanvasFocusesThatPane() {
+        let context = launchApp(splitPaneCount: 2)
+        let initialState = waitForState(context.stateElement) { state in
+            guard state["panes"] == "2",
+                  state["columns"] == "2",
+                  let focused = self.focusedIndex(from: state) else {
+                return false
+            }
+            return (0...1).contains(focused.column) && focused.row == 0
+        }
+        guard let initialFocused = focusedIndex(from: initialState) else {
+            return XCTFail("focused pane index is invalid: \(initialState)")
+        }
+        let targetColumn = initialFocused.column == 0 ? 1 : 0
+
+        let selectButton = context.app.buttons["Select"]
+        guard selectButton.waitForExistence(timeout: 10) else {
+            return XCTFail(
+                "Select tool button not found, state: "
+                    + stateString(of: context.stateElement)
+            )
+        }
+        tapByCoordinate(selectButton)
+        XCTAssertTrue(
+            waitUntil(timeout: 5) { selectButton.isSelected },
+            "Select tool did not become selected, state: "
+                + stateString(of: context.stateElement)
+        )
+
+        let initialGrid = grid(from: initialState)
+        guard initialGrid.count == 2,
+              initialGrid.allSatisfy({ $0.rows.count == 1 }),
+              initialGrid.indices.contains(targetColumn),
+              let containerSize = containerSize(from: initialState) else {
+            return XCTFail("two-column grid geometry is invalid: \(initialState)")
+        }
+
+        let containerOrigin = context.stateElement.frame.origin
+        let targetColumnStartFraction = initialGrid
+            .prefix(targetColumn)
+            .reduce(0.0) { $0 + $1.width }
+        let targetColumnWidthFraction = initialGrid[targetColumn].width
+        let targetRowHeightFraction = initialGrid[targetColumn].rows[0]
+        let targetPaneFrame = CGRect(
+            x: containerOrigin.x
+                + CGFloat(targetColumnStartFraction) * containerSize.width,
+            y: containerOrigin.y,
+            width: CGFloat(targetColumnWidthFraction) * containerSize.width,
+            height: CGFloat(targetRowHeightFraction) * containerSize.height
+        )
+
+        let closeButtons = matchingButtons(
+            labeled: "Close pane",
+            in: context.app,
+            expectedCount: 2
+        )
+        let targetPaneTopTrailingCorner = CGPoint(
+            x: targetPaneFrame.maxX,
+            y: targetPaneFrame.minY
+        )
+        guard let targetCloseButton = closeButtons.min(by: { first, second in
+            hypot(
+                first.frame.midX - targetPaneTopTrailingCorner.x,
+                first.frame.midY - targetPaneTopTrailingCorner.y
+            ) < hypot(
+                second.frame.midX - targetPaneTopTrailingCorner.x,
+                second.frame.midY - targetPaneTopTrailingCorner.y
+            )
+        }), targetCloseButton.frame.intersects(targetPaneFrame) else {
+            return XCTFail(
+                "target pane Close pane button not found, state: \(initialState)"
+            )
+        }
+        let closeButtonExclusion = targetCloseButton.frame.insetBy(
+            dx: -24,
+            dy: -24
+        )
+
+        let toolbarButtons = [
+            context.app.buttons["Pen"],
+            context.app.buttons["Select"],
+            context.app.buttons["Undo"],
+            context.app.buttons["Redo"],
+        ]
+        guard toolbarButtons.allSatisfy({
+            $0.waitForExistence(timeout: 5)
+        }) else {
+            return XCTFail(
+                "shared toolbar buttons were not all available, state: "
+                    + stateString(of: context.stateElement)
+            )
+        }
+        let toolbarFrame = toolbarButtons.reduce(CGRect.null) {
+            $0.union($1.frame)
+        }
+        let toolbarExclusion = toolbarFrame.insetBy(dx: -24, dy: -24)
+
+        let paneEdgeInset: CGFloat = 40
+        let headerExclusionHeight = targetPaneFrame.height * 0.20
+        let headerExclusion = CGRect(
+            x: targetPaneFrame.minX,
+            y: targetPaneFrame.minY,
+            width: targetPaneFrame.width,
+            height: headerExclusionHeight
+        )
+        let backlinksRailMinimumWidth: CGFloat = 560
+        let backlinksRailMinimumHeight: CGFloat = 500
+        let backlinksRailDefensiveWidth: CGFloat = 200
+        let shouldAvoidBacklinksRail =
+            targetPaneFrame.width >= backlinksRailMinimumWidth
+                && targetPaneFrame.height >= backlinksRailMinimumHeight
+        let safeMinimumX = targetPaneFrame.minX + paneEdgeInset
+        let safeMaximumX = targetPaneFrame.maxX
+            - paneEdgeInset
+            - (shouldAvoidBacklinksRail ? backlinksRailDefensiveWidth : 0)
+        guard safeMaximumX > safeMinimumX else {
+            return XCTFail(
+                "target pane has no safe horizontal canvas band, state: \(initialState)"
+            )
+        }
+
+        let centeredCanvasX = min(
+            max(targetPaneFrame.midX, safeMinimumX),
+            safeMaximumX
+        )
+        let horizontalCandidates = [
+            centeredCanvasX,
+            min(
+                max(
+                    targetPaneFrame.minX + targetPaneFrame.width * 0.38,
+                    safeMinimumX
+                ),
+                safeMaximumX
+            ),
+            min(
+                max(
+                    targetPaneFrame.minX + targetPaneFrame.width * 0.62,
+                    safeMinimumX
+                ),
+                safeMaximumX
+            ),
+        ]
+        let verticalCandidates: [CGFloat] = [0.62, 0.55, 0.72, 0.45].map {
+            targetPaneFrame.minY + targetPaneFrame.height * $0
+        }
+        let canvasInterior = targetPaneFrame.insetBy(
+            dx: paneEdgeInset,
+            dy: paneEdgeInset
+        )
+        let tapCandidates = verticalCandidates.flatMap { y in
+            horizontalCandidates.map { x in CGPoint(x: x, y: y) }
+        }
+        guard let tapPoint = tapCandidates.first(where: { point in
+            canvasInterior.contains(point)
+                && point.x <= safeMaximumX
+                && !headerExclusion.contains(point)
+                && !closeButtonExclusion.contains(point)
+                && !toolbarExclusion.contains(point)
+        }) else {
+            return XCTFail(
+                "no safe canvas tap point cleared the pane chrome and toolbar; "
+                    + "pane: \(targetPaneFrame), close: \(closeButtonExclusion), "
+                    + "toolbar: \(toolbarExclusion), state: \(initialState)"
+            )
+        }
+
+        context.window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(
+                CGVector(
+                    dx: tapPoint.x - context.window.frame.minX,
+                    dy: tapPoint.y - context.window.frame.minY
+                )
+            )
+            .tap()
+
+        let focusedState = waitForState(context.stateElement) { state in
+            guard state["panes"] == "2",
+                  state["columns"] == "2",
+                  let focused = self.focusedIndex(from: state) else {
+                return false
+            }
+            return focused.column == targetColumn && focused.row == 0
+        }
+        guard let focused = focusedIndex(from: focusedState) else {
+            return XCTFail("focused pane index is invalid: \(focusedState)")
+        }
+        XCTAssertEqual(focused.column, targetColumn, "state: \(focusedState)")
+        XCTAssertEqual(focused.row, 0, "state: \(focusedState)")
+        XCTAssertEqual(focusedState["panes"], "2", "state: \(focusedState)")
+        XCTAssertEqual(focusedState["columns"], "2", "state: \(focusedState)")
+    }
+
     func testSidebarDragCreatesPane() {
         let context = launchApp(splitPaneCount: 1)
         let initialState = waitForState(context.stateElement) {
@@ -174,7 +366,7 @@ final class SplitPaneFlowUITests: XCTestCase {
         XCTAssertEqual(focused.row, 0, "state: \(focusedState)")
     }
 
-    func testClosePaneRenormalizesFractions() throws {
+    func testClosePaneRenormalizesFractions() {
         let context = launchApp(splitPaneCount: 3)
         let initialState = waitForState(context.stateElement) {
             ($0["panes"].flatMap(Int.init) ?? 0) >= 3
@@ -183,9 +375,10 @@ final class SplitPaneFlowUITests: XCTestCase {
             return XCTFail("pane count is invalid: \(initialState)")
         }
         if paneCount < 3 {
-            throw XCTSkip(
+            XCTFail(
                 "fewer than 3 panes available: \(stateString(of: context.stateElement))"
             )
+            return
         }
 
         let closeButtons = matchingButtons(
@@ -464,6 +657,21 @@ final class SplitPaneFlowUITests: XCTestCase {
         )
 
         let sidebar = showSidebar(in: context.app)
+        let sidebarButtons = sidebar.buttons
+        let hasDifferentSidebarRow = waitUntil(timeout: 10) {
+            sidebarButtons.allElementsBoundByIndex.contains { button in
+                button.exists
+                    && button.label != "Close notes"
+                    && button.label != openTitles[0]
+                    && button.label != openTitles[1]
+            }
+        }
+        guard hasDifferentSidebarRow else {
+            return XCTFail(
+                "no sidebar row exists that differs from both open pane titles, "
+                    + "state: \(stateString(of: context.stateElement))"
+            )
+        }
         guard let row = waitForSidebarRow(in: sidebar, matching: { label in
             label != openTitles[0] && label != openTitles[1]
         }) else {

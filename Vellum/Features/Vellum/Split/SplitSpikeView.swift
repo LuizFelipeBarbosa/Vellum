@@ -1,4 +1,8 @@
 #if DEBUG
+// PKCanvasView multi-finger undo and redo gestures cannot be synthesized by
+// XCUITest. SplitSpikeUITests keeps this reduced two-pane harness permanently
+// to regression-test per-pane undo isolation and focus-follows-touch without
+// driving those gestures through the full app.
 import Foundation
 import PencilKit
 import SwiftUI

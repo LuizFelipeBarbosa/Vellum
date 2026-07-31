@@ -21,6 +21,8 @@ final class NoteSplitState {
     private(set) var columns: [SplitColumn] = []
     var focusedPaneID: UUID?
     var selectedTool: ToolID = .pen
+    /// The tool an element selection set aside, restored when that selection ends.
+    var toolBorrowedByElementSelection: ToolID?
     var activeOptionsTool: ToolID?
     var squeezeEraser = SqueezeEraserController()
 
@@ -104,6 +106,10 @@ final class NoteSplitState {
     func removePane(id: UUID) {
         guard let index = paneIndex(of: id) else { return }
         let removedPaneWasFocused = focusedPaneID == id
+        // Only the focused pane can own a live element-selection tool borrow.
+        if removedPaneWasFocused {
+            toolBorrowedByElementSelection = nil
+        }
         let column = columns[index.column]
         let rowFractions = SplitLayoutPolicy.fractionsRemoving(
             at: index.row,

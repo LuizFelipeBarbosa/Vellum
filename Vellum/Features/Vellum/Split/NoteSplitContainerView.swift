@@ -60,11 +60,7 @@ struct NoteSplitContainerView: View {
                 app.split.paneIndex(of: $0)
             }
             let containerGlobalOrigin = geometry.frame(in: .global).origin
-            let headerPane = focusedPaneIndex.flatMap { index in
-                columns.indices.contains(index.column)
-                    ? columns[index.column].panes.first
-                    : nil
-            } ?? columns.first?.panes.first
+            let headerPane = focusedPane ?? columns.first?.panes.first
             let firstPaneHeaderFrames = headerPane.flatMap {
                 paneHeaderFrames[$0.id]
             }
@@ -97,26 +93,19 @@ struct NoteSplitContainerView: View {
                                     let rowIndex = paneEntry.offset
                                     let pane = paneEntry.element
                                     let paneID = pane.id
-                                    let appModel = app
 
                                     NoteScreenView(
                                         model: pane.noteModel,
-                                        app: appModel,
+                                        app: app,
                                         paneContext: PaneContext(
                                             pane: pane,
                                             isFocused: app.split.focusedPaneID == paneID,
-                                            paneWidth: columnWidths[columnIndex],
-                                            paneHeight: rowHeights[columnIndex][rowIndex],
+                                            paneSize: CGSize(
+                                                width: columnWidths[columnIndex],
+                                                height: rowHeights[columnIndex][rowIndex]
+                                            ),
                                             paneCount: panes.count,
-                                            onClose: { [weak appModel] in
-                                                guard let appModel else { return }
-                                                Task {
-                                                    await appModel.closePane(paneID)
-                                                }
-                                            },
-                                            onFocus: { [weak appModel] in
-                                                appModel?.split.focus(paneID)
-                                            }
+                                            canvasGeneration: pane.canvasGeneration
                                         )
                                     )
                                     .frame(
@@ -284,6 +273,9 @@ struct NoteSplitContainerView: View {
             }
             .onChange(of: geometry.size, initial: true) { _, newSize in
                 app.handleSplitContainerResize(newSize)
+            }
+            .onChange(of: panes.count) {
+                app.reclampSplitGrid()
             }
         }
         .task {

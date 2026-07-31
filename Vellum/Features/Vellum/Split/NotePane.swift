@@ -8,6 +8,7 @@ final class NotePane: Identifiable {
     let noteModel: NoteScreenModel
     let undoManager: UndoManager = UndoManager()
     let canvasReference: NoteCanvasReference = NoteCanvasReference()
+    private(set) var canvasGeneration: Int = 0
     var heightFraction: CGFloat
 
     var noteID: UUID { noteModel.noteID }
@@ -15,5 +16,9 @@ final class NotePane: Identifiable {
     init(noteModel: NoteScreenModel, heightFraction: CGFloat = 1) {
         self.noteModel = noteModel
         self.heightFraction = heightFraction
+    }
+
+    func canvasDidBecomeReady() {
+        canvasGeneration += 1
     }
 }

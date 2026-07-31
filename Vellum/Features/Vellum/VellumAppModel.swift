@@ -332,20 +332,27 @@ final class VellumAppModel {
 
     func handleSplitContainerResize(_ size: CGSize) {
         lastSplitContainerSize = size
-        guard !split.columns.isEmpty else { return }
+        resizeOverflowTask?.cancel()
+        resizeOverflowTask = nil
+        reclampSplitGrid()
+    }
+
+    func reclampSplitGrid() {
+        guard lastSplitContainerSize != .zero, !split.columns.isEmpty else { return }
+        // The live-state eviction loop converges on its own; restarting it here would
+        // reset its count and make removals crawl behind repeated debounce delays.
+        guard resizeOverflowTask == nil else { return }
 
         let result = SplitGridPolicy.reclamped(
             split.gridSnapshot,
-            containerSize: size
+            containerSize: lastSplitContainerSize
         )
         guard !result.overflow.isEmpty else {
-            resizeOverflowTask?.cancel()
             resizeOverflowTask = nil
             split.applyGrid(result.grid)
             return
         }
 
-        resizeOverflowTask?.cancel()
         resizeOverflowTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let self else { return }

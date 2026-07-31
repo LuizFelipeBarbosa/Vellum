@@ -4,11 +4,12 @@ import UIKit
 @MainActor
 struct PaneFocusSurface: UIViewRepresentable {
     let paneContext: PaneContext
+    let onFocus: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             pane: paneContext.pane,
-            onFocus: paneContext.onFocus
+            onFocus: onFocus
         )
     }
 
@@ -22,7 +23,7 @@ struct PaneFocusSurface: UIViewRepresentable {
 
     func updateUIView(_ view: UIView, context: Context) {
         context.coordinator.pane = paneContext.pane
-        context.coordinator.onFocus = paneContext.onFocus
+        context.coordinator.onFocus = onFocus
         context.coordinator.syncInstallation()
     }
 
@@ -48,8 +49,11 @@ struct PaneFocusSurface: UIViewRepresentable {
         }
 
         func syncInstallation() {
-            guard let targetView = pane.canvasReference.canvasView?.superview,
-                  targetView !== installedView else { return }
+            guard let targetView = pane.canvasReference.canvasView?.superview else {
+                dismantleInstallation()
+                return
+            }
+            guard targetView !== installedView else { return }
 
             if let installedView {
                 installedView.removeGestureRecognizer(touchDownObserver)

@@ -16,8 +16,6 @@ struct NoteScreenView: View {
     @State private var lastNonNilTool: (any PKTool)?
     @State private var canvasReference = NoteCanvasReference()
     @State private var selectionController = CanvasSelectionController()
-    /// The tool an element selection set aside, restored when that selection ends.
-    @State private var toolBorrowedByElementSelection: ToolID?
     @State private var shapeSnapController = ShapeSnapController()
     @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
     @State private var canvasSize: CGSize = .zero
@@ -42,24 +40,17 @@ struct NoteScreenView: View {
     }
 
     private var showsBacklinksRail: Bool {
-        paneContext.map {
-            $0.paneWidth >= PaneChromeThresholds.backlinksRailMinWidth
-                && $0.paneHeight >= PaneChromeThresholds.backlinksRailMinHeight
-        } ?? true
+        paneContext.map(\.fitsBacklinksRail) ?? true
     }
 
     private var showsSuggestionsAndThumbnails: Bool {
         paneContext.map {
-            $0.paneWidth >= PaneChromeThresholds.suggestionsAndThumbnailsMinWidth
-                && $0.paneHeight >= PaneChromeThresholds.suggestionsAndThumbnailsMinHeight
-                && $0.isFocused
+            $0.fitsSuggestionsAndThumbnails && $0.isFocused
         } ?? true
     }
 
     private var showsEntityChips: Bool {
-        paneContext.map {
-            $0.paneWidth >= PaneChromeThresholds.entityChipsMinWidth
-        } ?? true
+        paneContext.map(\.fitsEntityChips) ?? true
     }
 
     var body: some View {
@@ -94,9 +85,7 @@ struct NoteScreenView: View {
                         leftClusterFrame = $0
                         rightClusterFrame = $1
                     },
-                    isCompact: paneContext.map {
-                        $0.paneWidth < PaneChromeThresholds.fullHeaderMinWidth
-                    } ?? false
+                    isCompact: paneContext?.hasCompactHeader ?? false
                 )
 
                 if !model.noteEntities.isEmpty && showsEntityChips {
@@ -116,8 +105,11 @@ struct NoteScreenView: View {
 
             modalOverlays
 
-            if let paneContext, paneContext.paneCount > 1 {
-                PaneFocusSurface(paneContext: paneContext)
+            if let paneContext, paneContext.isSplit {
+                PaneFocusSurface(
+                    paneContext: paneContext,
+                    onFocus: { app.split.focus(paneContext.pane.id) }
+                )
                     .frame(width: 0, height: 0)
                     .allowsHitTesting(false)
 
@@ -171,8 +163,12 @@ struct NoteScreenView: View {
             // Selecting an element borrows the Select tool so shapes and photos use one edit flow.
             // Once the selection ends the tool goes back, so selecting either never costs the
             // pen you were drawing with. If the tool has moved on already, the user chose it.
-            guard !hasSelection, let borrowedFrom = toolBorrowedByElementSelection else { return }
-            toolBorrowedByElementSelection = nil
+            guard !hasSelection,
+                  let borrowedFrom = app.split.toolBorrowedByElementSelection
+            else {
+                return
+            }
+            app.split.toolBorrowedByElementSelection = nil
             if selectedTool == .select {
                 selectedTool = borrowedFrom
             }
@@ -272,7 +268,9 @@ struct NoteScreenView: View {
 
     private func paneCloseButton(_ paneContext: PaneContext) -> some View {
         Button {
-            paneContext.onClose()
+            Task {
+                await app.closePane(paneContext.pane.id)
+            }
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 10.5, weight: .medium))
@@ -371,6 +369,9 @@ struct NoteScreenView: View {
                     showsSystemToolPicker: false,
                     onCanvasReady: { canvasView in
                         activeCanvasReference.canvasView = canvasView
+                        Task { @MainActor in
+                            paneContext?.pane.canvasDidBecomeReady()
+                        }
                     },
                     paneUndoManager: paneContext?.pane.undoManager,
                     isDrawingEnabled: selectedTool.usesDrawingGesture,
@@ -859,7 +860,7 @@ struct NoteScreenView: View {
 
     private func borrowSelectTool() {
         if selectedTool != .select {
-            toolBorrowedByElementSelection = selectedTool
+            app.split.toolBorrowedByElementSelection = selectedTool
         }
         selectedTool = .select
     }

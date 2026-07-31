@@ -28,8 +28,16 @@ struct SplitSidebarRowDragGesture: UIGestureRecognizerRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldReceive touch: UITouch
         ) -> Bool {
-            activeNoteID = noteIDForTouch?(gestureRecognizer, touch)
-            return activeNoteID != nil
+            let noteID = noteIDForTouch?(gestureRecognizer, touch)
+
+            // The first eligible touch fixes the dragged row while the press
+            // is still possible. A second finger can land on a different row
+            // before the long press resolves and must not retarget the drag.
+            if gestureRecognizer.state == .possible, activeNoteID == nil {
+                activeNoteID = noteID
+            }
+
+            return noteID != nil
         }
 
         // Row selection is a SwiftUI Button whose tap recognizer would
