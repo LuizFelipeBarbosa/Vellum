@@ -83,7 +83,14 @@ final class PagedCanvasView: PKCanvasView {
         }
     }
 
-    // Placeholder until PencilCanvasView supplies the note-specific content height.
+    // Placeholders until PencilCanvasView supplies the note-specific content dimensions.
+    var contentWidthInContentSpace: CGFloat = PageGeometry.a4.contentWidth {
+        didSet {
+            guard oldValue != contentWidthInContentSpace else { return }
+            lastFitScale = nil
+            updateZoomLimitsAndContentSize()
+        }
+    }
     var contentHeightInContentSpace: CGFloat = PageGeometry.a4.pageHeight {
         didSet {
             guard oldValue != contentHeightInContentSpace else { return }
@@ -101,12 +108,15 @@ final class PagedCanvasView: PKCanvasView {
     }
 
     var expectedContentSize: CGSize {
-        CGSize(width: PageLayout.contentWidth * zoomScale,
+        CGSize(width: contentWidthInContentSpace * zoomScale,
                height: contentHeightInContentSpace * zoomScale)
     }
 
     var fitZoomScale: CGFloat {
-        PageLayout.minZoom(forViewportWidth: bounds.width)
+        PageLayout.minZoom(
+            forViewportWidth: bounds.width,
+            contentWidth: contentWidthInContentSpace
+        )
     }
 
     func resyncContentSizeIfStomped() {
@@ -145,7 +155,8 @@ final class PagedCanvasView: PKCanvasView {
         guard !isAnimatingZoomSnap else { return }
         guard let target = PageLayout.settleTargetZoom(
             forEndedZoomScale: scale,
-            viewportWidth: bounds.width
+            viewportWidth: bounds.width,
+            contentWidth: contentWidthInContentSpace
         ), abs(scale - target) > 0.0001 else { return }
 
         animateZoomSnap(to: target)
@@ -213,8 +224,14 @@ final class PagedCanvasView: PKCanvasView {
         guard !isAnimatingZoomSnap, !isApplyingLayoutZoom else { return }
         haptics.zoomTick(
             scale: zoomScale,
-            minScale: PageLayout.overviewMinZoom(forViewportWidth: bounds.width),
-            maxScale: PageLayout.maxZoom(forViewportWidth: bounds.width)
+            minScale: PageLayout.overviewMinZoom(
+                forViewportWidth: bounds.width,
+                contentWidth: contentWidthInContentSpace
+            ),
+            maxScale: PageLayout.maxZoom(
+                forViewportWidth: bounds.width,
+                contentWidth: contentWidthInContentSpace
+            )
         )
     }
 
@@ -231,11 +248,23 @@ final class PagedCanvasView: PKCanvasView {
     func updateZoomLimitsAndContentSize() {
         guard bounds.width > 0 else { return }
         let isFirstLayout = lastFitScale == nil
-        let fit = PageLayout.minZoom(forViewportWidth: bounds.width)
-        let overviewFloor = PageLayout.overviewMinZoom(forViewportWidth: bounds.width)
+        let fit = PageLayout.minZoom(
+            forViewportWidth: bounds.width,
+            contentWidth: contentWidthInContentSpace
+        )
+        let overviewFloor = PageLayout.overviewMinZoom(
+            forViewportWidth: bounds.width,
+            contentWidth: contentWidthInContentSpace
+        )
         let wasAtFit = lastFitScale.map { abs(zoomScale - $0) < 0.001 } ?? false
-        minimumZoomScale = PageLayout.elasticMinZoom(forViewportWidth: bounds.width)
-        maximumZoomScale = PageLayout.elasticMaxZoom(forViewportWidth: bounds.width)
+        minimumZoomScale = PageLayout.elasticMinZoom(
+            forViewportWidth: bounds.width,
+            contentWidth: contentWidthInContentSpace
+        )
+        maximumZoomScale = PageLayout.elasticMaxZoom(
+            forViewportWidth: bounds.width,
+            contentWidth: contentWidthInContentSpace
+        )
         isApplyingLayoutZoom = true
         if !isZooming {
             if lastFitScale == nil || wasAtFit {
@@ -269,7 +298,8 @@ struct PencilCanvasView: UIViewRepresentable {
     var onCanvasReady: ((PKCanvasView) -> Void)? = nil
     var paneUndoManager: UndoManager? = nil
     var isDrawingEnabled: Bool = true
-    // Placeholder overridden by NoteScreenView from NotePageState.
+    // Placeholders overridden by NoteScreenView from NotePageState.
+    var contentWidth: CGFloat = PageGeometry.a4.contentWidth
     var contentHeight: CGFloat = PageGeometry.a4.pageHeight
     var topContentInset: CGFloat = 0
     var onViewportChanged: ((CanvasViewport) -> Void)? = nil
@@ -294,6 +324,7 @@ struct PencilCanvasView: UIViewRepresentable {
         let canvasView = PagedCanvasView()
         canvasView.performRepresentableUpdate {
             canvasView.contentInsetAdjustmentBehavior = .never
+            canvasView.contentWidthInContentSpace = contentWidth
             canvasView.contentHeightInContentSpace = contentHeight
             canvasView.topContentInset = topContentInset
             canvasView.delegate = context.coordinator
@@ -371,6 +402,7 @@ struct PencilCanvasView: UIViewRepresentable {
             canvasView.backgroundColor = isTransparent ? .clear : .white
             canvasView.isOpaque = !isTransparent
             canvasView.drawingGestureRecognizer.isEnabled = isDrawingEnabled
+            (canvasView as? PagedCanvasView)?.contentWidthInContentSpace = contentWidth
             (canvasView as? PagedCanvasView)?.contentHeightInContentSpace = contentHeight
             (canvasView as? PagedCanvasView)?.topContentInset = topContentInset
 

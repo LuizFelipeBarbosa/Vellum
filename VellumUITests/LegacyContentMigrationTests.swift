@@ -41,25 +41,26 @@ final class LegacyContentMigrationTests: XCTestCase {
         let contentMaxX = elements.reduce(drawingMaxX) { maximum, element in
             max(maximum, element.rotatedBoundingBox.maxX)
         }
-        let factor = PageLayout.contentWidth / contentMaxX
+        let factor = PageLayout.portraitContentWidth / contentMaxX
 
         let result = LegacyContentMigrator.migrateIfNeeded(
             drawing: drawing,
             elements: elements,
-            layoutVersion: 1
+            layoutVersion: 1,
+            targetContentWidth: PageGeometry.a4.contentWidth
         )
 
         XCTAssertTrue(result.didMigrate)
         XCTAssertLessThanOrEqual(
             result.drawing.bounds.maxX,
-            PageLayout.contentWidth + 0.01
+            PageLayout.portraitContentWidth + 0.01
         )
         let migratedImage = try XCTUnwrap(
             result.elements.first { $0.id == imageID }
         )
         XCTAssertLessThanOrEqual(
             migratedImage.rotatedBoundingBox.maxX,
-            PageLayout.contentWidth + 0.01
+            PageLayout.portraitContentWidth + 0.01
         )
         XCTAssertEqual(
             drawing.bounds.width / drawing.bounds.height,
@@ -84,7 +85,8 @@ final class LegacyContentMigrationTests: XCTestCase {
         let secondResult = LegacyContentMigrator.migrateIfNeeded(
             drawing: result.drawing,
             elements: result.elements,
-            layoutVersion: 1
+            layoutVersion: 1,
+            targetContentWidth: PageGeometry.a4.contentWidth
         )
         XCTAssertFalse(secondResult.didMigrate)
         XCTAssertEqual(
@@ -116,7 +118,8 @@ final class LegacyContentMigrationTests: XCTestCase {
         let result = LegacyContentMigrator.migrateIfNeeded(
             drawing: drawing,
             elements: elements,
-            layoutVersion: Note.currentLayoutVersion
+            layoutVersion: Note.currentLayoutVersion,
+            targetContentWidth: PageGeometry.a4.contentWidth
         )
 
         XCTAssertFalse(result.didMigrate)
@@ -147,7 +150,8 @@ final class LegacyContentMigrationTests: XCTestCase {
         let result = LegacyContentMigrator.migrateIfNeeded(
             drawing: drawing,
             elements: elements,
-            layoutVersion: 1
+            layoutVersion: 1,
+            targetContentWidth: PageGeometry.a4.contentWidth
         )
 
         XCTAssertFalse(result.didMigrate)
@@ -162,7 +166,8 @@ final class LegacyContentMigrationTests: XCTestCase {
         let result = LegacyContentMigrator.migrateIfNeeded(
             drawing: drawing,
             elements: [],
-            layoutVersion: 1
+            layoutVersion: 1,
+            targetContentWidth: PageGeometry.a4.contentWidth
         )
 
         XCTAssertFalse(result.didMigrate)
@@ -216,12 +221,12 @@ final class LegacyContentMigrationTests: XCTestCase {
         let modelDrawing = try PKDrawing(data: modelDrawingData)
         XCTAssertLessThanOrEqual(
             modelDrawing.bounds.maxX,
-            PageLayout.contentWidth + 0.01
+            PageLayout.portraitContentWidth + 0.01
         )
         XCTAssertEqual(model.canvasElements.elements.count, 1)
         XCTAssertLessThanOrEqual(
             try XCTUnwrap(model.canvasElements.elements.first).rotatedBoundingBox.maxX,
-            PageLayout.contentWidth + 0.01
+            PageLayout.portraitContentWidth + 0.01
         )
         XCTAssertEqual(model.saveState, .unsaved)
 
@@ -234,7 +239,7 @@ final class LegacyContentMigrationTests: XCTestCase {
         let reloadedElement = try XCTUnwrap(reloadedNote.pages.first?.elements.first)
         XCTAssertLessThanOrEqual(
             reloadedElement.rotatedBoundingBox.maxX,
-            PageLayout.contentWidth + 0.01
+            PageLayout.portraitContentWidth + 0.01
         )
         let drawingPath = try XCTUnwrap(reloadedNote.pages.first?.drawingAssetPath)
         let loadedData = try await freshRepository.loadAsset(
@@ -245,7 +250,7 @@ final class LegacyContentMigrationTests: XCTestCase {
         let reloadedDrawing = try PKDrawing(data: reloadedData)
         XCTAssertLessThanOrEqual(
             reloadedDrawing.bounds.maxX,
-            PageLayout.contentWidth + 0.01
+            PageLayout.portraitContentWidth + 0.01
         )
     }
 

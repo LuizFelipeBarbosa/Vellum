@@ -143,7 +143,7 @@ final class SelectionPasteboardTests: XCTestCase {
 
         let bounds = try XCTUnwrap(pastedBounds)
         XCTAssertGreaterThanOrEqual(bounds.minX, -0.001)
-        XCTAssertLessThanOrEqual(bounds.maxX, PageLayout.contentWidth + 0.001)
+        XCTAssertLessThanOrEqual(bounds.maxX, PageLayout.portraitContentWidth + 0.001)
         XCTAssertGreaterThanOrEqual(bounds.minY, -0.001)
     }
 

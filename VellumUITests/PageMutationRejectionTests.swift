@@ -30,6 +30,17 @@ final class PageMutationRejectionTests: XCTestCase {
         )
     }
 
+    func testSetPageOrientationReportsRejectionWithoutCanvas() async throws {
+        let rootDirectory = try makeRootDirectory()
+        defer { try? FileManager.default.removeItem(at: rootDirectory) }
+        let model = try await makeLoadedModel(rootDirectory: rootDirectory)
+
+        XCTAssertFalse(
+            model.setPageOrientation(.landscape),
+            "setPageOrientation must report rejection when no canvas is attached"
+        )
+    }
+
     private func makeRootDirectory() throws -> URL {
         let rootDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

@@ -1,21 +1,57 @@
 import CoreGraphics
 
 public struct PageGeometry: Equatable, Sendable {
+    public let contentWidth: CGFloat
     public let pageHeight: CGFloat
+    public let orientation: PageOrientation
 
-    public var contentWidth: CGFloat { PageLayout.contentWidth }
-
-    public static let a4 = PageGeometry(aspectRatio: PageLayout.a4AspectRatio)
     public static let aspectRatioRange: ClosedRange<Double> = 0.5...3.0
+    public static let a4 = PageGeometry(
+        portraitAspectRatio: PageLayout.a4AspectRatio,
+        orientation: .portrait
+    )
+    public static let a4Landscape = PageGeometry(
+        portraitAspectRatio: PageLayout.a4AspectRatio,
+        orientation: .landscape
+    )
 
-    public init(aspectRatio: Double) {
-        let clampedAspectRatio = min(
-            max(aspectRatio, Self.aspectRatioRange.lowerBound),
-            Self.aspectRatioRange.upperBound
+    public init(
+        portraitAspectRatio: Double,
+        orientation: PageOrientation = .portrait
+    ) {
+        let portraitWidth = PageLayout.portraitContentWidth
+        let uprightHeight = portraitWidth * CGFloat(
+            Self.clampedAspectRatio(portraitAspectRatio)
         )
-        pageHeight = PageLayout.contentWidth * CGFloat(clampedAspectRatio)
+        self.orientation = orientation
+        switch orientation {
+        case .portrait:
+            contentWidth = portraitWidth
+            pageHeight = uprightHeight
+        case .landscape:
+            contentWidth = uprightHeight
+            pageHeight = portraitWidth
+        }
     }
 
+    public static func clampedAspectRatio(_ value: Double) -> Double {
+        min(
+            max(value, aspectRatioRange.lowerBound),
+            aspectRatioRange.upperBound
+        )
+    }
+
+    /// The orientation-independent upright page shape persisted by `Note`.
+    public var portraitAspectRatio: Double {
+        switch orientation {
+        case .portrait:
+            Double(pageHeight / contentWidth)
+        case .landscape:
+            Double(contentWidth / pageHeight)
+        }
+    }
+
+    /// The actual height-to-width ratio after applying the page orientation.
     public var aspectRatio: Double {
         Double(pageHeight / contentWidth)
     }
@@ -93,10 +129,27 @@ public struct PageGeometry: Equatable, Sendable {
     }
 
     public var pdfPageSize: CGSize {
-        CGSize(width: 595.2, height: 595.2 * CGFloat(aspectRatio))
+        let pointsPerContentPoint = 595.2 / PageLayout.portraitContentWidth
+        switch orientation {
+        case .portrait:
+            let width = contentWidth * pointsPerContentPoint
+            return CGSize(
+                width: width,
+                height: width * CGFloat(portraitAspectRatio)
+            )
+        case .landscape:
+            let height = pageHeight * pointsPerContentPoint
+            return CGSize(
+                width: height * CGFloat(portraitAspectRatio),
+                height: height
+            )
+        }
     }
 
     public var rasterPageSizePixels: CGSize {
-        CGSize(width: 1_536, height: (1_536 * CGFloat(aspectRatio)).rounded())
+        CGSize(
+            width: (contentWidth * 2).rounded(),
+            height: (pageHeight * 2).rounded()
+        )
     }
 }

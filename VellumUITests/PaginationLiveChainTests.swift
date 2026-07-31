@@ -135,13 +135,13 @@ final class PaginationLiveChainTests: XCTestCase {
             "Live PKCanvasView delegate was not a PencilCanvasView.Coordinator."
         )
         host.canvasView.contentSize = CGSize(
-            width: PageLayout.contentWidth,
+            width: PageLayout.portraitContentWidth,
             height: host.pageState.contentHeight
         )
 
         coordinator.scrollViewDidScroll(host.canvasView)
 
-        let expectedContentWidth = PageLayout.contentWidth * host.canvasView.zoomScale
+        let expectedContentWidth = PageLayout.portraitContentWidth * host.canvasView.zoomScale
         let expectedContentHeight = host.pageState.contentHeight * host.canvasView.zoomScale
         let actualContentSize = host.canvasView.contentSize
 

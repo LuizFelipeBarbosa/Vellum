@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftUI
+import UIKit
 import VellumCore
 
 enum AppScreen: Hashable {
@@ -70,6 +71,7 @@ final class VellumAppModel {
     private let debugAutoOpenMostRecentNote: Bool
     private let debugSplitPaneCount: Int?
     private let debugSplitGridRows: [Int]?
+    private let debugPDFFixtureNoteRequested: Bool
     #endif
 
     init(
@@ -94,6 +96,7 @@ final class VellumAppModel {
             debugAskQuestion = nil
         }
         debugAutoOpenMostRecentNote = arguments.contains("-vellum-auto-open-note")
+        debugPDFFixtureNoteRequested = arguments.contains("-vellum-pdf-fixture-note")
         if let flagIndex = arguments.firstIndex(of: "-vellum-split-panes"),
            arguments.indices.contains(flagIndex + 1),
            let count = Int(arguments[flagIndex + 1]) {
@@ -146,7 +149,26 @@ final class VellumAppModel {
         }
 
         #if DEBUG
-        if let debugSplitGridRows {
+        if debugPDFFixtureNoteRequested {
+            let fixtureTitle = "PDF Orientation Fixture"
+            if let note = library.summaries.first(where: { $0.title == fixtureTitle }) {
+                await openNote(note.id)
+            } else {
+                let renderer = UIGraphicsPDFRenderer(
+                    bounds: CGRect(x: 0, y: 0, width: 200, height: 300)
+                )
+                let data = renderer.pdfData { context in
+                    context.beginPage()
+                }
+                if let noteID = await library.createNoteFromPDF(
+                    data: data,
+                    suggestedTitle: fixtureTitle
+                ) {
+                    await refreshStats()
+                    await openNote(noteID)
+                }
+            }
+        } else if let debugSplitGridRows {
             let notes = library.summaries.sorted { $0.updatedAt > $1.updatedAt }
             var noteIterator = notes.makeIterator()
 
@@ -184,6 +206,7 @@ final class VellumAppModel {
 
         if debugSplitGridRows == nil,
            debugSplitPaneCount == nil,
+           !debugPDFFixtureNoteRequested,
            debugAutoOpenMostRecentNote,
            let note = library.summaries.max(by: { $0.updatedAt < $1.updatedAt }) {
             await openNote(note.id)

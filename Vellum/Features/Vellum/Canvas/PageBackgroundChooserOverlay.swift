@@ -5,6 +5,7 @@ struct PagePatternPreview: View {
     let kind: PageBackgroundStyle.Kind
     let spacing: Double
     let tint: CodableColor?
+    var size: CGSize = CGSize(width: 72, height: 96)
 
     var body: some View {
         Canvas { context, size in
@@ -99,7 +100,7 @@ struct PagePatternPreview: View {
                 context.stroke(lines, with: .color(patternColor), lineWidth: 0.75)
             }
         }
-        .frame(width: 72, height: 96)
+        .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
             RoundedRectangle(cornerRadius: 8)

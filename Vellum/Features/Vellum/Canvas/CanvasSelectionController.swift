@@ -31,6 +31,7 @@ final class CanvasSelectionController {
     var persistImageData: ((Data) async -> String?)?
     var importSystemImage: ((Data, CGPoint?) async -> UUID?)?
     var onOperationFailed: ((String) -> Void)?
+    var contentWidth: CGFloat = PageGeometry.a4.contentWidth
     /// Alignment lattice for a content-space point, or nil where there is nothing to align to.
     /// Supplied by the note screen, which is what knows the page background.
     var snapGrid: ((CGPoint) -> ShapeSnapGrid?)?
@@ -46,6 +47,10 @@ final class CanvasSelectionController {
             return 0
         }
         return element.rotation
+    }
+
+    var hasHiddenStrokes: Bool {
+        drawingBeforeHide != nil
     }
 
     private var captureStart: CGPoint?
@@ -835,7 +840,8 @@ final class CanvasSelectionController {
             duplicateOffset = Self.pasteOffset(
                 forTarget: target,
                 drawing: drawing,
-                elements: payload.elements
+                elements: payload.elements,
+                contentWidth: contentWidth
             )
         } else {
             duplicateOffset = CGSize(width: 20, height: 20)
@@ -1155,7 +1161,8 @@ final class CanvasSelectionController {
     private static func pasteOffset(
         forTarget target: CGPoint,
         drawing: PKDrawing,
-        elements: [CanvasElement]
+        elements: [CanvasElement],
+        contentWidth: CGFloat
     ) -> CGSize {
         var payloadBounds: CGRect?
         if !drawing.strokes.isEmpty {
@@ -1175,13 +1182,13 @@ final class CanvasSelectionController {
         )
 
         // X protects both finite page edges when the payload fits; Y protects only the top because pages grow downward without a bottom edge.
-        if payloadBounds.width <= PageLayout.contentWidth {
+        if payloadBounds.width <= contentWidth {
             let translatedMinX = payloadBounds.minX + delta.width
             let translatedMaxX = payloadBounds.maxX + delta.width
             if translatedMinX < 0 {
                 delta.width -= translatedMinX
-            } else if translatedMaxX > PageLayout.contentWidth {
-                delta.width -= translatedMaxX - PageLayout.contentWidth
+            } else if translatedMaxX > contentWidth {
+                delta.width -= translatedMaxX - contentWidth
             }
         }
 

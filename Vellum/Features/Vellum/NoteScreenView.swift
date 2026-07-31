@@ -9,7 +9,7 @@ import VellumCore
 struct NoteScreenView: View {
     @Bindable var model: NoteScreenModel
     @Bindable var app: VellumAppModel
-    var paneContext: PaneContext
+    let paneContext: PaneContext
 
     @State private var isShowingActivity = false
     @State private var isConfirmingDelete = false
@@ -140,6 +140,7 @@ struct NoteScreenView: View {
                 selectionController: selectionController,
                 shapeSnapController: shapeSnapController,
                 pageState: pageState,
+                thumbnailStore: thumbnailStore,
                 currentVisibleContentRect: { currentVisibleContentRect },
                 cacheCurrentTool: cacheCurrentTool,
                 scrollCanvas: scrollCanvas
@@ -169,10 +170,11 @@ struct NoteScreenView: View {
             }
         }
         .onChange(of: paneContext.isFocused) { wasFocused, isFocused in
-            if wasFocused == true, isFocused == false {
+            if wasFocused, !isFocused {
                 selectionController.clearSelection()
                 model.isShowingSuggestions = false
                 isShowingThumbnails = false
+                app.split.isShowingPaperOptions = false
             }
         }
         .modifier(
@@ -189,6 +191,7 @@ struct NoteScreenView: View {
             NoteScreenPageViewportChangeObservers(
                 model: model,
                 canvasReference: activeCanvasReference,
+                selectionController: selectionController,
                 pageState: pageState,
                 thumbnailStore: thumbnailStore,
                 canvasViewport: canvasViewport,
@@ -289,13 +292,14 @@ struct NoteScreenView: View {
     private var canvasArea: some View {
         GeometryReader { geometry in
             let canvasGlobalOrigin = geometry.frame(in: .global).origin
+            let pageGeometry = model.note?.pageGeometry ?? .a4
 
             ZStack(alignment: .topLeading) {
                 PageGuideLayer(
                     viewport: canvasViewport,
                     viewportSize: canvasSize,
                     pageCount: pageState.pageCount,
-                    geometry: model.note?.pageGeometry ?? .a4,
+                    geometry: pageGeometry,
                     style: model.note?.backgroundStyle ?? .legacyDefault,
                     pdfBands: model.pdfBands
                 )
@@ -306,10 +310,10 @@ struct NoteScreenView: View {
                     pdfBands: model.pdfBands,
                     viewport: canvasViewport,
                     pageCount: pageState.pageCount,
-                    geometry: model.note?.pageGeometry ?? .a4
+                    geometry: pageGeometry
                 )
                 .frame(
-                    width: PageLayout.contentWidth,
+                    width: pageGeometry.contentWidth,
                     height: pageState.contentHeight,
                     alignment: .topLeading
                 )
@@ -329,7 +333,7 @@ struct NoteScreenView: View {
                     viewport: canvasViewport,
                     viewportSize: canvasSize,
                     pageCount: pageState.pageCount,
-                    geometry: model.note?.pageGeometry ?? .a4,
+                    geometry: pageGeometry,
                     style: model.note?.backgroundStyle ?? .legacyDefault,
                     pdfBands: model.pdfBands,
                     mode: .pdfAdornments
@@ -343,7 +347,7 @@ struct NoteScreenView: View {
                     placement: .belowInk
                 )
                 .contentViewportFrame(
-                    contentWidth: PageLayout.contentWidth,
+                    contentWidth: pageGeometry.contentWidth,
                     contentHeight: pageState.contentHeight,
                     zoom: canvasViewport.zoomScale,
                     contentOffset: canvasViewport.contentOffset,
@@ -372,6 +376,7 @@ struct NoteScreenView: View {
                     },
                     paneUndoManager: paneContext.pane.undoManager,
                     isDrawingEnabled: selectedTool.usesDrawingGesture,
+                    contentWidth: pageGeometry.contentWidth,
                     contentHeight: pageState.contentHeight,
                     topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + 16,
                     onViewportChanged: { canvasViewport = $0 },
@@ -455,7 +460,7 @@ struct NoteScreenView: View {
                     isTextToolActive: selectedTool == .text
                 )
                 .contentViewportFrame(
-                    contentWidth: PageLayout.contentWidth,
+                    contentWidth: pageGeometry.contentWidth,
                     contentHeight: pageState.contentHeight,
                     zoom: canvasViewport.zoomScale,
                     contentOffset: canvasViewport.contentOffset,
@@ -470,7 +475,7 @@ struct NoteScreenView: View {
                     isSelectToolActive: selectedTool == .select
                 )
                 .contentViewportFrame(
-                    contentWidth: PageLayout.contentWidth,
+                    contentWidth: pageGeometry.contentWidth,
                     contentHeight: pageState.contentHeight,
                     zoom: canvasViewport.zoomScale,
                     contentOffset: canvasViewport.contentOffset,
@@ -840,7 +845,11 @@ struct NoteScreenView: View {
     }
 
     private var fitZoomScale: CGFloat {
-        PageLayout.minZoom(forViewportWidth: canvasSize.width)
+        PageLayout.minZoom(
+            forViewportWidth: canvasSize.width,
+            contentWidth: model.note?.pageGeometry.contentWidth
+                ?? PageGeometry.a4.contentWidth
+        )
     }
 
     private var isZoomAtFit: Bool {
@@ -941,7 +950,7 @@ struct NoteScreenView: View {
             pdfPagesByBand: pdfPagesByBand,
             pdfExpectedBands: pdfExpectedBands
         )
-        assert(content.geometry.pageHeight == pageState.pageGeometry.pageHeight)
+        assert(content.geometry == pageState.pageGeometry)
         return content
     }
 
@@ -1033,6 +1042,7 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
     let selectionController: CanvasSelectionController
     let shapeSnapController: ShapeSnapController
     let pageState: NotePageState
+    let thumbnailStore: PageThumbnailStore
     let currentVisibleContentRect: () -> CGRect
     let cacheCurrentTool: () -> Void
     let scrollCanvas: (Int) -> Void
@@ -1042,12 +1052,16 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
             .task {
                 cacheCurrentTool()
                 pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+                selectionController.contentWidth = pageState.pageGeometry.contentWidth
                 model.canvasElements.canvasReference = canvasReference
                 if let paneUndoManager {
                     model.canvasElements.undoManagerOverride = paneUndoManager
                 }
                 selectionController.canvasReference = canvasReference
                 selectionController.elementsStore = model.canvasElements
+                model.hasHiddenSelectionStrokes = { [weak selectionController] in
+                    selectionController?.hasHiddenStrokes ?? false
+                }
                 shapeSnapController.canvasReference = canvasReference
                 shapeSnapController.elementsStore = model.canvasElements
                 model.canvasElements.onSnapshotApplied = { [weak selectionController] in
@@ -1062,6 +1076,28 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                     Task { @MainActor in
                         await Task.yield()
                         scrollCanvas(index)
+                    }
+                }
+                model.onPageOrientationChanged = {
+                    thumbnailStore.markDirty()
+                }
+                model.onOrientationFlipped = { contentY in
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard let canvas = canvasReference.canvasView as? PagedCanvasView else {
+                            return
+                        }
+                        let offsetY = PageLayout.anchoredOffsetY(
+                            visibleCenterContentY: contentY,
+                            scale: canvas.zoomScale,
+                            viewportHeight: canvas.bounds.height,
+                            contentHeight: canvas.contentHeightInContentSpace,
+                            minimumOffsetY: -canvas.topContentInset
+                        )
+                        canvas.setContentOffset(
+                            CGPoint(x: canvas.contentOffset.x, y: offsetY),
+                            animated: false
+                        )
                     }
                 }
                 let resolveSnapGrid = { [weak model, weak pageState] (point: CGPoint) -> ShapeSnapGrid? in
@@ -1103,6 +1139,7 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                     }
                 }
                 pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+                selectionController.contentWidth = pageState.pageGeometry.contentWidth
                 pageState.updateContent(
                     drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
                     elements: model.canvasElements.elements,
@@ -1111,6 +1148,9 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
             }
             .onDisappear {
                 model.onScrollToPage = nil
+                model.hasHiddenSelectionStrokes = nil
+                model.onPageOrientationChanged = nil
+                model.onOrientationFlipped = nil
             }
     }
 }
@@ -1184,6 +1224,7 @@ private struct NoteScreenPageViewportChangeObservers: ViewModifier {
 
     let model: NoteScreenModel
     let canvasReference: NoteCanvasReference
+    let selectionController: CanvasSelectionController
     let pageState: NotePageState
     let thumbnailStore: PageThumbnailStore
     let canvasViewport: CanvasViewport
@@ -1201,8 +1242,9 @@ private struct NoteScreenPageViewportChangeObservers: ViewModifier {
                 thumbnailStore.markDirty()
                 schedulePDFWindowUpdate()
             }
-            .onChange(of: model.note?.pageAspectRatio) { _, _ in
-                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+            .onChange(of: model.note?.pageGeometry) { _, geometry in
+                pageState.pageGeometry = geometry ?? .a4
+                selectionController.contentWidth = pageState.pageGeometry.contentWidth
                 pageState.updateContent(
                     drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
                     elements: model.canvasElements.elements,

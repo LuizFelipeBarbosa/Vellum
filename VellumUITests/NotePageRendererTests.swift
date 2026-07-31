@@ -250,7 +250,7 @@ final class NotePageRendererTests: XCTestCase {
     func testAboveInkImagePaintsOverInk() throws {
         let assetPath = "assets/above-ink.png"
         let center = CGPoint(
-            x: PageLayout.contentWidth / 2,
+            x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
         let frame = CanvasRect(
@@ -730,7 +730,7 @@ final class NotePageRendererTests: XCTestCase {
 
     func testShapeStrokePixelsDifferBetweenLightAndDarkInterfaceStyles() throws {
         let center = CGPoint(
-            x: PageLayout.contentWidth / 2,
+            x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
         let shape = makeHorizontalShape(
@@ -783,7 +783,7 @@ final class NotePageRendererTests: XCTestCase {
 
     func testDarkInterfaceStyleRendersDefaultPenShapeLighterThanPaper() throws {
         let center = CGPoint(
-            x: PageLayout.contentWidth / 2,
+            x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
         let paperPixels = try pixelBuffer(
@@ -818,7 +818,7 @@ final class NotePageRendererTests: XCTestCase {
 
     func testDarkInterfaceStylePreservesTranslucentShapeAlpha() throws {
         let center = CGPoint(
-            x: PageLayout.contentWidth / 2,
+            x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
         let markerColor = ToolPreferences.default.highlighter.color
@@ -1019,7 +1019,7 @@ final class NotePageRendererTests: XCTestCase {
         )
         let pixel = pixels.pixel(
             atContentPoint: CGPoint(
-                x: PageLayout.contentWidth / 2,
+                x: PageLayout.portraitContentWidth / 2,
                 y: PageGeometry.a4.pageHeight / 2
             )
         )
@@ -1138,7 +1138,7 @@ final class NotePageRendererTests: XCTestCase {
             y: fittedRect.midY
         ))
         let marginPoint = CGPoint(
-            x: PageLayout.contentWidth / 2,
+            x: PageLayout.portraitContentWidth / 2,
             y: fittedRect.minY / 2
         )
         let marginPixel = renderedPDFBand.pixel(atContentPoint: marginPoint)
@@ -1175,7 +1175,7 @@ final class NotePageRendererTests: XCTestCase {
     }
 
     func testLetterGeometryFillsTheFormerA4LetterboxMarginWithPDFContent() throws {
-        let geometry = PageGeometry(aspectRatio: 792.0 / 612.0)
+        let geometry = PageGeometry(portraitAspectRatio: 792.0 / 612.0)
         let sourceSize = CGSize(width: 612, height: 792)
         let pdfDocument = try makeSolidPDFDocument(color: .white, size: sourceSize)
         let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
@@ -1259,7 +1259,7 @@ final class NotePageRendererTests: XCTestCase {
 
     func testDarkInterfaceStyleRendersDarkCardPaperAndLightInk() throws {
         let center = CGPoint(
-            x: PageLayout.contentWidth / 2,
+            x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
         let paperContent = makeContent(style: .blank, interfaceStyle: .dark)
@@ -1405,7 +1405,7 @@ final class NotePageRendererTests: XCTestCase {
         )
         let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
         let center = CGPoint(
-            x: PageLayout.contentWidth / 2,
+            x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
         let stroke = makeStroke(
@@ -1464,7 +1464,7 @@ final class NotePageRendererTests: XCTestCase {
         format.scale = 1
         format.opaque = true
         return UIGraphicsImageRenderer(size: pointSize, format: format).image { context in
-            let pointScale = pointSize.width / PageLayout.contentWidth
+            let pointScale = pointSize.width / PageLayout.portraitContentWidth
             context.cgContext.scaleBy(x: pointScale, y: pointScale)
             NotePageRenderer.draw(
                 pageIndex: pageIndex,
@@ -1479,12 +1479,12 @@ final class NotePageRendererTests: XCTestCase {
         let width: CGFloat = 192
         return CGSize(
             width: width,
-            height: width * PageGeometry.a4.pageHeight / PageLayout.contentWidth
+            height: width * PageGeometry.a4.pageHeight / PageLayout.portraitContentWidth
         )
     }
 
     private var fullRenderPointSize: CGSize {
-        CGSize(width: PageLayout.contentWidth, height: PageGeometry.a4.pageHeight)
+        CGSize(width: PageLayout.portraitContentWidth, height: PageGeometry.a4.pageHeight)
     }
 
     private func render(
@@ -1561,7 +1561,7 @@ final class NotePageRendererTests: XCTestCase {
         strokeWidth: Double
     ) -> CanvasElement {
         let center = CGPoint(
-            x: PageLayout.contentWidth / 2,
+            x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
         return CanvasElement(
@@ -1685,11 +1685,11 @@ final class NotePageRendererTests: XCTestCase {
 
         let minX = max(
             0,
-            Int(floor(contentRect.minX / PageLayout.contentWidth * CGFloat(lhs.width)))
+            Int(floor(contentRect.minX / PageLayout.portraitContentWidth * CGFloat(lhs.width)))
         )
         let maxX = min(
             lhs.width,
-            Int(ceil(contentRect.maxX / PageLayout.contentWidth * CGFloat(lhs.width)))
+            Int(ceil(contentRect.maxX / PageLayout.portraitContentWidth * CGFloat(lhs.width)))
         )
         let minY = max(
             0,
@@ -1728,7 +1728,7 @@ final class NotePageRendererTests: XCTestCase {
         func pixel(atContentPoint point: CGPoint) -> Pixel {
             let x = min(
                 width - 1,
-                max(0, Int(point.x / PageLayout.contentWidth * CGFloat(width)))
+                max(0, Int(point.x / PageLayout.portraitContentWidth * CGFloat(width)))
             )
             let y = min(
                 height - 1,

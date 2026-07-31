@@ -83,7 +83,10 @@ final class CanvasViewportReportingTests: XCTestCase {
         )
         XCTAssertEqual(
             newestReport.zoomScale,
-            PageLayout.minZoom(forViewportWidth: 700),
+            PageLayout.minZoom(
+                forViewportWidth: 700,
+                contentWidth: host.canvasView.contentWidthInContentSpace
+            ),
             accuracy: 0.01,
             "synchronous resize report did not contain the new fit zoom"
         )
@@ -251,7 +254,10 @@ final class CanvasViewportReportingTests: XCTestCase {
         )
         XCTAssertEqual(
             initialReport.zoomScale,
-            PageLayout.minZoom(forViewportWidth: pagedCanvasView.bounds.width),
+            PageLayout.minZoom(
+                forViewportWidth: pagedCanvasView.bounds.width,
+                contentWidth: pagedCanvasView.contentWidthInContentSpace
+            ),
             accuracy: 0.01,
             "Hosted canvas's initial viewport report was not at fit zoom."
         )

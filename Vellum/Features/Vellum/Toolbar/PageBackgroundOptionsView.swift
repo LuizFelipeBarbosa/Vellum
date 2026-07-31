@@ -4,12 +4,37 @@ import VellumCore
 
 struct PageBackgroundOptionsView: View {
     @Binding var style: PageBackgroundStyle
+    var pageOrientation: PageOrientation = .portrait
+    var isPageOrientationAvailable: Bool = false
+    var onSetPageOrientation: ((PageOrientation) -> Void)? = nil
+    var orientationWouldPushContentOffPage: ((PageOrientation) -> Bool)? = nil
+
+    @State private var pendingOrientation: PageOrientation?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Paper")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(VellumTheme.ink)
+
+            if isPageOrientationAvailable {
+                OptionsSectionCaption("Orientation")
+
+                Picker("Orientation", selection: orientationBinding) {
+                    ForEach(PageOrientation.allCases, id: \.rawValue) { orientation in
+                        Text(orientation == .portrait ? "Portrait" : "Landscape")
+                            .tag(orientation)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityLabel("Page orientation")
+            } else {
+                Text("Page size follows the imported PDF.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(VellumTheme.mutedDark)
+            }
+
+            OptionsDivider()
 
             OptionsSectionCaption("Style")
 
@@ -27,7 +52,10 @@ struct PageBackgroundOptionsView: View {
                 PagePatternPreview(
                     kind: style.kind,
                     spacing: style.spacing,
-                    tint: style.paperTint
+                    tint: style.paperTint,
+                    size: pageOrientation == .landscape
+                        ? CGSize(width: 96, height: 72)
+                        : CGSize(width: 72, height: 96)
                 )
                 Spacer()
             }
@@ -79,6 +107,45 @@ struct PageBackgroundOptionsView: View {
         .padding(18)
         .frame(width: 300, alignment: .leading)
         .background(VellumTheme.popover)
+        .confirmationDialog(
+            "Flip to \(pendingOrientation == .landscape ? "Landscape" : "Portrait")?",
+            isPresented: Binding(
+                get: { pendingOrientation != nil },
+                set: { if !$0 { pendingOrientation = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Rotate") {
+                if let pendingOrientation {
+                    onSetPageOrientation?(pendingOrientation)
+                }
+                pendingOrientation = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingOrientation = nil
+            }
+        } message: {
+            Text(
+                "Some content is wider than a portrait page and won't be shown. "
+                    + "Flip back to landscape to see it again."
+            )
+        }
+    }
+
+    private var orientationBinding: Binding<PageOrientation> {
+        Binding(
+            get: { pageOrientation },
+            set: { requestOrientation($0) }
+        )
+    }
+
+    private func requestOrientation(_ newOrientation: PageOrientation) {
+        guard newOrientation != pageOrientation else { return }
+        if orientationWouldPushContentOffPage?(newOrientation) == true {
+            pendingOrientation = newOrientation
+        } else {
+            onSetPageOrientation?(newOrientation)
+        }
     }
 
     private var paperColorBinding: Binding<Color> {

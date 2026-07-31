@@ -62,6 +62,56 @@ final class PdfImportServiceTests: XCTestCase {
         XCTAssertEqual(result.note.pageAspectRatio, 792.0 / 612.0, accuracy: 0.001)
     }
 
+    func testLandscapePDFSetsOrientationAndAspectRatio() throws {
+        let result = try PDFImportService.buildNote(
+            fromPDFData: makePDF(
+                pageCount: 1,
+                pageSize: CGSize(width: 792, height: 612)
+            ),
+            title: "Landscape"
+        )
+
+        XCTAssertEqual(result.note.pageOrientation, .landscape)
+        XCTAssertEqual(result.note.pageAspectRatio, 792.0 / 612.0, accuracy: 0.001)
+    }
+
+    func testPortraitPDFKeepsOrientationAndAspectRatio() throws {
+        let result = try PDFImportService.buildNote(
+            fromPDFData: makePDF(
+                pageCount: 1,
+                pageSize: CGSize(width: 612, height: 792)
+            ),
+            title: "Portrait"
+        )
+
+        XCTAssertEqual(result.note.pageOrientation, .portrait)
+        XCTAssertEqual(result.note.pageAspectRatio, 792.0 / 612.0, accuracy: 0.001)
+    }
+
+    func testSquarePDFKeepsPortraitOrientation() throws {
+        let result = try PDFImportService.buildNote(
+            fromPDFData: makePDF(
+                pageCount: 1,
+                pageSize: CGSize(width: 700, height: 700)
+            ),
+            title: "Square"
+        )
+
+        XCTAssertEqual(result.note.pageOrientation, .portrait)
+    }
+
+    func testLandscapePDFGeometryIsWiderThanTall() throws {
+        let result = try PDFImportService.buildNote(
+            fromPDFData: makePDF(
+                pageCount: 1,
+                pageSize: CGSize(width: 792, height: 612)
+            ),
+            title: "Landscape Geometry"
+        )
+
+        XCTAssertGreaterThan(result.note.pageGeometry.contentWidth, result.note.pageGeometry.pageHeight)
+    }
+
     func testRotatedFirstPageSwapsTheDerivedAspectRatio() throws {
         let unrotatedData = makePDF(
             pageCount: 1,
@@ -77,7 +127,8 @@ final class PdfImportServiceTests: XCTestCase {
             title: "Rotated Letter"
         )
 
-        XCTAssertEqual(result.note.pageAspectRatio, 612.0 / 792.0, accuracy: 0.001)
+        XCTAssertEqual(result.note.pageOrientation, .landscape)
+        XCTAssertEqual(result.note.pageAspectRatio, 792.0 / 612.0, accuracy: 0.001)
     }
 
     // A 501-page fixture is intentionally omitted because it is expensive to generate.

@@ -82,6 +82,50 @@ func currentNoteLayoutVersionRoundTrip() throws {
     #expect(decoded.layoutVersion == Note.currentLayoutVersion)
 }
 
+@Test("A manifest without page orientation defaults to portrait")
+func manifestWithoutPageOrientationDefaultsToPortrait() throws {
+    let encoded = try FilePersistence.encoder().encode(
+        migrationNote(schemaVersion: Note.currentSchemaVersion)
+    )
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "pageOrientation")
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    #expect(decoded.pageOrientation == .portrait)
+    #expect(decoded.pageGeometry == .a4)
+}
+
+@Test("An unknown page orientation defaults to portrait")
+func unknownPageOrientationDefaultsToPortrait() throws {
+    let encoded = try FilePersistence.encoder().encode(
+        migrationNote(schemaVersion: Note.currentSchemaVersion)
+    )
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object["pageOrientation"] = "future-orientation"
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    #expect(decoded.pageOrientation == .portrait)
+    #expect(decoded.pageGeometry == .a4)
+}
+
+@Test("Page orientation round trips through persistence")
+func pageOrientationRoundTripsThroughPersistence() throws {
+    var note = migrationNote(schemaVersion: Note.currentSchemaVersion)
+    note.pageOrientation = .landscape
+
+    let decoded = try FilePersistence.decoder().decode(
+        Note.self,
+        from: FilePersistence.encoder().encode(note)
+    )
+
+    #expect(decoded.pageOrientation == .landscape)
+    #expect(decoded.pageGeometry == .a4Landscape)
+}
+
 @Test("A v2 manifest decodes with soft-delete defaults")
 func v2ManifestDefaults() throws {
     let original = migrationNote(schemaVersion: 2)

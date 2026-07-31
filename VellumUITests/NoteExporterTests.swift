@@ -344,7 +344,7 @@ final class NoteExporterTests: XCTestCase {
                 pageIndex: 1,
                 content: referenceContent,
                 pointSize: CGSize(
-                    width: PageLayout.contentWidth,
+                    width: PageLayout.portraitContentWidth,
                     height: PageGeometry.a4.pageHeight
                 ),
                 scale: 2
@@ -536,11 +536,11 @@ final class NoteExporterTests: XCTestCase {
 
         let minX = max(
             0,
-            Int(floor(contentRect.minX / PageLayout.contentWidth * CGFloat(lhs.width)))
+            Int(floor(contentRect.minX / PageLayout.portraitContentWidth * CGFloat(lhs.width)))
         )
         let maxX = min(
             lhs.width,
-            Int(ceil(contentRect.maxX / PageLayout.contentWidth * CGFloat(lhs.width)))
+            Int(ceil(contentRect.maxX / PageLayout.portraitContentWidth * CGFloat(lhs.width)))
         )
         let minY = max(
             0,

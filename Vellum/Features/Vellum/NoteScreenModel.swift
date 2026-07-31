@@ -54,7 +54,12 @@ final class NoteScreenModel {
     private var autosaveDisabled = false
     private var pendingPageMutationSave = false
 
-    var note: Note?
+    var note: Note? {
+        didSet {
+            pdfCache.contentWidth = note?.pageGeometry.contentWidth
+                ?? PageGeometry.a4.contentWidth
+        }
+    }
     var drawingData: Data?
     var proposals: [AgentProposal] = []
     var editorMode: EditorMode = .ink
@@ -75,6 +80,9 @@ final class NoteScreenModel {
     var selectedEntity: Entity?
     var noteTitles: [UUID: String] = [:]
     var onScrollToPage: ((Int) -> Void)?
+    var hasHiddenSelectionStrokes: (() -> Bool)?
+    var onPageOrientationChanged: (() -> Void)?
+    var onOrientationFlipped: ((CGFloat) -> Void)?
 
     var pendingProposals: [AgentProposal] {
         proposals.filter { $0.status == .pending }
@@ -98,11 +106,26 @@ final class NoteScreenModel {
         canvasElements.pagesProvider = { [weak self] in
             self?.note?.pages ?? []
         }
+        canvasElements.noteShapeProvider = { [weak self] in
+            guard let note = self?.note else {
+                return CanvasElementsStore.NoteShape(
+                    portraitAspectRatio: PageLayout.a4AspectRatio,
+                    orientation: .portrait
+                )
+            }
+            return CanvasElementsStore.NoteShape(
+                portraitAspectRatio: note.pageAspectRatio,
+                orientation: note.pageOrientation
+            )
+        }
         pdfCache.pagesProvider = { [weak self] in
             self?.note?.pages ?? []
         }
         canvasElements.onPagesRestored = { [weak self] pages in
             self?.pagesRestored(pages)
+        }
+        canvasElements.onNoteShapeRestored = { [weak self] shape in
+            self?.noteShapeRestored(shape)
         }
     }
 
@@ -222,7 +245,8 @@ final class NoteScreenModel {
                 let migration = LegacyContentMigrator.migrateIfNeeded(
                     drawing: loadedPKDrawing,
                     elements: elements,
-                    layoutVersion: loadedNote.layoutVersion
+                    layoutVersion: loadedNote.layoutVersion,
+                    targetContentWidth: loadedNote.pageGeometry.contentWidth
                 )
                 if migration.didMigrate {
                     drawingChanged(migration.drawing.dataRepresentation())
@@ -308,6 +332,64 @@ final class NoteScreenModel {
             currentNote.pages.append(Self.blankPage(order: order))
         }
         note = currentNote
+    }
+
+    @discardableResult
+    func setPageOrientation(_ orientation: PageOrientation) -> Bool {
+        guard let canvasView = canvasElements.canvasReference?.canvasView,
+              !canvasView.isZooming,
+              (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else {
+            return false
+        }
+        guard hasHiddenSelectionStrokes?() != true,
+              pdfBands.isEmpty,
+              var currentNote = note,
+              currentNote.pageOrientation != orientation else {
+            return false
+        }
+
+        let visibleCenterContentY = (canvasView as? PagedCanvasView).map { canvas in
+            (canvas.contentOffset.y + canvas.bounds.height / 2) / canvas.zoomScale
+        }
+
+        pendingPageMutationSave = true
+        defer { pendingPageMutationSave = false }
+        canvasElements.performTransaction("Rotate Pages") {
+            currentNote.pageOrientation = orientation
+            note = currentNote
+            materializePagesForFilledBands()
+        }
+
+        onPageOrientationChanged?()
+        if let visibleCenterContentY {
+            onOrientationFlipped?(visibleCenterContentY)
+        }
+        return true
+    }
+
+    func orientationWouldPushContentOffPage(to orientation: PageOrientation) -> Bool {
+        guard let note else { return false }
+
+        let drawingBounds: CGRect
+        if let liveDrawing = canvasElements.canvasReference?.canvasView?.drawing {
+            drawingBounds = liveDrawing.bounds
+        } else if let drawingData,
+                  let persistedDrawing = try? PKDrawing(data: drawingData) {
+            drawingBounds = persistedDrawing.bounds
+        } else {
+            drawingBounds = .null
+        }
+
+        let drawingRight =
+            (drawingBounds.isNull || drawingBounds.isEmpty) ? 0 : drawingBounds.maxX
+        let elementsRight = canvasElements.elements
+            .map { $0.effectiveBoundingBox.maxX }
+            .max() ?? 0
+        let targetWidth = PageGeometry(
+            portraitAspectRatio: note.pageAspectRatio,
+            orientation: orientation
+        ).contentWidth
+        return max(drawingRight, elementsRight) > targetWidth
     }
 
     @discardableResult
@@ -441,6 +523,7 @@ final class NoteScreenModel {
             errorMessage = "The note must be loaded before inserting an image."
             return nil
         }
+        let contentWidth = note.pageGeometry.contentWidth
 
         do {
             try await notes.saveAsset(
@@ -460,7 +543,7 @@ final class NoteScreenModel {
         )
         let scale = min(
             fittedLongEdge / longEdge,
-            PageLayout.contentWidth / processed.pixelSize.width
+            contentWidth / processed.pixelSize.width
         )
         let fittedSize = CGSize(
             width: processed.pixelSize.width * scale,
@@ -472,7 +555,7 @@ final class NoteScreenModel {
         )
         let frameX = min(
             max(0, center.x - fittedSize.width / 2),
-            PageLayout.contentWidth - fittedSize.width
+            contentWidth - fittedSize.width
         )
         let frameY = max(0, center.y - fittedSize.height / 2)
         let frame = CanvasRect(
@@ -646,6 +729,18 @@ final class NoteScreenModel {
             return
         }
         currentNote.pages = pages
+        note = currentNote
+        noteWasEdited()
+    }
+
+    private func noteShapeRestored(_ shape: CanvasElementsStore.NoteShape) {
+        guard var currentNote = note,
+              currentNote.pageAspectRatio != shape.portraitAspectRatio
+                || currentNote.pageOrientation != shape.orientation else {
+            return
+        }
+        currentNote.pageAspectRatio = shape.portraitAspectRatio
+        currentNote.pageOrientation = shape.orientation
         note = currentNote
         noteWasEdited()
     }
