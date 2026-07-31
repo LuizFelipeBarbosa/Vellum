@@ -15,10 +15,14 @@ struct NoteToolbarView: View {
     let store: ToolPreferencesStore
     @Binding var selectedTool: ToolID
     @Binding var activeOptionsTool: ToolID?
+    @Binding var isShowingPaperOptions: Bool
     @State private var isShowingFavoritesEditor = false
-    @State private var isShowingBackgroundOptions = false
     let canvasReference: NoteCanvasReference
     var backgroundStyle: Binding<PageBackgroundStyle>? = nil
+    var pageOrientation: PageOrientation = .portrait
+    var isPageOrientationAvailable: Bool = false
+    var onSetPageOrientation: ((PageOrientation) -> Void)? = nil
+    var orientationWouldPushContentOffPage: ((PageOrientation) -> Bool)? = nil
     var onInsertPhoto: (() -> Void)? = nil
     var onInsertFile: (() -> Void)? = nil
     var dockEdge: ToolbarDockEdge = .bottom
@@ -61,9 +65,15 @@ struct NoteToolbarView: View {
         .popover(isPresented: $isShowingFavoritesEditor, arrowEdge: arrowEdge) {
             FavoritesEditView(store: store)
         }
-        .popover(isPresented: $isShowingBackgroundOptions, arrowEdge: arrowEdge) {
+        .popover(isPresented: $isShowingPaperOptions, arrowEdge: arrowEdge) {
             if let backgroundStyle {
-                PageBackgroundOptionsView(style: backgroundStyle)
+                PageBackgroundOptionsView(
+                    style: backgroundStyle,
+                    pageOrientation: pageOrientation,
+                    isPageOrientationAvailable: isPageOrientationAvailable,
+                    onSetPageOrientation: onSetPageOrientation,
+                    orientationWouldPushContentOffPage: orientationWouldPushContentOffPage
+                )
             }
         }
     }
@@ -177,7 +187,7 @@ struct NoteToolbarView: View {
 
             if backgroundStyle != nil {
                 Button {
-                    isShowingBackgroundOptions.toggle()
+                    isShowingPaperOptions.toggle()
                 } label: {
                     Image(systemName: "doc.text.image")
                         .frame(width: 24, height: 24)

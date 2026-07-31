@@ -49,6 +49,10 @@ final class CanvasSelectionController {
         return element.rotation
     }
 
+    var hasHiddenStrokes: Bool {
+        drawingBeforeHide != nil
+    }
+
     private var captureStart: CGPoint?
     private var captureMode: SelectionMode?
     private var captureRect: CGRect?

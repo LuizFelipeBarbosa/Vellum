@@ -52,6 +52,68 @@ final class ElementUndoTransactionTests: XCTestCase {
         XCTAssertTrue(undoManager.canRedo)
     }
 
+    func testShapeAndPageGrowthUndoAndRedoAtomically() {
+        let (store, undoManager) = makeStore()
+        let originalShape = CanvasElementsStore.NoteShape(
+            portraitAspectRatio: PageLayout.a4AspectRatio,
+            orientation: .portrait
+        )
+        let landscapeShape = CanvasElementsStore.NoteShape(
+            portraitAspectRatio: PageLayout.a4AspectRatio,
+            orientation: .landscape
+        )
+        var shape = originalShape
+        store.noteShapeProvider = { shape }
+        store.onNoteShapeRestored = { shape = $0 }
+
+        let firstPageID = UUID()
+        var pages = [
+            NotePage(
+                id: firstPageID,
+                order: 0,
+                plainText: "",
+                drawingAssetPath: "pages/\(firstPageID.uuidString)/drawing.data",
+                background: .blank
+            ),
+        ]
+        store.pagesProvider = { pages }
+        store.onPagesRestored = { pages = $0 }
+
+        store.performTransaction("Rotate Pages") {
+            shape = landscapeShape
+            let secondPageID = UUID()
+            pages.append(
+                NotePage(
+                    id: secondPageID,
+                    order: 1,
+                    plainText: "",
+                    drawingAssetPath: "pages/\(secondPageID.uuidString)/drawing.data",
+                    background: .blank
+                )
+            )
+        }
+
+        XCTAssertEqual(shape, landscapeShape)
+        XCTAssertEqual(pages.count, 2)
+        XCTAssertEqual(undoManager.undoActionName, "Rotate Pages")
+
+        undoManager.undo()
+
+        XCTAssertEqual(shape, originalShape)
+        XCTAssertEqual(pages.count, 1)
+        XCTAssertEqual(pages[0].id, firstPageID)
+        XCTAssertFalse(undoManager.canUndo)
+        XCTAssertTrue(undoManager.canRedo)
+
+        undoManager.redo()
+
+        XCTAssertEqual(shape, landscapeShape)
+        XCTAssertEqual(pages.count, 2)
+        XCTAssertEqual(pages.map(\.order), [0, 1])
+        XCTAssertFalse(undoManager.canRedo)
+        XCTAssertEqual(undoManager.undoActionName, "Rotate Pages")
+    }
+
     func testAddElementUsesKindSpecificUndoActionNames() {
         let (textStore, textUndoManager) = makeStore()
         textStore.addElement(makeElement(text: "Text"))

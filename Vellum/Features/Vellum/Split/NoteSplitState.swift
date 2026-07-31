@@ -24,6 +24,7 @@ final class NoteSplitState {
     /// The tool an element selection set aside, restored when that selection ends.
     var toolBorrowedByElementSelection: ToolID?
     var activeOptionsTool: ToolID?
+    var isShowingPaperOptions = false
     var squeezeEraser = SqueezeEraserController()
 
     var panes: [NotePane] {

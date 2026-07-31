@@ -140,6 +140,7 @@ struct NoteScreenView: View {
                 selectionController: selectionController,
                 shapeSnapController: shapeSnapController,
                 pageState: pageState,
+                thumbnailStore: thumbnailStore,
                 currentVisibleContentRect: { currentVisibleContentRect },
                 cacheCurrentTool: cacheCurrentTool,
                 scrollCanvas: scrollCanvas
@@ -173,6 +174,7 @@ struct NoteScreenView: View {
                 selectionController.clearSelection()
                 isShowingThumbnails = false
                 model.isShowingSuggestions = false
+                app.split.isShowingPaperOptions = false
             }
         }
         .modifier(
@@ -1040,6 +1042,7 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
     let selectionController: CanvasSelectionController
     let shapeSnapController: ShapeSnapController
     let pageState: NotePageState
+    let thumbnailStore: PageThumbnailStore
     let currentVisibleContentRect: () -> CGRect
     let cacheCurrentTool: () -> Void
     let scrollCanvas: (Int) -> Void
@@ -1056,6 +1059,9 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                 }
                 selectionController.canvasReference = canvasReference
                 selectionController.elementsStore = model.canvasElements
+                model.hasHiddenSelectionStrokes = { [weak selectionController] in
+                    selectionController?.hasHiddenStrokes ?? false
+                }
                 shapeSnapController.canvasReference = canvasReference
                 shapeSnapController.elementsStore = model.canvasElements
                 model.canvasElements.onSnapshotApplied = { [weak selectionController] in
@@ -1070,6 +1076,28 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                     Task { @MainActor in
                         await Task.yield()
                         scrollCanvas(index)
+                    }
+                }
+                model.onPageOrientationChanged = {
+                    thumbnailStore.markDirty()
+                }
+                model.onOrientationFlipped = { contentY in
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard let canvas = canvasReference.canvasView as? PagedCanvasView else {
+                            return
+                        }
+                        let offsetY = PageLayout.anchoredOffsetY(
+                            visibleCenterContentY: contentY,
+                            scale: canvas.zoomScale,
+                            viewportHeight: canvas.bounds.height,
+                            contentHeight: canvas.contentHeightInContentSpace,
+                            minimumOffsetY: -canvas.topContentInset
+                        )
+                        canvas.setContentOffset(
+                            CGPoint(x: canvas.contentOffset.x, y: offsetY),
+                            animated: false
+                        )
                     }
                 }
                 let resolveSnapGrid = { [weak model, weak pageState] (point: CGPoint) -> ShapeSnapGrid? in
@@ -1120,6 +1148,9 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
             }
             .onDisappear {
                 model.onScrollToPage = nil
+                model.hasHiddenSelectionStrokes = nil
+                model.onPageOrientationChanged = nil
+                model.onOrientationFlipped = nil
             }
     }
 }

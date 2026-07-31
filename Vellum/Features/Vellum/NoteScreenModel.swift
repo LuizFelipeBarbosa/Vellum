@@ -80,6 +80,9 @@ final class NoteScreenModel {
     var selectedEntity: Entity?
     var noteTitles: [UUID: String] = [:]
     var onScrollToPage: ((Int) -> Void)?
+    var hasHiddenSelectionStrokes: (() -> Bool)?
+    var onPageOrientationChanged: (() -> Void)?
+    var onOrientationFlipped: ((CGFloat) -> Void)?
 
     var pendingProposals: [AgentProposal] {
         proposals.filter { $0.status == .pending }
@@ -103,11 +106,26 @@ final class NoteScreenModel {
         canvasElements.pagesProvider = { [weak self] in
             self?.note?.pages ?? []
         }
+        canvasElements.noteShapeProvider = { [weak self] in
+            guard let note = self?.note else {
+                return CanvasElementsStore.NoteShape(
+                    portraitAspectRatio: PageLayout.a4AspectRatio,
+                    orientation: .portrait
+                )
+            }
+            return CanvasElementsStore.NoteShape(
+                portraitAspectRatio: note.pageAspectRatio,
+                orientation: note.pageOrientation
+            )
+        }
         pdfCache.pagesProvider = { [weak self] in
             self?.note?.pages ?? []
         }
         canvasElements.onPagesRestored = { [weak self] pages in
             self?.pagesRestored(pages)
+        }
+        canvasElements.onNoteShapeRestored = { [weak self] shape in
+            self?.noteShapeRestored(shape)
         }
     }
 
@@ -314,6 +332,64 @@ final class NoteScreenModel {
             currentNote.pages.append(Self.blankPage(order: order))
         }
         note = currentNote
+    }
+
+    @discardableResult
+    func setPageOrientation(_ orientation: PageOrientation) -> Bool {
+        guard let canvasView = canvasElements.canvasReference?.canvasView,
+              !canvasView.isZooming,
+              (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else {
+            return false
+        }
+        guard hasHiddenSelectionStrokes?() != true,
+              pdfBands.isEmpty,
+              var currentNote = note,
+              currentNote.pageOrientation != orientation else {
+            return false
+        }
+
+        let visibleCenterContentY = (canvasView as? PagedCanvasView).map { canvas in
+            (canvas.contentOffset.y + canvas.bounds.height / 2) / canvas.zoomScale
+        }
+
+        pendingPageMutationSave = true
+        defer { pendingPageMutationSave = false }
+        canvasElements.performTransaction("Rotate Pages") {
+            currentNote.pageOrientation = orientation
+            note = currentNote
+            materializePagesForFilledBands()
+        }
+
+        onPageOrientationChanged?()
+        if let visibleCenterContentY {
+            onOrientationFlipped?(visibleCenterContentY)
+        }
+        return true
+    }
+
+    func orientationWouldPushContentOffPage(to orientation: PageOrientation) -> Bool {
+        guard let note else { return false }
+
+        let drawingBounds: CGRect
+        if let liveDrawing = canvasElements.canvasReference?.canvasView?.drawing {
+            drawingBounds = liveDrawing.bounds
+        } else if let drawingData,
+                  let persistedDrawing = try? PKDrawing(data: drawingData) {
+            drawingBounds = persistedDrawing.bounds
+        } else {
+            drawingBounds = .null
+        }
+
+        let drawingRight =
+            (drawingBounds.isNull || drawingBounds.isEmpty) ? 0 : drawingBounds.maxX
+        let elementsRight = canvasElements.elements
+            .map { $0.effectiveBoundingBox.maxX }
+            .max() ?? 0
+        let targetWidth = PageGeometry(
+            portraitAspectRatio: note.pageAspectRatio,
+            orientation: orientation
+        ).contentWidth
+        return max(drawingRight, elementsRight) > targetWidth
     }
 
     @discardableResult
@@ -653,6 +729,18 @@ final class NoteScreenModel {
             return
         }
         currentNote.pages = pages
+        note = currentNote
+        noteWasEdited()
+    }
+
+    private func noteShapeRestored(_ shape: CanvasElementsStore.NoteShape) {
+        guard var currentNote = note,
+              currentNote.pageAspectRatio != shape.portraitAspectRatio
+                || currentNote.pageOrientation != shape.orientation else {
+            return
+        }
+        currentNote.pageAspectRatio = shape.portraitAspectRatio
+        currentNote.pageOrientation = shape.orientation
         note = currentNote
         noteWasEdited()
     }

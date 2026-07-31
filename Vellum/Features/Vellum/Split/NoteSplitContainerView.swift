@@ -194,6 +194,10 @@ struct NoteSplitContainerView: View {
                             get: { app.split.activeOptionsTool },
                             set: { app.split.activeOptionsTool = $0 }
                         ),
+                        isShowingPaperOptions: Binding(
+                            get: { app.split.isShowingPaperOptions },
+                            set: { app.split.isShowingPaperOptions = $0 }
+                        ),
                         canvasReference: focusedPane?.canvasReference
                             ?? fallbackCanvasReference,
                         backgroundStyle: focusedPane.map { pane in
@@ -201,6 +205,18 @@ struct NoteSplitContainerView: View {
                                 get: { pane.noteModel.backgroundStyle },
                                 set: { pane.noteModel.backgroundStyle = $0 }
                             )
+                        },
+                        pageOrientation: app.split.focusedPane?
+                            .noteModel.note?.pageOrientation ?? .portrait,
+                        isPageOrientationAvailable: app.split.focusedPane?
+                            .noteModel.pdfBands.isEmpty ?? false,
+                        onSetPageOrientation: { orientation in
+                            _ = app.split.focusedPane?
+                                .noteModel.setPageOrientation(orientation)
+                        },
+                        orientationWouldPushContentOffPage: { orientation in
+                            app.split.focusedPane?.noteModel
+                                .orientationWouldPushContentOffPage(to: orientation) ?? false
                         },
                         onInsertPhoto: {
                             app.split.focusedPane?.noteModel.isShowingPhotosPicker = true
@@ -262,6 +278,7 @@ struct NoteSplitContainerView: View {
                             + "columns:\(columns.count);"
                             + "grid:\(formattedGrid(grid));"
                             + "focused:\(formattedPaneIndex(focusedPaneIndex));"
+                            + "orientation:\(app.split.focusedPane?.noteModel.note?.pageOrientation.rawValue ?? "none");"
                             + "dragging:\(dragState == nil ? 0 : 1);"
                             + "target:\(formattedDragTarget(dragState));"
                             + "size:\(Int(geometry.size.width.rounded()))x\(Int(geometry.size.height.rounded()))"

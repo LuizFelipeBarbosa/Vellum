@@ -7,14 +7,21 @@ import VellumCore
 @MainActor
 @Observable
 final class CanvasElementsStore {
+    struct NoteShape: Equatable {
+        let portraitAspectRatio: Double
+        let orientation: PageOrientation
+    }
+
     fileprivate struct Snapshot: Equatable {
         let drawingData: Data?
         let elements: [CanvasElement]
+        let noteShape: NoteShape?
         let pages: [NotePage]?
 
         static func == (lhs: Snapshot, rhs: Snapshot) -> Bool {
             lhs.drawingData == rhs.drawingData
                 && lhs.elements == rhs.elements
+                && lhs.noteShape == rhs.noteShape
                 && pagesEqual(lhs.pages, rhs.pages)
         }
 
@@ -50,6 +57,8 @@ final class CanvasElementsStore {
     var onElementsChanged: (([CanvasElement]) -> Void)?
     var pagesProvider: (() -> [NotePage])?
     var onPagesRestored: (([NotePage]) -> Void)?
+    var noteShapeProvider: (() -> NoteShape)?
+    var onNoteShapeRestored: ((NoteShape) -> Void)?
     /// Fired after an undo/redo snapshot restore. Selection must be invalidated:
     /// the programmatic drawing write suppresses onExternalDrawingChange, so
     /// stroke indices held by a selection would silently go stale.
@@ -236,6 +245,7 @@ final class CanvasElementsStore {
         let before = Snapshot(
             drawingData: currentSnapshot.drawingData,
             elements: previousElements,
+            noteShape: currentSnapshot.noteShape,
             pages: currentSnapshot.pages
         )
         guard before != currentSnapshot else { return }
@@ -312,6 +322,7 @@ final class CanvasElementsStore {
         Snapshot(
             drawingData: canvasReference?.canvasView?.drawing.dataRepresentation(),
             elements: elements,
+            noteShape: noteShapeProvider?(),
             pages: pagesProvider?()
         )
     }
@@ -328,6 +339,9 @@ final class CanvasElementsStore {
         }
 
         elements = snapshot.elements
+        if let noteShape = snapshot.noteShape {
+            onNoteShapeRestored?(noteShape)
+        }
         if let pages = snapshot.pages {
             onPagesRestored?(pages)
         }

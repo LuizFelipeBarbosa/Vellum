@@ -34,7 +34,7 @@ struct PDFImportService {
             throw PDFImportError.unreadable
         }
 
-        // Every band uses the first page's displayed aspect; mixed-size pages still aspect-fit.
+        // The note follows the first page's displayed orientation and aspect; mixed-size pages still aspect-fit.
         let mediaBoxSize = firstPage.bounds(for: .mediaBox).size
         let normalizedRotation = ((firstPage.rotation % 360) + 360) % 360
         let displayedPageSize =
@@ -44,6 +44,7 @@ struct PDFImportService {
         guard displayedPageSize.width > 0, displayedPageSize.height > 0 else {
             throw PDFImportError.unreadable
         }
+        let isLandscape = displayedPageSize.width > displayedPageSize.height
 
         let assetRelativePath = "assets/pdf-\(UUID().uuidString).pdf"
         let pages = (0..<document.pageCount).map { index in
@@ -73,7 +74,10 @@ struct PDFImportService {
             pages: pages,
             noteType: .pdf,
             backgroundStyle: .blank,
-            pageAspectRatio: Double(displayedPageSize.height / displayedPageSize.width)
+            pageAspectRatio: isLandscape
+                ? Double(displayedPageSize.width / displayedPageSize.height)
+                : Double(displayedPageSize.height / displayedPageSize.width),
+            pageOrientation: isLandscape ? .landscape : .portrait
         )
 
         return (note, assetRelativePath)
