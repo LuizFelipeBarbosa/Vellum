@@ -298,6 +298,168 @@ final class SplitPaneFlowUITests: XCTestCase {
         )
     }
 
+    func testSidebarScrollsDuringAndAfterADrag() throws {
+        let context = launchApp(splitPaneCount: 1)
+        let initialState = waitForState(context.stateElement) {
+            $0["panes"] == "1" && $0["columns"] == "1"
+        }
+        XCTAssertEqual(initialState["panes"], "1", "state: \(initialState)")
+        XCTAssertEqual(initialState["columns"], "1", "state: \(initialState)")
+
+        addTeardownBlock { @MainActor in
+            self.closePanesAddedAbove(
+                1,
+                in: context.app,
+                stateElement: context.stateElement
+            )
+        }
+
+        let sidebar = showSidebar(in: context.app)
+        guard let initialTopRow = waitForSidebarRow(
+            in: sidebar,
+            matching: { _ in true }
+        ) else {
+            return XCTFail(
+                "sidebar fixture has no visible note row, state: \(initialState)"
+            )
+        }
+
+        let rowCount = sidebar.buttons.allElementsBoundByIndex.filter { button in
+            button.exists
+                && button.isHittable
+                && button.label != "Close notes"
+                && button.frame.intersects(sidebar.frame)
+        }.count
+        // Mirrors SplitSidebarDragMath.rowHeight, which is internal to the app.
+        let sidebarRowHeight: CGFloat = 56
+        let contentHeight = CGFloat(rowCount) * sidebarRowHeight
+        let viewportHeight = sidebar.frame.height
+        guard contentHeight >= viewportHeight + 200 else {
+            throw XCTSkip(
+                "seeded sidebar fixture has \(rowCount) note rows "
+                    + "(\(contentHeight)pt of row content) in a "
+                    + "\(viewportHeight)pt viewport; it does not have enough "
+                    + "notes to exercise real scrolling on this device"
+            )
+        }
+
+        let initialTopRowLabel = initialTopRow.label
+        let initialTopRowY = initialTopRow.frame.minY
+        let scrollDistance = min(120, sidebar.frame.height * 0.15)
+        let firstScrollStart = sidebar.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.70)
+        )
+        let firstScrollEnd = firstScrollStart.withOffset(
+            CGVector(dx: 0, dy: -scrollDistance)
+        )
+        guard let firstScrollRecord = makeSidebarFlickGestureRecord(
+            in: context.app,
+            from: firstScrollStart,
+            to: firstScrollEnd
+        ) else {
+            return XCTFail("XCTest synthesized pointer support is unavailable.")
+        }
+        XCTAssertTrue(
+            ShapeFlowTestHelpers.synthesize(firstScrollRecord),
+            "failed to synthesize the initial sidebar flick"
+        )
+
+        let firstScrollSucceeded = waitUntil(timeout: 2) {
+            !initialTopRow.exists
+                || !initialTopRow.isHittable
+                || initialTopRow.frame.minY < initialTopRowY - 8
+        }
+        let firstScrollObservation = initialTopRow.exists
+            ? "row '\(initialTopRowLabel)' moved from y \(initialTopRowY) "
+                + "to \(initialTopRow.frame.minY)"
+            : "row '\(initialTopRowLabel)' left the accessibility hierarchy"
+        XCTAssertTrue(
+            firstScrollSucceeded,
+            "sidebar did not scroll immediately; \(firstScrollObservation), "
+                + "state: \(stateValues(of: context.stateElement))"
+        )
+
+        guard let dragRow = waitForSidebarRow(
+            in: sidebar,
+            matching: { _ in true }
+        ) else {
+            return XCTFail(
+                "sidebar has no visible row after scrolling; "
+                    + "\(firstScrollObservation), state: "
+                    + stateString(of: context.stateElement)
+            )
+        }
+        guard let record = makeSidebarDragGestureRecord(
+            in: context.app,
+            window: context.window,
+            row: dragRow,
+            dropOffset: CGVector(dx: 0.10, dy: 0.50)
+        ) else {
+            return XCTFail("XCTest synthesized pointer support is unavailable.")
+        }
+
+        XCTAssertTrue(
+            ShapeFlowTestHelpers.synthesize(record),
+            "failed to synthesize the cancel-zone sidebar note drag"
+        )
+
+        let cancelledState = waitForState(context.stateElement, timeout: 5) {
+            $0["dragging"] == "0"
+        }
+        XCTAssertEqual(cancelledState["dragging"], "0", "state: \(cancelledState)")
+        XCTAssertEqual(cancelledState["panes"], "1", "state: \(cancelledState)")
+        XCTAssertEqual(cancelledState["columns"], "1", "state: \(cancelledState)")
+        XCTAssertTrue(
+            sidebar.exists,
+            "sidebar closed after cancel-zone drag, state: \(cancelledState)"
+        )
+
+        guard let postDragTopRow = waitForSidebarRow(
+            in: sidebar,
+            matching: { _ in true }
+        ) else {
+            return XCTFail(
+                "sidebar has no visible row after cancel-zone drag, "
+                    + "state: \(cancelledState)"
+            )
+        }
+        let postDragTopRowLabel = postDragTopRow.label
+        let postDragTopRowY = postDragTopRow.frame.minY
+        let secondScrollStart = sidebar.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.30)
+        )
+        let secondScrollEnd = secondScrollStart.withOffset(
+            CGVector(dx: 0, dy: scrollDistance)
+        )
+        guard let secondScrollRecord = makeSidebarFlickGestureRecord(
+            in: context.app,
+            from: secondScrollStart,
+            to: secondScrollEnd
+        ) else {
+            return XCTFail("XCTest synthesized pointer support is unavailable.")
+        }
+        XCTAssertTrue(
+            ShapeFlowTestHelpers.synthesize(secondScrollRecord),
+            "failed to synthesize the post-drag sidebar flick"
+        )
+
+        let secondScrollSucceeded = waitUntil(timeout: 2) {
+            !postDragTopRow.exists
+                || !postDragTopRow.isHittable
+                || postDragTopRow.frame.minY > postDragTopRowY + 8
+        }
+        let secondScrollObservation = postDragTopRow.exists
+            ? "row '\(postDragTopRowLabel)' moved from y \(postDragTopRowY) "
+                + "to \(postDragTopRow.frame.minY)"
+            : "row '\(postDragTopRowLabel)' left the accessibility hierarchy"
+        XCTAssertTrue(
+            secondScrollSucceeded,
+            "sidebar did not scroll after the cancelled drag; "
+                + "\(secondScrollObservation), state: "
+                + stateString(of: context.stateElement)
+        )
+    }
+
     func testDragAlreadyOpenNoteFocusesPane() {
         let context = launchApp(splitPaneCount: 2)
         let initialState = waitForState(context.stateElement) {
@@ -334,10 +496,34 @@ final class SplitPaneFlowUITests: XCTestCase {
             return XCTFail("XCTest synthesized pointer support is unavailable.")
         }
 
-        XCTAssertTrue(
-            ShapeFlowTestHelpers.synthesize(record),
-            "failed to synthesize the already-open note drag"
+        let gestureFinished = XCTestExpectation(
+            description: "already-open note drag finished"
         )
+        DispatchQueue.global(qos: .userInitiated).async {
+            XCTAssertTrue(
+                ShapeFlowTestHelpers.synthesize(record),
+                "failed to synthesize the already-open note drag"
+            )
+            gestureFinished.fulfill()
+        }
+
+        let midDragDeadline = Date().addingTimeInterval(5)
+        var sawFocusTarget = false
+        while Date() < midDragDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            let state = stateValues(of: context.stateElement)
+            if state["target"] == "focus-0.0" {
+                sawFocusTarget = true
+                break
+            }
+        }
+        XCTAssertTrue(
+            sawFocusTarget,
+            "never observed focus-0.0 target, state: "
+                + stateString(of: context.stateElement)
+        )
+
+        wait(for: [gestureFinished], timeout: 15)
 
         let settledState = waitForState(context.stateElement, timeout: 5) {
             $0["dragging"] == "0"
@@ -993,7 +1179,7 @@ final class SplitPaneFlowUITests: XCTestCase {
         )
     }
 
-    func testInteriorDropReplacesPaneNote() throws {
+    func testInteriorDropSplitsPane() throws {
         let context = launchApp(splitPaneCount: 2)
         let initialState = waitForState(context.stateElement) {
             $0["panes"] == "2"
@@ -1005,10 +1191,18 @@ final class SplitPaneFlowUITests: XCTestCase {
             return XCTFail("initial grid widths are invalid: \(initialState)")
         }
 
+        addTeardownBlock { @MainActor in
+            self.closePanesAddedAbove(
+                2,
+                in: context.app,
+                stateElement: context.stateElement
+            )
+        }
+
         let windowWidth = Double(context.window.frame.width)
         let paneOneStartXFraction = widths[0]
         let paneOneInteriorXFraction =
-            paneOneStartXFraction + widths[1] / 2
+            paneOneStartXFraction + widths[1] * 0.65
         let paneOneInteriorX = paneOneInteriorXFraction * windowWidth
         guard paneOneInteriorX > 0, paneOneInteriorX < windowWidth else {
             return XCTFail(
@@ -1030,7 +1224,6 @@ final class SplitPaneFlowUITests: XCTestCase {
                 "no sidebar row found that differs from both open pane titles"
             )
         }
-        let replacementTitle = row.label
         guard let record = makeSidebarDragGestureRecord(
             in: context.app,
             window: context.window,
@@ -1043,45 +1236,188 @@ final class SplitPaneFlowUITests: XCTestCase {
             return XCTFail("XCTest synthesized pointer support is unavailable.")
         }
 
-        XCTAssertTrue(
-            ShapeFlowTestHelpers.synthesize(record),
-            "failed to synthesize the pane-interior sidebar note drag"
+        let gestureFinished = XCTestExpectation(
+            description: "pane-interior sidebar drag finished"
         )
+        DispatchQueue.global(qos: .userInitiated).async {
+            XCTAssertTrue(
+                ShapeFlowTestHelpers.synthesize(record),
+                "failed to synthesize the pane-interior sidebar note drag"
+            )
+            gestureFinished.fulfill()
+        }
+
+        let midDragDeadline = Date().addingTimeInterval(5)
+        var previewState: [String: String]?
+        while Date() < midDragDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            let state = stateValues(of: context.stateElement)
+            if state["target"] == "col-2" {
+                previewState = state
+                break
+            }
+        }
+
+        guard let previewState else {
+            wait(for: [gestureFinished], timeout: 15)
+            return XCTFail(
+                "never observed col-2 preview target, state: "
+                    + stateString(of: context.stateElement)
+            )
+        }
+        let previewColumns = grid(from: previewState, key: "preview")
+        XCTAssertEqual(previewColumns.count, 3, "state: \(previewState)")
+        for column in previewColumns {
+            XCTAssertEqual(
+                column.width,
+                1.0 / 3.0,
+                accuracy: 0.05,
+                "state: \(previewState)"
+            )
+        }
+
+        wait(for: [gestureFinished], timeout: 15)
 
         let settledState = waitForState(context.stateElement, timeout: 5) {
             $0["dragging"] == "0"
         }
         XCTAssertEqual(settledState["dragging"], "0", "state: \(settledState)")
 
-        let replacedState = waitForState(context.stateElement) {
-            $0["panes"] == "2"
-                && $0["columns"] == "2"
+        let splitState = waitForState(context.stateElement) {
+            $0["panes"] == "3"
+                && $0["columns"] == "3"
                 && $0["dragging"] == "0"
         }
-        XCTAssertEqual(replacedState["panes"], "2", "state: \(replacedState)")
-        XCTAssertEqual(replacedState["columns"], "2", "state: \(replacedState)")
+        XCTAssertEqual(splitState["panes"], "3", "state: \(splitState)")
+        XCTAssertEqual(splitState["columns"], "3", "state: \(splitState)")
+        XCTAssertEqual(
+            splitState["grid"],
+            splitState["preview"],
+            "state: \(splitState)"
+        )
         XCTAssertTrue(
             waitUntil(timeout: 5) { !sidebar.exists },
-            "sidebar remained open after replacing pane 1"
+            "sidebar remained open after splitting pane 1"
         )
         XCTAssertFalse(sidebar.exists)
 
-        let replacedTitleFields = sortedTitleFields(
+        let splitTitleFields = sortedTitleFields(
             in: context.app,
-            expectedCount: 2
+            expectedCount: 3
         )
-        guard replacedTitleFields.indices.contains(1) else {
-            return XCTFail(
-                "pane 1 title field disappeared after replacement, state: \(replacedState)"
+        let postDropTitles = Set(splitTitleFields.map(displayTitle))
+        XCTAssertTrue(
+            openTitles.allSatisfy(postDropTitles.contains),
+            "an original pane note disappeared; before: \(openTitles), "
+                + "after: \(postDropTitles), state: \(splitState)"
+        )
+    }
+
+    // NOTE: a test for the bottom wedge *inside* a multi-column layout was
+    // attempted here and removed. Its drop resolved to the column-1 left wedge
+    // rather than the bottom wedge, and the cause was not established: the same
+    // dy (0.90) and the same in-pane u (0.5) do produce a row target in the
+    // single-column testSidebarDragToBottomEdgeStacksPane. dropOffset is a
+    // fraction of the window while the wedge math is per-pane, so the mapping
+    // needs container-relative drop coordinates before this case can be tested
+    // honestly. Bottom-edge stacking IS covered (single column); the multi-column
+    // interior-bottom case is a known coverage gap, not a passing test.
+    func testCapacityFullShowsRefusalDuringDrag() throws {
+        let sizingContext = launchApp(splitPaneCount: 1)
+        let sizingState = waitForState(sizingContext.stateElement) {
+            self.containerSize(from: $0) != nil
+        }
+        guard let splitSize = containerSize(from: sizingState) else {
+            return XCTFail("split container size is unavailable: \(sizingState)")
+        }
+        let maximumColumns = max(Int(splitSize.width / 320), 1)
+        let maximumRows = max(Int(splitSize.height / 280), 1)
+        sizingContext.app.terminate()
+
+        let context = launchApp(
+            gridRows: Array(repeating: maximumRows, count: maximumColumns)
+        )
+        let initialState = waitForState(context.stateElement, timeout: 15) {
+            let decoded = self.grid(from: $0)
+            return decoded.count == maximumColumns
+                && decoded.allSatisfy { $0.rows.count == maximumRows }
+        }
+        let initialGrid = grid(from: initialState)
+        guard initialGrid.count == maximumColumns,
+              initialGrid.allSatisfy({ $0.rows.count == maximumRows }) else {
+            throw XCTSkip(
+                "fixture could not fill split capacity \(maximumColumns)x"
+                    + "\(maximumRows), state: \(initialState)"
             )
         }
-        let paneOneTitleField = replacedTitleFields[1]
+        let initialPaneCount = initialGrid.reduce(0) { $0 + $1.rows.count }
+        let initialColumnCount = initialGrid.count
+
+        let openTitles = Set(
+            sortedTitleFields(in: context.app, expectedCount: initialPaneCount)
+                .map(displayTitle)
+        )
+        let sidebar = showSidebar(in: context.app)
+        guard let row = waitForSidebarRow(in: sidebar, matching: { label in
+            !openTitles.contains(label)
+        }) else {
+            throw XCTSkip("fixture has no unopened note available for refusal drag")
+        }
+
+        let targetX = initialGrid[0].width * 0.65
+        let targetY = initialGrid[0].rows[0] * 0.65
+        guard let record = makeSidebarDragGestureRecord(
+            in: context.app,
+            window: context.window,
+            row: row,
+            dropOffset: CGVector(
+                dx: CGFloat(targetX),
+                dy: CGFloat(targetY)
+            )
+        ) else {
+            return XCTFail("XCTest synthesized pointer support is unavailable.")
+        }
+
+        let gestureFinished = XCTestExpectation(
+            description: "capacity-full sidebar drag finished"
+        )
+        DispatchQueue.global(qos: .userInitiated).async {
+            XCTAssertTrue(
+                ShapeFlowTestHelpers.synthesize(record),
+                "failed to synthesize the capacity-full sidebar drag"
+            )
+            gestureFinished.fulfill()
+        }
+
+        let midDragDeadline = Date().addingTimeInterval(5)
+        var sawCapacityRefusal = false
+        while Date() < midDragDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            let state = stateValues(of: context.stateElement)
+            if state["target"] == "none-capacity" {
+                sawCapacityRefusal = true
+                break
+            }
+        }
         XCTAssertTrue(
-            waitUntil(timeout: 10) {
-                self.displayTitle(of: paneOneTitleField) == replacementTitle
-            },
-            "pane 1 title did not become '\(replacementTitle)', state: "
+            sawCapacityRefusal,
+            "never observed capacity refusal, state: "
                 + stateString(of: context.stateElement)
+        )
+
+        wait(for: [gestureFinished], timeout: 15)
+        let settledState = waitForState(context.stateElement, timeout: 5) {
+            $0["dragging"] == "0"
+        }
+        XCTAssertEqual(
+            settledState["panes"],
+            String(initialPaneCount),
+            "state: \(settledState)"
+        )
+        XCTAssertEqual(
+            settledState["columns"],
+            String(initialColumnCount),
+            "state: \(settledState)"
         )
     }
 
@@ -1258,6 +1594,37 @@ final class SplitPaneFlowUITests: XCTestCase {
 
     // MARK: - Synthesized gestures
 
+    private func makeSidebarFlickGestureRecord(
+        in app: XCUIApplication,
+        from start: XCUICoordinate,
+        to end: XCUICoordinate
+    ) -> ShapeFlowTestHelpers.GestureRecord? {
+        let screenStart = start.screenPoint
+        let screenEnd = end.screenPoint
+        let sampleInterval: TimeInterval = 0.02
+        let movementSteps = 8
+        let moves = (1...movementSteps).map { index in
+            let fraction = CGFloat(index) / CGFloat(movementSteps)
+            return (
+                point: CGPoint(
+                    x: screenStart.x + (screenEnd.x - screenStart.x) * fraction,
+                    y: screenStart.y + (screenEnd.y - screenStart.y) * fraction
+                ),
+                offset: sampleInterval * TimeInterval(index)
+            )
+        }
+
+        return ShapeFlowTestHelpers.makeGestureRecord(
+            named: "Sidebar flick",
+            gesture: ShapeFlowTestHelpers.PointerGesture(
+                start: screenStart,
+                moves: moves,
+                liftOffset: sampleInterval * TimeInterval(movementSteps + 1)
+            ),
+            targetProcessID: ShapeFlowTestHelpers.processID(of: app)
+        )
+    }
+
     private func makeSidebarDragGestureRecord(
         in app: XCUIApplication,
         window: XCUIElement,
@@ -1281,9 +1648,33 @@ final class SplitPaneFlowUITests: XCTestCase {
         var moves: [(point: CGPoint, offset: TimeInterval)] = []
         var offset: TimeInterval = 0
 
-        for _ in 1...9 {
+        // A finger drifts one way over a hold rather than oscillating about the
+        // press point. The net travel has to clear the scroll view's pan
+        // threshold — otherwise the pan never arms, the recognizers never race,
+        // and this test passes against the very bug it exists to catch — while
+        // staying inside the long press's allowableMovement so a working build
+        // still lifts the row.
+        let holdDrift = [
+            CGVector(dx: 1, dy: 2),
+            CGVector(dx: 2, dy: 5),
+            CGVector(dx: 2, dy: 8),
+            CGVector(dx: 3, dy: 11),
+            CGVector(dx: 3, dy: 13),
+            CGVector(dx: 4, dy: 15),
+            CGVector(dx: 4, dy: 16),
+            CGVector(dx: 4, dy: 17),
+        ]
+        for drift in holdDrift {
             offset += holdInterval
-            moves.append((point: screenStart, offset: offset))
+            moves.append(
+                (
+                    point: CGPoint(
+                        x: screenStart.x + drift.dx,
+                        y: screenStart.y + drift.dy
+                    ),
+                    offset: offset
+                )
+            )
         }
 
         let distance = hypot(
@@ -1439,11 +1830,16 @@ final class SplitPaneFlowUITests: XCTestCase {
 
     private func grid(
         from state: [String: String],
+        key: String = "grid",
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> [(width: Double, rows: [Double])] {
-        guard let encoded = state["grid"] else {
-            XCTFail("split state has no grid: \(state)", file: file, line: line)
+        guard let encoded = state[key] else {
+            XCTFail(
+                "split state has no \(key): \(state)",
+                file: file,
+                line: line
+            )
             return []
         }
 
