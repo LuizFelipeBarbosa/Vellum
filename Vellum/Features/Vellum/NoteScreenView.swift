@@ -29,7 +29,7 @@ struct NoteScreenView: View {
     @State private var rightClusterFrame: CGRect = .zero
     @State private var topOverlayGlobalFrame: CGRect = .zero
 
-    private var canvasReference: NoteCanvasReference {
+    private var activeCanvasReference: NoteCanvasReference {
         paneContext.pane.canvasReference
     }
 
@@ -135,7 +135,7 @@ struct NoteScreenView: View {
             NoteScreenLifecycleModifiers(
                 model: model,
                 app: app,
-                canvasReference: canvasReference,
+                canvasReference: activeCanvasReference,
                 paneUndoManager: paneContext.pane.undoManager,
                 selectionController: selectionController,
                 shapeSnapController: shapeSnapController,
@@ -172,15 +172,15 @@ struct NoteScreenView: View {
         .onChange(of: paneContext.isFocused) { wasFocused, isFocused in
             if wasFocused, !isFocused {
                 selectionController.clearSelection()
-                isShowingThumbnails = false
                 model.isShowingSuggestions = false
+                isShowingThumbnails = false
                 app.split.isShowingPaperOptions = false
             }
         }
         .modifier(
             NoteScreenCanvasContentChangeObservers(
                 model: model,
-                canvasReference: canvasReference,
+                canvasReference: activeCanvasReference,
                 pageState: pageState,
                 thumbnailStore: thumbnailStore,
                 isShowingThumbnails: isShowingThumbnails,
@@ -190,7 +190,7 @@ struct NoteScreenView: View {
         .modifier(
             NoteScreenPageViewportChangeObservers(
                 model: model,
-                canvasReference: canvasReference,
+                canvasReference: activeCanvasReference,
                 selectionController: selectionController,
                 pageState: pageState,
                 thumbnailStore: thumbnailStore,
@@ -359,7 +359,7 @@ struct NoteScreenView: View {
                     onDrawingChanged: { data in
                         model.drawingChanged(data)
                         pageState.updateContent(
-                            drawingBounds: canvasReference.canvasView?.drawing.bounds
+                            drawingBounds: activeCanvasReference.canvasView?.drawing.bounds
                                 ?? .null,
                             elements: model.canvasElements.elements,
                             minimumFilledPages: model.note?.pages.count ?? 0
@@ -369,7 +369,7 @@ struct NoteScreenView: View {
                     tool: activeTool,
                     showsSystemToolPicker: false,
                     onCanvasReady: { canvasView in
-                        canvasReference.canvasView = canvasView
+                        activeCanvasReference.canvasView = canvasView
                         Task { @MainActor in
                             paneContext.pane.canvasDidBecomeReady()
                         }
@@ -383,7 +383,7 @@ struct NoteScreenView: View {
                     onExternalDrawingChange: {
                         selectionController.externalDrawingDidChange()
                         pageState.updateContent(
-                            drawingBounds: canvasReference.canvasView?.drawing.bounds
+                            drawingBounds: activeCanvasReference.canvasView?.drawing.bounds
                                 ?? .null,
                             elements: model.canvasElements.elements,
                             minimumFilledPages: model.note?.pages.count ?? 0
@@ -406,13 +406,13 @@ struct NoteScreenView: View {
                         }
                     },
                     onTwoFingerTap: {
-                        if canvasReference.canvasView?.undoManager?.canUndo == true {
-                            canvasReference.canvasView?.undoManager?.undo()
+                        if activeCanvasReference.canvasView?.undoManager?.canUndo == true {
+                            activeCanvasReference.canvasView?.undoManager?.undo()
                         }
                     },
                     onThreeFingerTap: {
-                        if canvasReference.canvasView?.undoManager?.canRedo == true {
-                            canvasReference.canvasView?.undoManager?.redo()
+                        if activeCanvasReference.canvasView?.undoManager?.canRedo == true {
+                            activeCanvasReference.canvasView?.undoManager?.redo()
                         }
                     }
                 )
@@ -430,7 +430,7 @@ struct NoteScreenView: View {
                 .allowsHitTesting(false)
 
                 ShapeEraserSurface(
-                    canvasReference: canvasReference,
+                    canvasReference: activeCanvasReference,
                     elementsStore: model.canvasElements,
                     eraserConfig: app.toolPreferences.preferences.eraser,
                     isEnabled: selectedTool == .eraser
@@ -439,7 +439,7 @@ struct NoteScreenView: View {
                 .allowsHitTesting(false)
 
                 ElementTapSelectionSurface(
-                    canvasReference: canvasReference,
+                    canvasReference: activeCanvasReference,
                     elementsStore: model.canvasElements,
                     selectionController: selectionController,
                     // Only the ink tools borrow a tap for element selection. Shapes and photos
@@ -914,7 +914,7 @@ struct NoteScreenView: View {
     }
 
     private func scrollCanvas(toPageIndex index: Int) {
-        guard let canvas = canvasReference.canvasView else { return }
+        guard let canvas = activeCanvasReference.canvasView else { return }
         let geometry = model.note?.pageGeometry ?? .a4
         let inset = canvas.contentInset.top
         let y = geometry.pageRect(index: index).minY * canvas.zoomScale - inset
@@ -926,7 +926,7 @@ struct NoteScreenView: View {
     }
 
     private func resetZoomToFit() {
-        (canvasReference.canvasView as? PagedCanvasView)?.snapZoomToFit()
+        (activeCanvasReference.canvasView as? PagedCanvasView)?.snapZoomToFit()
     }
 
     private func currentPageRendererContent() -> NotePageRenderer.Content {
@@ -939,7 +939,7 @@ struct NoteScreenView: View {
             pdfPagesByBand[band] = model.pdfCache.page(forBand: band)
         }
         let content = NotePageRenderer.Content(
-            drawing: canvasReference.canvasView?.drawing
+            drawing: activeCanvasReference.canvasView?.drawing
                 ?? persistedDrawing
                 ?? PKDrawing(),
             elements: model.canvasElements.elements,

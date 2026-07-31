@@ -8,6 +8,7 @@ struct NoteSplitSidebarView: View {
     @Bindable var app: VellumAppModel
     let containerWidth: CGFloat
     let onDismiss: () -> Void
+    let onDragPrepare: () -> Void
     let onDragBegan: (NoteSummary, Color?, CGPoint) -> Void
     let onDragMoved: (CGPoint) -> Void
     let onDragEnded: () -> Void
@@ -53,6 +54,7 @@ struct NoteSplitSidebarView: View {
             .gesture(
                 SplitSidebarRowDragGesture(
                     noteIDs: summaries.map(\.id),
+                    onPrepare: onDragPrepare,
                     onBegin: { noteID, location in
                         guard let summary = app.library.summaries.first(
                             where: { $0.id == noteID }

@@ -81,6 +81,213 @@ final class NoteSplitStateTests: XCTestCase {
         XCTAssertEqual(state.focusedPaneID, top.id)
     }
 
+    func testMovePanePreservesPaneIdentity() {
+        let container = makeContainer()
+        let movedPane = makePane(container: container)
+        let otherPane = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: movedPane, at: nil)
+        state.insertColumn(with: otherPane, at: nil)
+        movedPane.canvasDidBecomeReady()
+        let undoManager = movedPane.undoManager
+        let canvasReference = movedPane.canvasReference
+        let canvasGeneration = movedPane.canvasGeneration
+
+        XCTAssertTrue(
+            state.movePane(
+                id: movedPane.id,
+                to: .row(column: 1, at: 1)
+            )
+        )
+        XCTAssertEqual(
+            state.paneIndex(of: movedPane.id),
+            PaneIndex(column: 0, row: 1)
+        )
+        guard let relocatedPane = state.panes.first(where: {
+            $0.id == movedPane.id
+        }) else {
+            return XCTFail("Moved pane was not reinserted")
+        }
+        XCTAssertTrue(relocatedPane === movedPane)
+        XCTAssertTrue(relocatedPane.undoManager === undoManager)
+        XCTAssertTrue(relocatedPane.canvasReference === canvasReference)
+        XCTAssertEqual(relocatedPane.canvasGeneration, canvasGeneration)
+    }
+
+    func testMovePaneToLaterRowInSourceColumnAdjustsForDetach() {
+        let container = makeContainer()
+        let a = makePane(container: container)
+        let b = makePane(container: container)
+        let c = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: a, at: nil)
+        state.stackPane(b, inColumn: 0, at: nil)
+        state.stackPane(c, inColumn: 0, at: nil)
+
+        XCTAssertTrue(
+            state.movePane(id: a.id, to: .row(column: 0, at: 2))
+        )
+
+        XCTAssertEqual(state.columns[0].panes.map(\.id), [b.id, a.id, c.id])
+    }
+
+    func testMoveNoOpLeavesFractionsUnchanged() {
+        let container = makeContainer()
+        let top = makePane(container: container)
+        let bottom = makePane(container: container)
+        let right = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: top, at: nil)
+        state.stackPane(bottom, inColumn: 0, at: nil)
+        state.insertColumn(with: right, at: nil)
+        let tunedGrid = SplitGridSnapshot(columns: [
+            .init(widthFraction: 0.37, rowFractions: [0.23, 0.77]),
+            .init(widthFraction: 0.63, rowFractions: [1]),
+        ])
+        state.applyGrid(tunedGrid)
+
+        XCTAssertFalse(
+            state.movePane(
+                id: bottom.id,
+                to: .row(column: 0, at: 2)
+            )
+        )
+        XCTAssertFalse(
+            state.movePane(id: right.id, to: .column(at: 2))
+        )
+        XCTAssertEqual(state.gridSnapshot, tunedGrid)
+    }
+
+    func testMoveLastPaneOutOfColumnCollapsesItAndShiftsDestination() {
+        let container = makeContainer()
+        let first = makePane(container: container)
+        let movedPane = makePane(container: container)
+        let last = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: first, at: nil)
+        state.insertColumn(with: movedPane, at: nil)
+        state.insertColumn(with: last, at: nil)
+        state.applyGrid(
+            SplitGridSnapshot(columns: [
+                .init(widthFraction: 0.2, rowFractions: [1]),
+                .init(widthFraction: 0.3, rowFractions: [1]),
+                .init(widthFraction: 0.5, rowFractions: [1]),
+            ])
+        )
+
+        XCTAssertTrue(
+            state.movePane(id: movedPane.id, to: .column(at: 0))
+        )
+
+        XCTAssertEqual(state.columns.count, 3)
+        XCTAssertEqual(
+            state.columns.map { $0.panes[0].id },
+            [movedPane.id, first.id, last.id]
+        )
+        assertFractions(
+            state.columns.map(\.widthFraction),
+            equalTo: [1 / 3, 4 / 21, 10 / 21]
+        )
+    }
+
+    func testMovePanePreservesBorrowedSelectionTool() {
+        let container = makeContainer()
+        let movedPane = makePane(container: container)
+        let otherPane = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: movedPane, at: nil)
+        state.insertColumn(with: otherPane, at: nil)
+        state.focus(movedPane.id)
+        state.toolBorrowedByElementSelection = .pen
+
+        XCTAssertTrue(
+            state.movePane(
+                id: movedPane.id,
+                to: .row(column: 1, at: 1)
+            )
+        )
+
+        XCTAssertEqual(state.toolBorrowedByElementSelection, .pen)
+    }
+
+    func testMoveFocusesMovedPane() {
+        let container = makeContainer()
+        let movedPane = makePane(container: container)
+        let otherPane = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: movedPane, at: nil)
+        state.insertColumn(with: otherPane, at: nil)
+        state.focus(otherPane.id)
+
+        XCTAssertTrue(
+            state.movePane(
+                id: movedPane.id,
+                to: .row(column: 1, at: 1)
+            )
+        )
+
+        XCTAssertEqual(state.focusedPaneID, movedPane.id)
+    }
+
+    func testGridSnapshotRemovingDropsEmptiedColumnAndAllowsEdgeMoveAtCapacity() {
+        let container = makeContainer()
+        let first = makePane(container: container)
+        let removed = makePane(container: container)
+        let last = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: first, at: nil)
+        state.insertColumn(with: removed, at: nil)
+        state.insertColumn(with: last, at: nil)
+        let originalColumnCount = state.columns.count
+
+        let removingSnapshot = state.gridSnapshotRemoving(paneID: removed.id)
+
+        XCTAssertEqual(removingSnapshot.columns.count, originalColumnCount - 1)
+        XCTAssertEqual(state.columns.count, originalColumnCount)
+        assertFractions(
+            removingSnapshot.columns.map(\.widthFraction),
+            equalTo: [0.5, 0.5]
+        )
+
+        let containerSize = CGSize(
+            width: SplitGridPolicy.minPaneWidth * 3,
+            height: SplitGridPolicy.minPaneHeight
+        )
+        let maxColumnCount = SplitGridPolicy.maxColumnCount(
+            forContainerWidth: containerSize.width
+        )
+        let capacityState = NoteSplitState()
+        let capacityPanes = (0..<maxColumnCount).map { _ in
+            makePane(container: container)
+        }
+        for pane in capacityPanes {
+            capacityState.insertColumn(with: pane, at: nil)
+        }
+        let fullGrid = capacityState.gridSnapshot
+        let postLiftGrid = capacityState.gridSnapshotRemoving(
+            paneID: capacityPanes[maxColumnCount / 2].id
+        )
+        let leadingEdge = SplitGridDropTarget.insertColumn(at: 0)
+
+        XCTAssertEqual(fullGrid.columns.count, maxColumnCount)
+        XCTAssertEqual(postLiftGrid.columns.count, maxColumnCount - 1)
+        XCTAssertEqual(capacityState.columns.count, maxColumnCount)
+        XCTAssertFalse(
+            SplitGridPolicy.allows(
+                leadingEdge,
+                grid: fullGrid,
+                containerSize: containerSize
+            )
+        )
+        XCTAssertTrue(
+            SplitGridPolicy.allows(
+                leadingEdge,
+                grid: postLiftGrid,
+                containerSize: containerSize
+            )
+        )
+    }
+
     func testReplacePanePreservesPositionAndHeightFraction() {
         let container = makeContainer()
         let top = makePane(container: container)
@@ -139,10 +346,12 @@ final class NoteSplitStateTests: XCTestCase {
         let state = NoteSplitState()
         state.insertColumn(with: pane, at: nil)
         state.toolBorrowedByElementSelection = .pen
+        state.selectedTool = .select
 
         state.removePane(id: pane.id)
 
         XCTAssertNil(state.toolBorrowedByElementSelection)
+        XCTAssertEqual(state.selectedTool, .pen)
     }
 
     func testRemovingLastPaneCollapsesColumnAndUsesNearestFocus() {

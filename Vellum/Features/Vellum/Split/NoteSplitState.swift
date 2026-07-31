@@ -2,6 +2,32 @@ import Foundation
 import Observation
 import VellumCore
 
+/// Where a moved pane lands, expressed as the two insertions the grid supports.
+// Staged for the pane-rearrange follow-up; no production caller yet.
+enum PaneMoveDestination: Equatable, Sendable {
+    case column(at: Int)
+    case row(column: Int, at: Int)
+}
+
+/// The container observes lifecycle and destination properties, while the
+/// floating-card leaf alone observes `location`. This read partition keeps
+/// finger movement from rebuilding every hosted pane at display cadence.
+@MainActor
+@Observable
+final class SplitDragSession {
+    var lift: SplitDragLift?
+    var location: CGPoint = .zero
+    var resolution: SidebarDropResolution?
+    var isLifted = false
+    var isCommitting = false
+
+    // Capacity refusal has no associated target in SidebarDropResolution. Keep
+    // its geometric candidate separately so the dashed ghost can move only when
+    // the wedge changes, without making the container observe finger location.
+    var refusedTarget: SplitGridDropTarget?
+    var originLocation: CGPoint = .zero
+}
+
 @MainActor
 @Observable
 final class SplitColumn: Identifiable {
@@ -96,6 +122,92 @@ final class NoteSplitState {
         focus(pane.id)
     }
 
+    /// Reinserts the same `NotePane` object, so a move never reloads the note,
+    /// resets the canvas, or disturbs the undo stack.
+    /// Returns false when the move is a no-op so callers can skip drop feedback.
+    // Staged for the pane-rearrange follow-up; no production caller yet.
+    @discardableResult
+    func movePane(id paneID: UUID, to destination: PaneMoveDestination) -> Bool {
+        guard let source = paneIndex(of: paneID) else { return false }
+
+        let isNoOp: Bool
+        switch destination {
+        case let .column(index):
+            let sourceIsOnlyPane = columns[source.column].panes.count == 1
+            isNoOp = sourceIsOnlyPane
+                && (index == source.column || index == source.column + 1)
+        case let .row(column, row):
+            isNoOp = column == source.column
+                && (row == source.row || row == source.row + 1)
+        }
+
+        // Detach-then-insert runs fractionsRemoving then fractionsInserting,
+        // re-equalizing shares. Rejecting a null move preserves hand-tuned
+        // divider fractions.
+        guard !isNoOp else { return false }
+
+        let detached = detachPane(at: source)
+
+        // Collapsing the source shifts every later destination column left by one.
+        // A row target in that source column is unreachable: its sole pane had
+        // boundaries 0 and 1, and both were rejected as no-ops above.
+        switch destination {
+        case let .column(index):
+            let adjustedIndex = detached.columnCollapsed && index > source.column
+                ? index - 1
+                : index
+            insertColumn(with: detached.pane, at: adjustedIndex)
+        case let .row(column, row):
+            let adjustedColumn = detached.columnCollapsed && column > source.column
+                ? column - 1
+                : column
+            // The detach removed source.row from this column, so every later
+            // destination row resolved against the pre-move grid shifts up by one.
+            let adjustedRow = !detached.columnCollapsed
+                && column == source.column
+                && row > source.row
+                ? row - 1
+                : row
+            stackPane(detached.pane, inColumn: adjustedColumn, at: adjustedRow)
+        }
+
+        return true
+    }
+
+    /// The grid as it would be with the pane already lifted out, for capacity
+    /// checks that must account for an emptied source column.
+    func gridSnapshotRemoving(paneID: UUID) -> SplitGridSnapshot {
+        guard let source = paneIndex(of: paneID) else { return gridSnapshot }
+
+        let sourceColumn = columns[source.column]
+        let rowFractions = SplitLayoutPolicy.fractionsRemoving(
+            at: source.row,
+            from: sourceColumn.panes.map(\.heightFraction)
+        )
+        var snapshotColumns = columns.map { column in
+            SplitGridSnapshot.Column(
+                widthFraction: column.widthFraction,
+                rowFractions: column.panes.map(\.heightFraction)
+            )
+        }
+
+        if rowFractions.isEmpty {
+            let columnFractions = SplitLayoutPolicy.fractionsRemoving(
+                at: source.column,
+                from: columns.map(\.widthFraction)
+            )
+            snapshotColumns.remove(at: source.column)
+            for columnIndex in snapshotColumns.indices {
+                snapshotColumns[columnIndex].widthFraction =
+                    columnFractions[columnIndex]
+            }
+        } else {
+            snapshotColumns[source.column].rowFractions = rowFractions
+        }
+
+        return SplitGridSnapshot(columns: snapshotColumns)
+    }
+
     func replacePane(id: UUID, with pane: NotePane) {
         guard let index = paneIndex(of: id) else { return }
         let oldPane = columns[index.column].panes[index.row]
@@ -109,7 +221,11 @@ final class NoteSplitState {
         let removedPaneWasFocused = focusedPaneID == id
         // Only the focused pane can own a live element-selection tool borrow.
         if removedPaneWasFocused {
+            let borrowedFrom = toolBorrowedByElementSelection
             toolBorrowedByElementSelection = nil
+            if selectedTool == .select, let borrowedFrom {
+                selectedTool = borrowedFrom
+            }
         }
         let column = columns[index.column]
         let rowFractions = SplitLayoutPolicy.fractionsRemoving(
@@ -146,6 +262,37 @@ final class NoteSplitState {
         } else {
             focusedPaneID = nil
         }
+    }
+
+    private func detachPane(
+        at index: PaneIndex
+    ) -> (pane: NotePane, columnCollapsed: Bool) {
+        // This pane is not going away, so its focus and live element-selection
+        // tool borrow must survive until the same object is reinserted.
+        let column = columns[index.column]
+        let rowFractions = SplitLayoutPolicy.fractionsRemoving(
+            at: index.row,
+            from: column.panes.map(\.heightFraction)
+        )
+        let pane = column.panes.remove(at: index.row)
+        let columnCollapsed = column.panes.isEmpty
+
+        if columnCollapsed {
+            let columnFractions = SplitLayoutPolicy.fractionsRemoving(
+                at: index.column,
+                from: columns.map(\.widthFraction)
+            )
+            columns.remove(at: index.column)
+            for columnIndex in columns.indices {
+                columns[columnIndex].widthFraction = columnFractions[columnIndex]
+            }
+        } else {
+            for rowIndex in column.panes.indices {
+                column.panes[rowIndex].heightFraction = rowFractions[rowIndex]
+            }
+        }
+
+        return (pane, columnCollapsed)
     }
 
     func focus(_ id: UUID) {
