@@ -5,7 +5,13 @@ import VellumCore
 
 enum AppScreen: Hashable {
     case library, graph, ask, trash
-    case note(UUID?)
+    case note
+}
+
+enum PanePlacement {
+    case replaceFocused
+    case newColumn(at: Int?)
+    case stackInColumn(column: Int, at: Int?)
 }
 
 struct Toast: Equatable, Identifiable {
@@ -26,6 +32,7 @@ final class VellumAppModel {
     let askScreen: AskScreenModel
     let trashScreen: TrashScreenModel
     let toolPreferences: ToolPreferencesStore
+    let split = NoteSplitState()
     var appearanceMode: AppearanceMode {
         didSet {
             UserDefaults.standard.set(appearanceMode.rawValue, forKey: "vellum.appearanceMode")
@@ -41,7 +48,7 @@ final class VellumAppModel {
             }
         }
     }
-    var currentNote: NoteScreenModel?
+    var currentNote: NoteScreenModel? { split.focusedPane?.noteModel }
     var toast: Toast?
     var showAgent = true
     var noteCount = 0
@@ -53,11 +60,16 @@ final class VellumAppModel {
 
     private var toastTask: Task<Void, Never>?
     private var askNavigationTask: Task<Void, Never>?
+    private var openingNoteIDs: Set<UUID> = []
+    private var lastSplitContainerSize: CGSize = .zero
+    private var resizeOverflowTask: Task<Void, Never>?
     private var didBootstrap = false
 
     #if DEBUG
     private let debugAskQuestion: String?
     private let debugAutoOpenMostRecentNote: Bool
+    private let debugSplitPaneCount: Int?
+    private let debugSplitGridRows: [Int]?
     #endif
 
     init(
@@ -82,12 +94,33 @@ final class VellumAppModel {
             debugAskQuestion = nil
         }
         debugAutoOpenMostRecentNote = arguments.contains("-vellum-auto-open-note")
+        if let flagIndex = arguments.firstIndex(of: "-vellum-split-panes"),
+           arguments.indices.contains(flagIndex + 1),
+           let count = Int(arguments[flagIndex + 1]) {
+            debugSplitPaneCount = count
+        } else {
+            debugSplitPaneCount = nil
+        }
+        if let flagIndex = arguments.firstIndex(of: "-vellum-split-grid"),
+           arguments.indices.contains(flagIndex + 1) {
+            let components = arguments[flagIndex + 1]
+                .split(separator: ",", omittingEmptySubsequences: false)
+            let rowCounts = components
+                .compactMap { Int($0) }
+            debugSplitGridRows = rowCounts.count == components.count
+                && !rowCounts.isEmpty
+                && rowCounts.allSatisfy { $0 > 0 }
+                ? rowCounts
+                : []
+        } else {
+            debugSplitGridRows = nil
+        }
         #endif
         if let flagIndex = arguments.firstIndex(of: "-prototypeStartView"),
            arguments.indices.contains(flagIndex + 1) {
             screen = switch arguments[flagIndex + 1] {
             case "library": .library
-            case "canvas": .note(nil)
+            case "canvas": .note
             case "graph": .graph
             case "ask": .ask
             default: .library
@@ -104,7 +137,7 @@ final class VellumAppModel {
         await library.refresh()
         await graphScreen.refresh()
 
-        if case .note(nil) = screen {
+        if case .note = screen {
             if let noteID = library.summaries.first?.id {
                 await openNote(noteID)
             } else {
@@ -113,7 +146,45 @@ final class VellumAppModel {
         }
 
         #if DEBUG
-        if debugAutoOpenMostRecentNote,
+        if let debugSplitGridRows {
+            let notes = library.summaries.sorted { $0.updatedAt > $1.updatedAt }
+            var noteIterator = notes.makeIterator()
+
+            for (columnIndex, rowCount) in debugSplitGridRows.enumerated() {
+                guard let firstNote = noteIterator.next() else { break }
+                if columnIndex == 0 {
+                    await openNote(firstNote.id)
+                } else {
+                    await openNote(
+                        firstNote.id,
+                        placement: .newColumn(at: nil)
+                    )
+                }
+
+                for _ in 1..<rowCount {
+                    guard let note = noteIterator.next() else { break }
+                    await openNote(
+                        note.id,
+                        placement: .stackInColumn(
+                            column: columnIndex,
+                            at: nil
+                        )
+                    )
+                }
+            }
+        } else if let debugSplitPaneCount, debugSplitPaneCount > 0 {
+            let notes = library.summaries.sorted { $0.updatedAt > $1.updatedAt }
+            if let mostRecentNote = notes.first {
+                await openNote(mostRecentNote.id)
+            }
+            for note in notes.dropFirst().prefix(debugSplitPaneCount - 1) {
+                await openNote(note.id, placement: .newColumn(at: nil))
+            }
+        }
+
+        if debugSplitGridRows == nil,
+           debugSplitPaneCount == nil,
+           debugAutoOpenMostRecentNote,
            let note = library.summaries.max(by: { $0.updatedAt < $1.updatedAt }) {
             await openNote(note.id)
         }
@@ -161,24 +232,23 @@ final class VellumAppModel {
     }
 
     func navigate(to newScreen: AppScreen) async {
-        if case .note(let requestedID) = newScreen {
-            if let requestedID {
-                await openNote(requestedID)
-            } else if let firstNoteID = library.summaries.first?.id {
-                await openNote(firstNoteID)
-            } else {
-                if case .note = screen {
-                    await currentNote?.flushPendingSave()
-                    currentNote = nil
+        if newScreen == .note {
+            if split.panes.isEmpty {
+                if let firstNoteID = library.summaries.first?.id {
+                    await openNote(firstNoteID)
+                } else {
+                    screen = .library
                 }
-                screen = .library
+            } else {
+                screen = .note
             }
             return
         }
 
         if case .note = screen {
-            await currentNote?.flushPendingSave()
-            currentNote = nil
+            // Discarding the split arrangement here is a deliberate v1 scope
+            // decision; returning from other screens does not restore it yet.
+            await split.closeAll()
         }
 
         if screen != newScreen {
@@ -192,20 +262,32 @@ final class VellumAppModel {
         }
     }
 
-    func openNote(_ id: UUID, isNewlyCreated: Bool = false) async {
+    @discardableResult
+    func openNote(
+        _ id: UUID,
+        isNewlyCreated: Bool = false,
+        placement: PanePlacement = .replaceFocused
+    ) async -> UUID? {
+        guard !openingNoteIDs.contains(id) else { return nil }
+        openingNoteIDs.insert(id)
+        defer { openingNoteIDs.remove(id) }
+
         do {
             let note = try await container.workspace.loadNote(id: id)
             if note.isTrashed {
                 showToast("This note is in the Trash")
-                return
+                return nil
             }
         } catch {
             library.errorMessage = error.localizedDescription
-            return
+            return nil
         }
 
-        await currentNote?.flushPendingSave()
-        currentNote = nil
+        if let existingPane = split.pane(for: id) {
+            split.focus(existingPane.id)
+            screen = .note
+            return existingPane.id
+        }
 
         let noteModel = NoteScreenModel(
             noteID: id,
@@ -219,15 +301,125 @@ final class VellumAppModel {
                 }
             }
         )
-        currentNote = noteModel
-        screen = .note(id)
+        let newPane = NotePane(noteModel: noteModel)
+
+        switch placement {
+        case .replaceFocused:
+            if let focusedPane = split.focusedPane {
+                await focusedPane.noteModel.flushPendingSave()
+                split.replacePane(id: focusedPane.id, with: newPane)
+            } else {
+                split.insertColumn(with: newPane, at: 0)
+            }
+        case .newColumn(let index):
+            split.insertColumn(with: newPane, at: index)
+        case .stackInColumn(let column, let row):
+            split.stackPane(newPane, inColumn: column, at: row)
+        }
+
+        screen = .note
+        return newPane.id
     }
 
-    func deleteCurrentNote(id: UUID) async throws {
-        await currentNote?.flushPendingSave()
+    func handleSplitContainerResize(_ size: CGSize) {
+        lastSplitContainerSize = size
+        resizeOverflowTask?.cancel()
+        resizeOverflowTask = nil
+        reclampSplitGrid()
+    }
+
+    func reclampSplitGrid() {
+        guard lastSplitContainerSize != .zero, !split.columns.isEmpty else { return }
+        // The live-state eviction loop converges on its own; restarting it here would
+        // reset its count and make removals crawl behind repeated debounce delays.
+        guard resizeOverflowTask == nil else { return }
+
+        let result = SplitGridPolicy.reclamped(
+            split.gridSnapshot,
+            containerSize: lastSplitContainerSize
+        )
+        guard !result.overflow.isEmpty else {
+            resizeOverflowTask = nil
+            split.applyGrid(result.grid)
+            return
+        }
+
+        resizeOverflowTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+
+            var closedPaneCount = 0
+            while true {
+                guard !Task.isCancelled else { return }
+
+                let result = SplitGridPolicy.reclamped(
+                    self.split.gridSnapshot,
+                    containerSize: self.lastSplitContainerSize
+                )
+                guard !result.overflow.isEmpty else {
+                    self.split.applyGrid(result.grid)
+                    break
+                }
+
+                let overflowPaneIDs = result.overflow.compactMap { index -> UUID? in
+                    guard self.split.columns.indices.contains(index.column),
+                          self.split.columns[index.column].panes.indices.contains(index.row)
+                    else {
+                        return nil
+                    }
+                    return self.split.columns[index.column].panes[index.row].id
+                }
+
+                for paneID in overflowPaneIDs {
+                    guard !Task.isCancelled else { return }
+                    guard let pane = self.split.panes.first(
+                        where: { $0.id == paneID }
+                    ) else {
+                        continue
+                    }
+                    await pane.noteModel.flushPendingSave()
+                    guard !Task.isCancelled else { return }
+                    guard self.split.panes.contains(
+                        where: { $0.id == paneID }
+                    ) else {
+                        continue
+                    }
+                    self.split.removePane(id: paneID)
+                    closedPaneCount += 1
+                }
+            }
+
+            if closedPaneCount > 0 {
+                self.showToast(
+                    "Closed \(closedPaneCount) pane\(closedPaneCount == 1 ? "" : "s") to fit"
+                )
+            }
+            self.resizeOverflowTask = nil
+        }
+    }
+
+    func closePane(_ paneID: UUID) async {
+        if let pane = split.panes.first(where: { $0.id == paneID }) {
+            await pane.noteModel.flushPendingSave()
+        }
+        split.removePane(id: paneID)
+        if split.panes.isEmpty {
+            await navigate(to: .library)
+        }
+    }
+
+    func deleteNote(id: UUID) async throws {
+        let pane = split.pane(for: id)
+        if let pane {
+            await pane.noteModel.flushPendingSave()
+        }
         try await container.workspace.deleteNote(id: id)
-        currentNote = nil
-        await navigate(to: .library)
+        if let pane {
+            split.removePane(id: pane.id)
+        }
+        if split.panes.isEmpty {
+            await navigate(to: .library)
+        }
         await library.refresh()
         await refreshStats()
         notifyTrashed([id])

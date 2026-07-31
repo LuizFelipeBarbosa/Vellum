@@ -9,10 +9,13 @@ struct NoteHeaderChips: View {
     var onConfirmDelete: () -> Void
     var onExport: (NoteExporter.Format) -> Void
     var onClusterFrames: ((_ leading: CGRect, _ trailing: CGRect) -> Void)? = nil
+    // Narrow split panes cannot fit the trailing cluster; it overflows the pane bounds.
+    var isCompact: Bool = false
 
     @FocusState private var isTitleFocused: Bool
     @State private var reportedLeadingFrame: CGRect?
     @State private var reportedTrailingFrame: CGRect?
+    @State private var headerRowFrame: CGRect = .zero
 
     var body: some View {
         HStack(alignment: .top) {
@@ -28,16 +31,26 @@ struct NoteHeaderChips: View {
 
             Spacer()
 
-            rightCluster
-                .onGeometryChange(
-                    for: CGRect.self,
-                    of: { $0.frame(in: .global) },
-                    action: { frame in
-                        reportedTrailingFrame = frame
-                        notifyClusterFramesIfNeeded()
-                    }
-                )
+            if !isCompact {
+                rightCluster
+                    .onGeometryChange(
+                        for: CGRect.self,
+                        of: { $0.frame(in: .global) },
+                        action: { frame in
+                            reportedTrailingFrame = frame
+                            notifyClusterFramesIfNeeded()
+                        }
+                    )
+            }
         }
+        .onGeometryChange(
+            for: CGRect.self,
+            of: { $0.frame(in: .global) },
+            action: { frame in
+                headerRowFrame = frame
+                notifyClusterFramesIfNeeded()
+            }
+        )
     }
 
     private var leftCluster: some View {
@@ -243,8 +256,20 @@ struct NoteHeaderChips: View {
     }
 
     private func notifyClusterFramesIfNeeded() {
-        guard let leading = reportedLeadingFrame,
-              let trailing = reportedTrailingFrame else { return }
+        guard let leading = reportedLeadingFrame else { return }
+        if isCompact {
+            guard headerRowFrame != .zero else { return }
+            // Compact panes use the row edge so the zero-width trailing frame remains valid geometry.
+            let synthesizedTrailing = CGRect(
+                x: headerRowFrame.maxX,
+                y: leading.minY,
+                width: 0,
+                height: leading.height
+            )
+            onClusterFrames?(leading, synthesizedTrailing)
+            return
+        }
+        guard let trailing = reportedTrailingFrame else { return }
         onClusterFrames?(leading, trailing)
     }
 }

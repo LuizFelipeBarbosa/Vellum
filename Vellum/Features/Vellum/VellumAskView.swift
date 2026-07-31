@@ -287,7 +287,7 @@ private struct VellumAnswerView: View {
 
     private func openCitation(_ citation: Citation) {
         Task {
-            await model.currentNote?.flushPendingSave()
+            await model.split.flushAll()
             await model.openNote(citation.noteID)
         }
     }

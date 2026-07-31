@@ -9,17 +9,12 @@ import VellumCore
 struct NoteScreenView: View {
     @Bindable var model: NoteScreenModel
     @Bindable var app: VellumAppModel
+    var paneContext: PaneContext
 
     @State private var isShowingActivity = false
     @State private var isConfirmingDelete = false
-    @State private var selectedTool: ToolID = .pen
-    @State private var squeezeEraser = SqueezeEraserController()
-    @State private var activeOptionsTool: ToolID?
     @State private var lastNonNilTool: (any PKTool)?
-    @State private var canvasReference = NoteCanvasReference()
     @State private var selectionController = CanvasSelectionController()
-    /// The tool an element selection set aside, restored when that selection ends.
-    @State private var toolBorrowedByElementSelection: ToolID?
     @State private var shapeSnapController = ShapeSnapController()
     @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
     @State private var canvasSize: CGSize = .zero
@@ -27,14 +22,33 @@ struct NoteScreenView: View {
     @State private var isShowingThumbnails = false
     @State private var thumbnailStore = PageThumbnailStore()
     @State private var photosPickerItem: PhotosPickerItem?
-    @State private var isShowingPhotosPicker = false
-    @State private var isShowingFileImporter = false
     @State private var exportOutput: NoteExporter.Output?
     @State private var exportDirectoryToCleanUp: URL?
     @State private var topOverlayHeight: CGFloat = 0
     @State private var leftClusterFrame: CGRect = .zero
     @State private var rightClusterFrame: CGRect = .zero
     @State private var topOverlayGlobalFrame: CGRect = .zero
+
+    private var activeCanvasReference: NoteCanvasReference {
+        paneContext.pane.canvasReference
+    }
+
+    private var selectedTool: ToolID {
+        get { app.split.selectedTool }
+        nonmutating set { app.split.selectedTool = newValue }
+    }
+
+    private var showsBacklinksRail: Bool {
+        paneContext.fitsBacklinksRail
+    }
+
+    private var showsSuggestionsAndThumbnails: Bool {
+        paneContext.fitsSuggestionsAndThumbnails && paneContext.isFocused
+    }
+
+    private var showsEntityChips: Bool {
+        paneContext.fitsEntityChips
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -67,10 +81,11 @@ struct NoteScreenView: View {
                     onClusterFrames: {
                         leftClusterFrame = $0
                         rightClusterFrame = $1
-                    }
+                    },
+                    isCompact: paneContext.hasCompactHeader
                 )
 
-                if !model.noteEntities.isEmpty {
+                if !model.noteEntities.isEmpty && showsEntityChips {
                     entityChips
                 }
             }
@@ -86,18 +101,46 @@ struct NoteScreenView: View {
             )
 
             modalOverlays
+
+            if paneContext.isSplit {
+                PaneFocusSurface(
+                    paneContext: paneContext,
+                    onFocus: { app.split.focus(paneContext.pane.id) }
+                )
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+
+                if paneContext.isFocused {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(VellumTheme.accent(0.55), lineWidth: 1.5)
+                        .padding(1.5)
+                        .allowsHitTesting(false)
+                }
+
+                paneCloseButton(paneContext)
+            }
         }
+        .preference(
+            key: PaneHeaderFramesKey.self,
+            value: [
+                paneContext.pane.id: PaneHeaderFrames(
+                    leftClusterFrame: leftClusterFrame,
+                    rightClusterFrame: rightClusterFrame,
+                    topOverlayGlobalFrame: topOverlayGlobalFrame
+                )
+            ]
+        )
         .background(VellumTheme.paper)
         .modifier(
             NoteScreenLifecycleModifiers(
                 model: model,
                 app: app,
-                canvasReference: canvasReference,
+                canvasReference: activeCanvasReference,
+                paneUndoManager: paneContext.pane.undoManager,
                 selectionController: selectionController,
                 shapeSnapController: shapeSnapController,
                 pageState: pageState,
                 currentVisibleContentRect: { currentVisibleContentRect },
-                selectedTool: $selectedTool,
                 cacheCurrentTool: cacheCurrentTool,
                 scrollCanvas: scrollCanvas
             )
@@ -115,16 +158,27 @@ struct NoteScreenView: View {
             // Selecting an element borrows the Select tool so shapes and photos use one edit flow.
             // Once the selection ends the tool goes back, so selecting either never costs the
             // pen you were drawing with. If the tool has moved on already, the user chose it.
-            guard !hasSelection, let borrowedFrom = toolBorrowedByElementSelection else { return }
-            toolBorrowedByElementSelection = nil
+            guard !hasSelection,
+                  let borrowedFrom = app.split.toolBorrowedByElementSelection
+            else {
+                return
+            }
+            app.split.toolBorrowedByElementSelection = nil
             if selectedTool == .select {
                 selectedTool = borrowedFrom
+            }
+        }
+        .onChange(of: paneContext.isFocused) { wasFocused, isFocused in
+            if wasFocused == true, isFocused == false {
+                selectionController.clearSelection()
+                model.isShowingSuggestions = false
+                isShowingThumbnails = false
             }
         }
         .modifier(
             NoteScreenCanvasContentChangeObservers(
                 model: model,
-                canvasReference: canvasReference,
+                canvasReference: activeCanvasReference,
                 pageState: pageState,
                 thumbnailStore: thumbnailStore,
                 isShowingThumbnails: isShowingThumbnails,
@@ -134,7 +188,7 @@ struct NoteScreenView: View {
         .modifier(
             NoteScreenPageViewportChangeObservers(
                 model: model,
-                canvasReference: canvasReference,
+                canvasReference: activeCanvasReference,
                 pageState: pageState,
                 thumbnailStore: thumbnailStore,
                 canvasViewport: canvasViewport,
@@ -155,7 +209,7 @@ struct NoteScreenView: View {
         .modifier(
             NoteScreenPhotoImportModifiers(
                 model: model,
-                isShowingPhotosPicker: $isShowingPhotosPicker,
+                isShowingPhotosPicker: $model.isShowingPhotosPicker,
                 photosPickerItem: $photosPickerItem,
                 currentVisibleContentRect: { currentVisibleContentRect },
                 onImageImported: selectImportedElement
@@ -164,7 +218,7 @@ struct NoteScreenView: View {
         .modifier(
             NoteScreenFileImportAndAlertModifiers(
                 model: model,
-                isShowingFileImporter: $isShowingFileImporter,
+                isShowingFileImporter: $model.isShowingFileImporter,
                 currentVisibleContentRect: { currentVisibleContentRect },
                 onImageImported: selectImportedElement
             )
@@ -207,6 +261,29 @@ struct NoteScreenView: View {
             .padding(.bottom, 9)
         }
         .scrollIndicators(.hidden)
+    }
+
+    private func paneCloseButton(_ paneContext: PaneContext) -> some View {
+        Button {
+            Task {
+                await app.closePane(paneContext.pane.id)
+            }
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(VellumTheme.mutedDark)
+                .frame(width: 24, height: 24)
+                .background(VellumTheme.popover, in: Circle())
+                .overlay {
+                    Circle().stroke(VellumTheme.ink(0.14), lineWidth: 1)
+                }
+                .shadow(color: VellumTheme.ink(0.1), radius: 3, y: 1)
+                .padding(10)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .accessibilityLabel("Close pane")
     }
 
     private var canvasArea: some View {
@@ -278,7 +355,8 @@ struct NoteScreenView: View {
                     onDrawingChanged: { data in
                         model.drawingChanged(data)
                         pageState.updateContent(
-                            drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                            drawingBounds: activeCanvasReference.canvasView?.drawing.bounds
+                                ?? .null,
                             elements: model.canvasElements.elements,
                             minimumFilledPages: model.note?.pages.count ?? 0
                         )
@@ -287,8 +365,12 @@ struct NoteScreenView: View {
                     tool: activeTool,
                     showsSystemToolPicker: false,
                     onCanvasReady: { canvasView in
-                        canvasReference.canvasView = canvasView
+                        activeCanvasReference.canvasView = canvasView
+                        Task { @MainActor in
+                            paneContext.pane.canvasDidBecomeReady()
+                        }
                     },
+                    paneUndoManager: paneContext.pane.undoManager,
                     isDrawingEnabled: selectedTool.usesDrawingGesture,
                     contentHeight: pageState.contentHeight,
                     topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + 16,
@@ -296,7 +378,8 @@ struct NoteScreenView: View {
                     onExternalDrawingChange: {
                         selectionController.externalDrawingDidChange()
                         pageState.updateContent(
-                            drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
+                            drawingBounds: activeCanvasReference.canvasView?.drawing.bounds
+                                ?? .null,
                             elements: model.canvasElements.elements,
                             minimumFilledPages: model.note?.pages.count ?? 0
                         )
@@ -304,23 +387,27 @@ struct NoteScreenView: View {
                     onPencilSqueeze: { phase in
                         switch phase {
                         case .began:
-                            if let tool = squeezeEraser.begin(current: selectedTool) {
+                            if let tool = app.split.squeezeEraser.begin(
+                                current: selectedTool
+                            ) {
                                 selectedTool = tool
                             }
                         case .ended:
-                            if let tool = squeezeEraser.end(current: selectedTool) {
+                            if let tool = app.split.squeezeEraser.end(
+                                current: selectedTool
+                            ) {
                                 selectedTool = tool
                             }
                         }
                     },
                     onTwoFingerTap: {
-                        if canvasReference.canvasView?.undoManager?.canUndo == true {
-                            canvasReference.canvasView?.undoManager?.undo()
+                        if activeCanvasReference.canvasView?.undoManager?.canUndo == true {
+                            activeCanvasReference.canvasView?.undoManager?.undo()
                         }
                     },
                     onThreeFingerTap: {
-                        if canvasReference.canvasView?.undoManager?.canRedo == true {
-                            canvasReference.canvasView?.undoManager?.redo()
+                        if activeCanvasReference.canvasView?.undoManager?.canRedo == true {
+                            activeCanvasReference.canvasView?.undoManager?.redo()
                         }
                     }
                 )
@@ -338,7 +425,7 @@ struct NoteScreenView: View {
                 .allowsHitTesting(false)
 
                 ShapeEraserSurface(
-                    canvasReference: canvasReference,
+                    canvasReference: activeCanvasReference,
                     elementsStore: model.canvasElements,
                     eraserConfig: app.toolPreferences.preferences.eraser,
                     isEnabled: selectedTool == .eraser
@@ -347,7 +434,7 @@ struct NoteScreenView: View {
                 .allowsHitTesting(false)
 
                 ElementTapSelectionSurface(
-                    canvasReference: canvasReference,
+                    canvasReference: activeCanvasReference,
                     elementsStore: model.canvasElements,
                     selectionController: selectionController,
                     // Only the ink tools borrow a tap for element selection. Shapes and photos
@@ -428,11 +515,13 @@ struct NoteScreenView: View {
                     }
                 }
 
-                backlinksRail
-                    .frame(width: 184)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.top, topOverlayHeight + 12)
-                    .zIndex(2)
+                if showsBacklinksRail {
+                    backlinksRail
+                        .frame(width: 184)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.top, topOverlayHeight + 12)
+                        .zIndex(2)
+                }
 
                 if let entity = model.selectedEntity {
                     EntityPopoverView(entity: entity, model: model, app: app)
@@ -481,36 +570,6 @@ struct NoteScreenView: View {
                 .padding(.bottom, 20)
                 .zIndex(4)
                 .animation(.easeOut(duration: 0.18), value: isZoomAtFit)
-
-                DockableToolbarContainer(
-                    store: app.toolPreferences,
-                    containerSize: geometry.size,
-                    topObstructions: (leftClusterFrame == .zero || rightClusterFrame == .zero)
-                        ? nil
-                        : TopDockObstructions(
-                            navbarTop: leftClusterFrame.minY - canvasGlobalOrigin.y,
-                            overlayBottom: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y,
-                            gapMinX: leftClusterFrame.maxX - canvasGlobalOrigin.x,
-                            gapMaxX: rightClusterFrame.minX - canvasGlobalOrigin.x
-                        )
-                ) { dockEdge, availableAxisLength in
-                    NoteToolbarView(
-                        store: app.toolPreferences,
-                        selectedTool: $selectedTool,
-                        activeOptionsTool: $activeOptionsTool,
-                        canvasReference: canvasReference,
-                        backgroundStyle: Binding(
-                            get: { model.backgroundStyle },
-                            set: { model.backgroundStyle = $0 }
-                        ),
-                        onInsertPhoto: { isShowingPhotosPicker = true },
-                        onInsertFile: { isShowingFileImporter = true },
-                        dockEdge: dockEdge,
-                        availableAxisLength: availableAxisLength
-                    )
-                }
-                .zIndex(4)
-
             }
             .clipped()
             .onAppear {
@@ -527,7 +586,7 @@ struct NoteScreenView: View {
             ForEach(model.backlinks, id: \.sourceNoteID) { backlink in
                 Button {
                     Task {
-                        await app.navigate(to: .note(backlink.sourceNoteID))
+                        await app.openNote(backlink.sourceNoteID)
                     }
                 } label: {
                     HStack(spacing: 4) {
@@ -605,13 +664,13 @@ struct NoteScreenView: View {
 
     @ViewBuilder
     private var modalOverlays: some View {
-        if isShowingThumbnails {
+        if isShowingThumbnails && showsSuggestionsAndThumbnails {
             thumbnailOverlay
                 .transition(.move(edge: .trailing).combined(with: .opacity))
                 .zIndex(9)
         }
 
-        if model.isShowingSuggestions {
+        if model.isShowingSuggestions && showsSuggestionsAndThumbnails {
             suggestionsOverlay
                 .transition(.move(edge: .trailing).combined(with: .opacity))
                 .zIndex(10)
@@ -798,7 +857,7 @@ struct NoteScreenView: View {
 
     private func borrowSelectTool() {
         if selectedTool != .select {
-            toolBorrowedByElementSelection = selectedTool
+            app.split.toolBorrowedByElementSelection = selectedTool
         }
         selectedTool = .select
     }
@@ -838,7 +897,7 @@ struct NoteScreenView: View {
     private func deleteNote() {
         Task {
             do {
-                try await app.deleteCurrentNote(id: model.noteID)
+                try await app.deleteNote(id: model.noteID)
             } catch {
                 model.errorMessage = error.localizedDescription
             }
@@ -846,7 +905,7 @@ struct NoteScreenView: View {
     }
 
     private func scrollCanvas(toPageIndex index: Int) {
-        guard let canvas = canvasReference.canvasView else { return }
+        guard let canvas = activeCanvasReference.canvasView else { return }
         let geometry = model.note?.pageGeometry ?? .a4
         let inset = canvas.contentInset.top
         let y = geometry.pageRect(index: index).minY * canvas.zoomScale - inset
@@ -858,7 +917,7 @@ struct NoteScreenView: View {
     }
 
     private func resetZoomToFit() {
-        (canvasReference.canvasView as? PagedCanvasView)?.snapZoomToFit()
+        (activeCanvasReference.canvasView as? PagedCanvasView)?.snapZoomToFit()
     }
 
     private func currentPageRendererContent() -> NotePageRenderer.Content {
@@ -871,7 +930,7 @@ struct NoteScreenView: View {
             pdfPagesByBand[band] = model.pdfCache.page(forBand: band)
         }
         let content = NotePageRenderer.Content(
-            drawing: canvasReference.canvasView?.drawing
+            drawing: activeCanvasReference.canvasView?.drawing
                 ?? persistedDrawing
                 ?? PKDrawing(),
             elements: model.canvasElements.elements,
@@ -970,11 +1029,11 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
     let model: NoteScreenModel
     let app: VellumAppModel
     let canvasReference: NoteCanvasReference
+    let paneUndoManager: UndoManager?
     let selectionController: CanvasSelectionController
     let shapeSnapController: ShapeSnapController
     let pageState: NotePageState
     let currentVisibleContentRect: () -> CGRect
-    @Binding var selectedTool: ToolID
     let cacheCurrentTool: () -> Void
     let scrollCanvas: (Int) -> Void
 
@@ -982,9 +1041,11 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
         content
             .task {
                 cacheCurrentTool()
-                selectedTool = app.toolPreferences.preferences.lastSelectedTool
                 pageState.pageGeometry = model.note?.pageGeometry ?? .a4
                 model.canvasElements.canvasReference = canvasReference
+                if let paneUndoManager {
+                    model.canvasElements.undoManagerOverride = paneUndoManager
+                }
                 selectionController.canvasReference = canvasReference
                 selectionController.elementsStore = model.canvasElements
                 shapeSnapController.canvasReference = canvasReference
@@ -1068,9 +1129,6 @@ private struct NoteScreenPrimaryChangeObservers: ViewModifier {
                     model.canvasElements.finishTextEditingSession(matching: nil)
                 }
                 selectionController.toolChanged()
-                app.toolPreferences.update { preferences in
-                    preferences.lastSelectedTool = newTool
-                }
                 cacheCurrentTool()
             }
             .onChange(of: app.toolPreferences.preferences) {

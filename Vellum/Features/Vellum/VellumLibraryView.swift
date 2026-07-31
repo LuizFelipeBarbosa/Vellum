@@ -316,7 +316,7 @@ struct VellumLibraryView: View {
             if isSelecting {
                 model.library.toggleSelection(card.id)
             } else {
-                Task { await model.navigate(to: .note(card.id)) }
+                Task { await model.openNote(card.id) }
             }
         }
 
