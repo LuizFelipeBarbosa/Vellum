@@ -2,13 +2,15 @@ import CoreGraphics
 import Testing
 @testable import VellumCore
 
+private let portraitContentWidth = PageLayout.portraitContentWidth
+
 @Test("Page dimensions use the A4 aspect ratio")
 func pageDimensionsUseA4AspectRatio() {
-    #expect(PageLayout.contentWidth == 768)
+    #expect(PageLayout.portraitContentWidth == 768)
     #expect(PageLayout.a4AspectRatio == 841.8 / 595.2)
     #expect(
         PageGeometry.a4.pageHeight
-            == PageLayout.contentWidth * CGFloat(PageLayout.a4AspectRatio)
+            == PageLayout.portraitContentWidth * CGFloat(PageLayout.a4AspectRatio)
     )
     #expect(PageGeometry.a4.pdfPageSize == CGSize(width: 595.2, height: 841.8))
     #expect(PageGeometry.a4.rasterPageSizePixels == CGSize(width: 1_536, height: 2_172))
@@ -21,7 +23,7 @@ func pageRectanglesAreStackedInContentSpace() {
 
         #expect(rect.origin.x == 0)
         #expect(rect.origin.y == CGFloat(index) * PageGeometry.a4.pageHeight)
-        #expect(rect.width == PageLayout.contentWidth)
+        #expect(rect.width == PageLayout.portraitContentWidth)
         #expect(rect.height == PageGeometry.a4.pageHeight)
     }
 }
@@ -30,10 +32,10 @@ func pageRectanglesAreStackedInContentSpace() {
 func portraitSourcePageFitsBandWidth() {
     let sourceSize = CGSize(width: 600, height: 800)
     let fitted = PageGeometry.a4.fittedRect(forSourcePageSize: sourceSize, pageIndex: 0)
-    let expectedHeight = sourceSize.height * PageLayout.contentWidth / sourceSize.width
+    let expectedHeight = sourceSize.height * PageLayout.portraitContentWidth / sourceSize.width
 
     #expect(fitted.minX == 0)
-    #expect(fitted.width == PageLayout.contentWidth)
+    #expect(fitted.width == PageLayout.portraitContentWidth)
     #expect(fitted.height == expectedHeight)
     #expect(fitted.midY == PageGeometry.a4.pageRect(index: 0).midY)
 }
@@ -44,7 +46,7 @@ func landscapeSourcePageIsVerticallyLetterboxed() {
     let fitted = PageGeometry.a4.fittedRect(forSourcePageSize: sourceSize, pageIndex: 0)
 
     #expect(fitted.minX == 0)
-    #expect(fitted.width == PageLayout.contentWidth)
+    #expect(fitted.width == PageLayout.portraitContentWidth)
     #expect(fitted.height == 384)
     #expect(fitted.midY == PageGeometry.a4.pageRect(index: 0).midY)
 }
@@ -52,7 +54,7 @@ func landscapeSourcePageIsVerticallyLetterboxed() {
 @Test("A source matching the content-area aspect ratio fills the page rect")
 func matchingAspectRatioFillsPageRect() {
     let sourceSize = CGSize(
-        width: PageLayout.contentWidth,
+        width: PageLayout.portraitContentWidth,
         height: PageGeometry.a4.pageHeight
     )
 
@@ -174,92 +176,193 @@ func pageIndexIsClampedToAvailablePages() {
 @Test("Viewport zoom bounds scale from the content width")
 func viewportZoomBoundsScaleFromContentWidth() {
     for width: CGFloat in [744, 834, 1_194] {
-        let expectedMinimum = width / PageLayout.contentWidth
+        let expectedMinimum = width / PageLayout.portraitContentWidth
 
-        #expect(PageLayout.minZoom(forViewportWidth: width) == expectedMinimum)
-        #expect(PageLayout.maxZoom(forViewportWidth: width) == 4 * expectedMinimum)
+        #expect(
+            PageLayout.minZoom(
+                forViewportWidth: width,
+                contentWidth: portraitContentWidth
+            ) == expectedMinimum
+        )
+        #expect(
+            PageLayout.maxZoom(
+                forViewportWidth: width,
+                contentWidth: portraitContentWidth
+            ) == 4 * expectedMinimum
+        )
     }
 
-    #expect(PageLayout.minZoom(forViewportWidth: 0) == 1)
-    #expect(PageLayout.maxZoom(forViewportWidth: 0) == 4)
-    #expect(PageLayout.minZoom(forViewportWidth: -100) == 1)
-    #expect(PageLayout.maxZoom(forViewportWidth: -100) == 4)
+    #expect(PageLayout.minZoom(
+        forViewportWidth: 0,
+        contentWidth: portraitContentWidth
+    ) == 1)
+    #expect(PageLayout.maxZoom(
+        forViewportWidth: 0,
+        contentWidth: portraitContentWidth
+    ) == 4)
+    #expect(PageLayout.minZoom(
+        forViewportWidth: -100,
+        contentWidth: portraitContentWidth
+    ) == 1)
+    #expect(PageLayout.maxZoom(
+        forViewportWidth: -100,
+        contentWidth: portraitContentWidth
+    ) == 4)
 }
 
 @Test("Ended zoom scales snap to fit within the fit-relative band")
 func endedZoomScalesSnapToFitWithinBand() {
     for width: CGFloat in [768, 1_024] {
-        let fit = PageLayout.minZoom(forViewportWidth: width)
+        let fit = PageLayout.minZoom(
+            forViewportWidth: width,
+            contentWidth: portraitContentWidth
+        )
 
-        #expect(PageLayout.snapTargetZoom(forEndedZoomScale: fit, viewportWidth: width) == fit)
+        #expect(PageLayout.snapTargetZoom(
+            forEndedZoomScale: fit,
+            viewportWidth: width,
+            contentWidth: portraitContentWidth
+        ) == fit)
         #expect(
-            PageLayout.snapTargetZoom(forEndedZoomScale: 0.95 * fit, viewportWidth: width) == fit
+            PageLayout.snapTargetZoom(
+                forEndedZoomScale: 0.95 * fit,
+                viewportWidth: width,
+                contentWidth: portraitContentWidth
+            ) == fit
         )
         #expect(
-            PageLayout.snapTargetZoom(forEndedZoomScale: 1.05 * fit, viewportWidth: width) == fit
+            PageLayout.snapTargetZoom(
+                forEndedZoomScale: 1.05 * fit,
+                viewportWidth: width,
+                contentWidth: portraitContentWidth
+            ) == fit
         )
         #expect(
-            PageLayout.snapTargetZoom(forEndedZoomScale: 1.09 * fit, viewportWidth: width) == fit
+            PageLayout.snapTargetZoom(
+                forEndedZoomScale: 1.09 * fit,
+                viewportWidth: width,
+                contentWidth: portraitContentWidth
+            ) == fit
         )
         #expect(
-            PageLayout.snapTargetZoom(forEndedZoomScale: 1.11 * fit, viewportWidth: width) == nil
+            PageLayout.snapTargetZoom(
+                forEndedZoomScale: 1.11 * fit,
+                viewportWidth: width,
+                contentWidth: portraitContentWidth
+            ) == nil
         )
         #expect(
-            PageLayout.snapTargetZoom(forEndedZoomScale: 0.89 * fit, viewportWidth: width) == nil
+            PageLayout.snapTargetZoom(
+                forEndedZoomScale: 0.89 * fit,
+                viewportWidth: width,
+                contentWidth: portraitContentWidth
+            ) == nil
         )
         #expect(
-            PageLayout.snapTargetZoom(forEndedZoomScale: 0.5 * fit, viewportWidth: width) == nil
+            PageLayout.snapTargetZoom(
+                forEndedZoomScale: 0.5 * fit,
+                viewportWidth: width,
+                contentWidth: portraitContentWidth
+            ) == nil
         )
         #expect(
-            PageLayout.snapTargetZoom(forEndedZoomScale: 0.25 * fit, viewportWidth: width) == nil
+            PageLayout.snapTargetZoom(
+                forEndedZoomScale: 0.25 * fit,
+                viewportWidth: width,
+                contentWidth: portraitContentWidth
+            ) == nil
         )
     }
 
     // Exact band boundaries, checked where fit == 1 so the ratios are float-exact.
     #expect(
-        PageLayout.snapTargetZoom(forEndedZoomScale: PageLayout.snapToFitLowerRatio, viewportWidth: 768) == 1
+        PageLayout.snapTargetZoom(
+            forEndedZoomScale: PageLayout.snapToFitLowerRatio,
+            viewportWidth: 768,
+            contentWidth: portraitContentWidth
+        ) == 1
     )
     #expect(
-        PageLayout.snapTargetZoom(forEndedZoomScale: PageLayout.snapToFitUpperRatio, viewportWidth: 768) == 1
+        PageLayout.snapTargetZoom(
+            forEndedZoomScale: PageLayout.snapToFitUpperRatio,
+            viewportWidth: 768,
+            contentWidth: portraitContentWidth
+        ) == 1
     )
 
-    #expect(PageLayout.snapTargetZoom(forEndedZoomScale: 1, viewportWidth: 0) == nil)
-    #expect(PageLayout.snapTargetZoom(forEndedZoomScale: -1, viewportWidth: 768) == nil)
+    #expect(PageLayout.snapTargetZoom(
+        forEndedZoomScale: 1,
+        viewportWidth: 0,
+        contentWidth: portraitContentWidth
+    ) == nil)
+    #expect(PageLayout.snapTargetZoom(
+        forEndedZoomScale: -1,
+        viewportWidth: 768,
+        contentWidth: portraitContentWidth
+    ) == nil)
 }
 
 @Test("Ended zoom scales settle inside logical bounds")
 func endedZoomScalesSettleInsideLogicalBounds() {
-    let overviewFloor = PageLayout.overviewMinZoom(forViewportWidth: 768)
-    let maximum = PageLayout.maxZoom(forViewportWidth: 768)
+    let overviewFloor = PageLayout.overviewMinZoom(
+        forViewportWidth: 768,
+        contentWidth: portraitContentWidth
+    )
+    let maximum = PageLayout.maxZoom(
+        forViewportWidth: 768,
+        contentWidth: portraitContentWidth
+    )
 
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 0.2, viewportWidth: 768) == overviewFloor)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 0.125, viewportWidth: 768) == overviewFloor)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 4.5, viewportWidth: 768) == maximum)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 5, viewportWidth: 768) == maximum)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 0.25, viewportWidth: 768) == nil)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 0.5, viewportWidth: 768) == nil)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 0.95, viewportWidth: 768) == 1)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 2, viewportWidth: 768) == nil)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 4, viewportWidth: 768) == nil)
+    #expect(settleTargetZoom(0.2) == overviewFloor)
+    #expect(settleTargetZoom(0.125) == overviewFloor)
+    #expect(settleTargetZoom(4.5) == maximum)
+    #expect(settleTargetZoom(5) == maximum)
+    #expect(settleTargetZoom(0.25) == nil)
+    #expect(settleTargetZoom(0.5) == nil)
+    #expect(settleTargetZoom(0.95) == 1)
+    #expect(settleTargetZoom(2) == nil)
+    #expect(settleTargetZoom(4) == nil)
 
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 1, viewportWidth: 0) == nil)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 1, viewportWidth: -768) == nil)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: 0, viewportWidth: 768) == nil)
-    #expect(PageLayout.settleTargetZoom(forEndedZoomScale: -1, viewportWidth: 768) == nil)
+    #expect(settleTargetZoom(1, viewportWidth: 0) == nil)
+    #expect(settleTargetZoom(1, viewportWidth: -768) == nil)
+    #expect(settleTargetZoom(0) == nil)
+    #expect(settleTargetZoom(-1) == nil)
 
     let secondWidth: CGFloat = 1_024
-    let secondFit = PageLayout.minZoom(forViewportWidth: secondWidth)
+    let secondFit = PageLayout.minZoom(
+        forViewportWidth: secondWidth,
+        contentWidth: portraitContentWidth
+    )
     #expect(
         PageLayout.settleTargetZoom(
             forEndedZoomScale: 0.2 * secondFit,
-            viewportWidth: secondWidth
-        ) == PageLayout.overviewMinZoom(forViewportWidth: secondWidth)
+            viewportWidth: secondWidth,
+            contentWidth: portraitContentWidth
+        ) == PageLayout.overviewMinZoom(
+            forViewportWidth: secondWidth,
+            contentWidth: portraitContentWidth
+        )
     )
     #expect(
         PageLayout.settleTargetZoom(
             forEndedZoomScale: 4.5 * secondFit,
-            viewportWidth: secondWidth
-        ) == PageLayout.maxZoom(forViewportWidth: secondWidth)
+            viewportWidth: secondWidth,
+            contentWidth: portraitContentWidth
+        ) == PageLayout.maxZoom(
+            forViewportWidth: secondWidth,
+            contentWidth: portraitContentWidth
+        )
+    )
+}
+
+private func settleTargetZoom(
+    _ scale: CGFloat,
+    viewportWidth: CGFloat = 768
+) -> CGFloat? {
+    PageLayout.settleTargetZoom(
+        forEndedZoomScale: scale,
+        viewportWidth: viewportWidth,
+        contentWidth: portraitContentWidth
     )
 }
 
@@ -334,14 +437,28 @@ func anchoredZoomOffsetRespectsCustomMinimum() {
 func overviewMinimumZoomIsFractionOfFitToWidth() {
     for width: CGFloat in [744, 834, 1_194] {
         #expect(
-            PageLayout.overviewMinZoom(forViewportWidth: width)
+            PageLayout.overviewMinZoom(
+                forViewportWidth: width,
+                contentWidth: portraitContentWidth
+            )
                 == PageLayout.overviewZoomFactor
-                    * PageLayout.minZoom(forViewportWidth: width)
+                    * PageLayout.minZoom(
+                        forViewportWidth: width,
+                        contentWidth: portraitContentWidth
+                    )
         )
     }
 
-    #expect(PageLayout.overviewMinZoom(forViewportWidth: 0) == PageLayout.overviewZoomFactor * 1)
     #expect(
-        PageLayout.overviewMinZoom(forViewportWidth: -100) == PageLayout.overviewZoomFactor * 1
+        PageLayout.overviewMinZoom(
+            forViewportWidth: 0,
+            contentWidth: portraitContentWidth
+        ) == PageLayout.overviewZoomFactor * 1
+    )
+    #expect(
+        PageLayout.overviewMinZoom(
+            forViewportWidth: -100,
+            contentWidth: portraitContentWidth
+        ) == PageLayout.overviewZoomFactor * 1
     )
 }

@@ -247,6 +247,8 @@ final class VellumAppModel {
         }
 
         if case .note = screen {
+            // Panes hold live canvases and undo stacks; restoring splits across navigation is out
+            // of scope for v1.
             await split.closeAll()
         }
 

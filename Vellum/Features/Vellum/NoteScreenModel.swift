@@ -54,7 +54,12 @@ final class NoteScreenModel {
     private var autosaveDisabled = false
     private var pendingPageMutationSave = false
 
-    var note: Note?
+    var note: Note? {
+        didSet {
+            pdfCache.contentWidth = note?.pageGeometry.contentWidth
+                ?? PageGeometry.a4.contentWidth
+        }
+    }
     var drawingData: Data?
     var proposals: [AgentProposal] = []
     var editorMode: EditorMode = .ink
@@ -222,7 +227,8 @@ final class NoteScreenModel {
                 let migration = LegacyContentMigrator.migrateIfNeeded(
                     drawing: loadedPKDrawing,
                     elements: elements,
-                    layoutVersion: loadedNote.layoutVersion
+                    layoutVersion: loadedNote.layoutVersion,
+                    targetContentWidth: loadedNote.pageGeometry.contentWidth
                 )
                 if migration.didMigrate {
                     drawingChanged(migration.drawing.dataRepresentation())
@@ -441,6 +447,7 @@ final class NoteScreenModel {
             errorMessage = "The note must be loaded before inserting an image."
             return nil
         }
+        let contentWidth = note.pageGeometry.contentWidth
 
         do {
             try await notes.saveAsset(
@@ -460,7 +467,7 @@ final class NoteScreenModel {
         )
         let scale = min(
             fittedLongEdge / longEdge,
-            PageLayout.contentWidth / processed.pixelSize.width
+            contentWidth / processed.pixelSize.width
         )
         let fittedSize = CGSize(
             width: processed.pixelSize.width * scale,
@@ -472,7 +479,7 @@ final class NoteScreenModel {
         )
         let frameX = min(
             max(0, center.x - fittedSize.width / 2),
-            PageLayout.contentWidth - fittedSize.width
+            contentWidth - fittedSize.width
         )
         let frameY = max(0, center.y - fittedSize.height / 2)
         let frame = CanvasRect(

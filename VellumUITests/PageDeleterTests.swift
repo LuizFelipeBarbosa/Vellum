@@ -9,7 +9,7 @@ final class PageDeleterTests: XCTestCase {
     func testDeletingMiddlePageRemovesItsContentAndMovesLaterContentUp() {
         let geometries = [
             PageGeometry.a4,
-            PageGeometry(aspectRatio: 792.0 / 612.0),
+            PageGeometry(portraitAspectRatio: 792.0 / 612.0),
         ]
 
         for geometry in geometries {

@@ -30,11 +30,15 @@ public struct Note: Identifiable, Codable, Sendable {
     public var links: [NoteLink]
     public var backgroundStyle: PageBackgroundStyle
     public var pageAspectRatio: Double = PageLayout.a4AspectRatio
+    public var pageOrientation: PageOrientation = .portrait
     public var deletedAt: Date?
 
     public var isTrashed: Bool { deletedAt != nil }
     public var pageGeometry: PageGeometry {
-        PageGeometry(aspectRatio: pageAspectRatio)
+        PageGeometry(
+            portraitAspectRatio: pageAspectRatio,
+            orientation: pageOrientation
+        )
     }
 
     public init(
@@ -52,6 +56,7 @@ public struct Note: Identifiable, Codable, Sendable {
         links: [NoteLink] = [],
         backgroundStyle: PageBackgroundStyle = .legacyDefault,
         pageAspectRatio: Double = PageLayout.a4AspectRatio,
+        pageOrientation: PageOrientation = .portrait,
         deletedAt: Date? = nil
     ) {
         self.id = id
@@ -67,7 +72,8 @@ public struct Note: Identifiable, Codable, Sendable {
         self.spaceID = spaceID
         self.links = links
         self.backgroundStyle = backgroundStyle
-        self.pageAspectRatio = PageGeometry(aspectRatio: pageAspectRatio).aspectRatio
+        self.pageAspectRatio = PageGeometry.clampedAspectRatio(pageAspectRatio)
+        self.pageOrientation = pageOrientation
         self.deletedAt = deletedAt
     }
 
@@ -89,12 +95,16 @@ public struct Note: Identifiable, Codable, Sendable {
             PageBackgroundStyle.self,
             forKey: .backgroundStyle
         ) ?? .legacyDefault
-        pageAspectRatio = PageGeometry(
-            aspectRatio: try container.decodeIfPresent(
+        pageAspectRatio = PageGeometry.clampedAspectRatio(
+            try container.decodeIfPresent(
                 Double.self,
                 forKey: .pageAspectRatio
             ) ?? PageLayout.a4AspectRatio
-        ).aspectRatio
+        )
+        pageOrientation = (try container.decodeIfPresent(
+            String.self,
+            forKey: .pageOrientation
+        )).flatMap(PageOrientation.init(rawValue:)) ?? .portrait
         deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
     }
 }

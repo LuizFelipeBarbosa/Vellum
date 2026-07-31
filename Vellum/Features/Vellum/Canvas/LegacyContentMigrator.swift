@@ -9,11 +9,12 @@ enum LegacyContentMigrator {
     }
 
     /// For legacy layout versions, scales content uniformly about the origin so its max X
-    /// fits PageLayout.contentWidth. Current layout versions are always returned unchanged.
+    /// fits the target page width. Current layout versions are always returned unchanged.
     static func migrateIfNeeded(
         drawing: PKDrawing,
         elements: [CanvasElement],
-        layoutVersion: Int
+        layoutVersion: Int,
+        targetContentWidth: CGFloat
     ) -> Result {
         guard layoutVersion < Note.currentLayoutVersion else {
             return Result(drawing: drawing, elements: elements, didMigrate: false)
@@ -24,11 +25,11 @@ enum LegacyContentMigrator {
             max(maximum, element.rotatedBoundingBox.maxX)
         }
 
-        guard contentMaxX > PageLayout.contentWidth else {
+        guard contentMaxX > targetContentWidth else {
             return Result(drawing: drawing, elements: elements, didMigrate: false)
         }
 
-        let factor = PageLayout.contentWidth / contentMaxX
+        let factor = targetContentWidth / contentMaxX
         let scaledDrawing = drawing.transformed(
             using: CGAffineTransform(scaleX: factor, y: factor)
         )

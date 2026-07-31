@@ -79,7 +79,7 @@ final class ImageImportTests: XCTestCase {
         // The clamp pushes the image left off the viewport's center so it fits the page.
         XCTAssertEqual(
             importedElement.frame.x,
-            Double(PageLayout.contentWidth) - importedElement.frame.width,
+            Double(PageLayout.portraitContentWidth) - importedElement.frame.width,
             accuracy: 2
         )
         XCTAssertEqual(
@@ -135,7 +135,7 @@ final class ImageImportTests: XCTestCase {
         let importedElement = try XCTUnwrap(model.canvasElements.elements.first)
         XCTAssertNotNil(importedID)
         XCTAssertEqual(importedID, importedElement.id)
-        XCTAssertEqual(importedElement.frame.width, Double(PageLayout.contentWidth), accuracy: 2)
+        XCTAssertEqual(importedElement.frame.width, Double(PageLayout.portraitContentWidth), accuracy: 2)
         XCTAssertEqual(
             importedElement.frame.height / importedElement.frame.width,
             1000.0 / 4000.0,

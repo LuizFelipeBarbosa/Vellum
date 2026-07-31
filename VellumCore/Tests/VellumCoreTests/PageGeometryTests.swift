@@ -7,21 +7,65 @@ private let letterAspect = 792.0 / 612.0
 
 @Test("Page geometry clamps aspect ratios to its supported range")
 func pageGeometryClampsAspectRatios() {
-    #expect(PageGeometry(aspectRatio: 0.01).aspectRatio == 0.5)
-    #expect(PageGeometry(aspectRatio: 10).aspectRatio == 3)
+    #expect(PageGeometry(portraitAspectRatio: 0.01).portraitAspectRatio == 0.5)
+    #expect(PageGeometry(portraitAspectRatio: 10).portraitAspectRatio == 3)
+}
+
+@Test("Landscape geometry swaps the upright page axes")
+func landscapeGeometrySwapsUprightAxes() {
+    let portrait = PageGeometry.a4
+    let landscape = PageGeometry.a4Landscape
+
+    #expect(landscape.contentWidth == portrait.pageHeight)
+    #expect(landscape.pageHeight == portrait.contentWidth)
+    #expect(landscape.orientation == .landscape)
+    #expect(landscape.aspectRatio == 1 / portrait.aspectRatio)
+}
+
+@Test("Landscape page rectangles use the swapped dimensions")
+func landscapePageRectUsesSwappedDimensions() {
+    let geometry = PageGeometry.a4Landscape
+
+    #expect(geometry.pageRect(index: 2) == CGRect(
+        x: 0,
+        y: 2 * geometry.pageHeight,
+        width: geometry.contentWidth,
+        height: geometry.pageHeight
+    ))
+}
+
+@Test("Landscape A4 exports with swapped PDF dimensions")
+func landscapeA4PDFSizeUsesSwappedDimensions() {
+    #expect(PageGeometry.a4Landscape.pdfPageSize == CGSize(width: 841.8, height: 595.2))
+}
+
+@Test("Portrait aspect ratio round trips through landscape geometry")
+func portraitAspectRatioRoundTripsThroughLandscapeGeometry() {
+    let uprightAspectRatio = PageGeometry.aspectRatioRange.upperBound
+    let landscape = PageGeometry(
+        portraitAspectRatio: uprightAspectRatio,
+        orientation: .landscape
+    )
+    let roundTripped = PageGeometry(
+        portraitAspectRatio: landscape.portraitAspectRatio,
+        orientation: .portrait
+    )
+
+    #expect(landscape.portraitAspectRatio == uprightAspectRatio)
+    #expect(roundTripped.portraitAspectRatio == uprightAspectRatio)
 }
 
 @Test("Letter geometry stacks and indexes pages with the letter page height")
 func letterGeometryUsesLetterPageHeight() {
-    let geometry = PageGeometry(aspectRatio: letterAspect)
-    let expectedHeight = PageLayout.contentWidth * CGFloat(letterAspect)
+    let geometry = PageGeometry(portraitAspectRatio: letterAspect)
+    let expectedHeight = PageLayout.portraitContentWidth * CGFloat(letterAspect)
     let pageRect = geometry.pageRect(index: 2)
 
     #expect(geometry.pageHeight == expectedHeight)
     #expect(pageRect == CGRect(
         x: 0,
         y: 2 * expectedHeight,
-        width: PageLayout.contentWidth,
+        width: PageLayout.portraitContentWidth,
         height: expectedHeight
     ))
     #expect(geometry.contentHeight(pageCount: 3) == 3 * expectedHeight)
@@ -31,7 +75,7 @@ func letterGeometryUsesLetterPageHeight() {
 
 @Test("Export page sizes scale with the geometry aspect ratio")
 func exportPageSizesScaleWithAspectRatio() {
-    let geometry = PageGeometry(aspectRatio: letterAspect)
+    let geometry = PageGeometry(portraitAspectRatio: letterAspect)
 
     #expect(geometry.pdfPageSize.width == 595.2)
     #expect(geometry.pdfPageSize.height == 595.2 * CGFloat(letterAspect))
@@ -51,7 +95,7 @@ func a4GeometryPreservesFormerFixedDimensions() {
 
 @Test("A letter PDF page fills a letter geometry band")
 func letterPDFPageFillsLetterBand() {
-    let geometry = PageGeometry(aspectRatio: letterAspect)
+    let geometry = PageGeometry(portraitAspectRatio: letterAspect)
     let pageRect = geometry.pageRect(index: 1)
     let fittedRect = geometry.fittedRect(
         forSourcePageSize: CGSize(width: 612, height: 792),
@@ -73,7 +117,7 @@ func notePageAspectRatioRoundTrip() throws {
     )
 
     #expect(decoded.pageAspectRatio == note.pageAspectRatio)
-    #expect(decoded.pageGeometry == PageGeometry(aspectRatio: letterAspect))
+    #expect(decoded.pageGeometry == PageGeometry(portraitAspectRatio: letterAspect))
 }
 
 @Test("A manifest without page aspect ratio defaults to A4")

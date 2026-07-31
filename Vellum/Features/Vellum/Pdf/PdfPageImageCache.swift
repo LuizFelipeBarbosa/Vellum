@@ -59,6 +59,7 @@ final class PdfPageImageCache {
 
     private(set) var images: [ImageKey: UIImage] = [:]
     var pagesProvider: (() -> [NotePage])?
+    var contentWidth: CGFloat = PageGeometry.a4.contentWidth
 
     private var documents: [String: PDFDocument] = [:]
     private var inFlight = Set<ImageKey>()
@@ -170,7 +171,8 @@ final class PdfPageImageCache {
             let targetPixelSize = Self.targetPixelSize(
                 for: page,
                 bucket: bucket,
-                displayScale: displayScale
+                displayScale: displayScale,
+                contentWidth: contentWidth
             )
             let request = PdfPageRenderRequest(
                 page: page,
@@ -238,7 +240,8 @@ final class PdfPageImageCache {
     private static func targetPixelSize(
         for page: PDFPage,
         bucket: ScaleBucket,
-        displayScale: CGFloat
+        displayScale: CGFloat,
+        contentWidth: CGFloat
     ) -> CGSize {
         let sourceSize = displayedMediaBoxSize(for: page)
         guard sourceSize.width > 0, sourceSize.height > 0 else {
@@ -248,7 +251,7 @@ final class PdfPageImageCache {
         let resolvedDisplayScale =
             displayScale.isFinite && displayScale > 0 ? displayScale : 2
         let bucketMultiplier: CGFloat = bucket == .zoomed ? 2 : 1
-        let targetWidth = PageLayout.contentWidth
+        let targetWidth = contentWidth
             * resolvedDisplayScale
             * bucketMultiplier
         let targetHeight = targetWidth * sourceSize.height / sourceSize.width

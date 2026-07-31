@@ -193,7 +193,7 @@ final class PageReordererTests: XCTestCase {
     }
 
     func testLetterGeometryTranslatesStrokeAndElementByLetterPageHeight() throws {
-        let geometry = PageGeometry(aspectRatio: 792.0 / 612.0)
+        let geometry = PageGeometry(portraitAspectRatio: 792.0 / 612.0)
         let stroke = makeStroke(
             locations: [
                 CGPoint(x: 20, y: 80),

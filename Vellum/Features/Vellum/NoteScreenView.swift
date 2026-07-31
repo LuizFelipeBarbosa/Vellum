@@ -9,12 +9,11 @@ import VellumCore
 struct NoteScreenView: View {
     @Bindable var model: NoteScreenModel
     @Bindable var app: VellumAppModel
-    var paneContext: PaneContext? = nil
+    let paneContext: PaneContext
 
     @State private var isShowingActivity = false
     @State private var isConfirmingDelete = false
     @State private var lastNonNilTool: (any PKTool)?
-    @State private var canvasReference = NoteCanvasReference()
     @State private var selectionController = CanvasSelectionController()
     @State private var shapeSnapController = ShapeSnapController()
     @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
@@ -30,8 +29,8 @@ struct NoteScreenView: View {
     @State private var rightClusterFrame: CGRect = .zero
     @State private var topOverlayGlobalFrame: CGRect = .zero
 
-    private var activeCanvasReference: NoteCanvasReference {
-        paneContext?.pane.canvasReference ?? canvasReference
+    private var canvasReference: NoteCanvasReference {
+        paneContext.pane.canvasReference
     }
 
     private var selectedTool: ToolID {
@@ -40,17 +39,15 @@ struct NoteScreenView: View {
     }
 
     private var showsBacklinksRail: Bool {
-        paneContext.map(\.fitsBacklinksRail) ?? true
+        paneContext.fitsBacklinksRail
     }
 
     private var showsSuggestionsAndThumbnails: Bool {
-        paneContext.map {
-            $0.fitsSuggestionsAndThumbnails && $0.isFocused
-        } ?? true
+        paneContext.fitsSuggestionsAndThumbnails && paneContext.isFocused
     }
 
     private var showsEntityChips: Bool {
-        paneContext.map(\.fitsEntityChips) ?? true
+        paneContext.fitsEntityChips
     }
 
     var body: some View {
@@ -85,7 +82,7 @@ struct NoteScreenView: View {
                         leftClusterFrame = $0
                         rightClusterFrame = $1
                     },
-                    isCompact: paneContext?.hasCompactHeader ?? false
+                    isCompact: paneContext.hasCompactHeader
                 )
 
                 if !model.noteEntities.isEmpty && showsEntityChips {
@@ -105,7 +102,7 @@ struct NoteScreenView: View {
 
             modalOverlays
 
-            if let paneContext, paneContext.isSplit {
+            if paneContext.isSplit {
                 PaneFocusSurface(
                     paneContext: paneContext,
                     onFocus: { app.split.focus(paneContext.pane.id) }
@@ -125,23 +122,21 @@ struct NoteScreenView: View {
         }
         .preference(
             key: PaneHeaderFramesKey.self,
-            value: paneContext.map { paneContext in
-                [
-                    paneContext.pane.id: PaneHeaderFrames(
-                        leftClusterFrame: leftClusterFrame,
-                        rightClusterFrame: rightClusterFrame,
-                        topOverlayGlobalFrame: topOverlayGlobalFrame
-                    )
-                ]
-            } ?? [:]
+            value: [
+                paneContext.pane.id: PaneHeaderFrames(
+                    leftClusterFrame: leftClusterFrame,
+                    rightClusterFrame: rightClusterFrame,
+                    topOverlayGlobalFrame: topOverlayGlobalFrame
+                )
+            ]
         )
         .background(VellumTheme.paper)
         .modifier(
             NoteScreenLifecycleModifiers(
                 model: model,
                 app: app,
-                canvasReference: activeCanvasReference,
-                paneUndoManager: paneContext?.pane.undoManager,
+                canvasReference: canvasReference,
+                paneUndoManager: paneContext.pane.undoManager,
                 selectionController: selectionController,
                 shapeSnapController: shapeSnapController,
                 pageState: pageState,
@@ -173,15 +168,17 @@ struct NoteScreenView: View {
                 selectedTool = borrowedFrom
             }
         }
-        .onChange(of: paneContext?.isFocused) { wasFocused, isFocused in
-            if wasFocused == true, isFocused == false {
+        .onChange(of: paneContext.isFocused) { wasFocused, isFocused in
+            if wasFocused, !isFocused {
                 selectionController.clearSelection()
+                isShowingThumbnails = false
+                model.isShowingSuggestions = false
             }
         }
         .modifier(
             NoteScreenCanvasContentChangeObservers(
                 model: model,
-                canvasReference: activeCanvasReference,
+                canvasReference: canvasReference,
                 pageState: pageState,
                 thumbnailStore: thumbnailStore,
                 isShowingThumbnails: isShowingThumbnails,
@@ -191,7 +188,8 @@ struct NoteScreenView: View {
         .modifier(
             NoteScreenPageViewportChangeObservers(
                 model: model,
-                canvasReference: activeCanvasReference,
+                canvasReference: canvasReference,
+                selectionController: selectionController,
                 pageState: pageState,
                 thumbnailStore: thumbnailStore,
                 canvasViewport: canvasViewport,
@@ -292,13 +290,14 @@ struct NoteScreenView: View {
     private var canvasArea: some View {
         GeometryReader { geometry in
             let canvasGlobalOrigin = geometry.frame(in: .global).origin
+            let pageGeometry = model.note?.pageGeometry ?? .a4
 
             ZStack(alignment: .topLeading) {
                 PageGuideLayer(
                     viewport: canvasViewport,
                     viewportSize: canvasSize,
                     pageCount: pageState.pageCount,
-                    geometry: model.note?.pageGeometry ?? .a4,
+                    geometry: pageGeometry,
                     style: model.note?.backgroundStyle ?? .legacyDefault,
                     pdfBands: model.pdfBands
                 )
@@ -309,10 +308,10 @@ struct NoteScreenView: View {
                     pdfBands: model.pdfBands,
                     viewport: canvasViewport,
                     pageCount: pageState.pageCount,
-                    geometry: model.note?.pageGeometry ?? .a4
+                    geometry: pageGeometry
                 )
                 .frame(
-                    width: PageLayout.contentWidth,
+                    width: pageGeometry.contentWidth,
                     height: pageState.contentHeight,
                     alignment: .topLeading
                 )
@@ -332,7 +331,7 @@ struct NoteScreenView: View {
                     viewport: canvasViewport,
                     viewportSize: canvasSize,
                     pageCount: pageState.pageCount,
-                    geometry: model.note?.pageGeometry ?? .a4,
+                    geometry: pageGeometry,
                     style: model.note?.backgroundStyle ?? .legacyDefault,
                     pdfBands: model.pdfBands,
                     mode: .pdfAdornments
@@ -346,7 +345,7 @@ struct NoteScreenView: View {
                     placement: .belowInk
                 )
                 .contentViewportFrame(
-                    contentWidth: PageLayout.contentWidth,
+                    contentWidth: pageGeometry.contentWidth,
                     contentHeight: pageState.contentHeight,
                     zoom: canvasViewport.zoomScale,
                     contentOffset: canvasViewport.contentOffset,
@@ -358,7 +357,7 @@ struct NoteScreenView: View {
                     onDrawingChanged: { data in
                         model.drawingChanged(data)
                         pageState.updateContent(
-                            drawingBounds: activeCanvasReference.canvasView?.drawing.bounds
+                            drawingBounds: canvasReference.canvasView?.drawing.bounds
                                 ?? .null,
                             elements: model.canvasElements.elements,
                             minimumFilledPages: model.note?.pages.count ?? 0
@@ -368,20 +367,21 @@ struct NoteScreenView: View {
                     tool: activeTool,
                     showsSystemToolPicker: false,
                     onCanvasReady: { canvasView in
-                        activeCanvasReference.canvasView = canvasView
+                        canvasReference.canvasView = canvasView
                         Task { @MainActor in
-                            paneContext?.pane.canvasDidBecomeReady()
+                            paneContext.pane.canvasDidBecomeReady()
                         }
                     },
-                    paneUndoManager: paneContext?.pane.undoManager,
+                    paneUndoManager: paneContext.pane.undoManager,
                     isDrawingEnabled: selectedTool.usesDrawingGesture,
+                    contentWidth: pageGeometry.contentWidth,
                     contentHeight: pageState.contentHeight,
                     topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + 16,
                     onViewportChanged: { canvasViewport = $0 },
                     onExternalDrawingChange: {
                         selectionController.externalDrawingDidChange()
                         pageState.updateContent(
-                            drawingBounds: activeCanvasReference.canvasView?.drawing.bounds
+                            drawingBounds: canvasReference.canvasView?.drawing.bounds
                                 ?? .null,
                             elements: model.canvasElements.elements,
                             minimumFilledPages: model.note?.pages.count ?? 0
@@ -404,13 +404,13 @@ struct NoteScreenView: View {
                         }
                     },
                     onTwoFingerTap: {
-                        if activeCanvasReference.canvasView?.undoManager?.canUndo == true {
-                            activeCanvasReference.canvasView?.undoManager?.undo()
+                        if canvasReference.canvasView?.undoManager?.canUndo == true {
+                            canvasReference.canvasView?.undoManager?.undo()
                         }
                     },
                     onThreeFingerTap: {
-                        if activeCanvasReference.canvasView?.undoManager?.canRedo == true {
-                            activeCanvasReference.canvasView?.undoManager?.redo()
+                        if canvasReference.canvasView?.undoManager?.canRedo == true {
+                            canvasReference.canvasView?.undoManager?.redo()
                         }
                     }
                 )
@@ -428,7 +428,7 @@ struct NoteScreenView: View {
                 .allowsHitTesting(false)
 
                 ShapeEraserSurface(
-                    canvasReference: activeCanvasReference,
+                    canvasReference: canvasReference,
                     elementsStore: model.canvasElements,
                     eraserConfig: app.toolPreferences.preferences.eraser,
                     isEnabled: selectedTool == .eraser
@@ -437,7 +437,7 @@ struct NoteScreenView: View {
                 .allowsHitTesting(false)
 
                 ElementTapSelectionSurface(
-                    canvasReference: activeCanvasReference,
+                    canvasReference: canvasReference,
                     elementsStore: model.canvasElements,
                     selectionController: selectionController,
                     // Only the ink tools borrow a tap for element selection. Shapes and photos
@@ -458,7 +458,7 @@ struct NoteScreenView: View {
                     isTextToolActive: selectedTool == .text
                 )
                 .contentViewportFrame(
-                    contentWidth: PageLayout.contentWidth,
+                    contentWidth: pageGeometry.contentWidth,
                     contentHeight: pageState.contentHeight,
                     zoom: canvasViewport.zoomScale,
                     contentOffset: canvasViewport.contentOffset,
@@ -473,7 +473,7 @@ struct NoteScreenView: View {
                     isSelectToolActive: selectedTool == .select
                 )
                 .contentViewportFrame(
-                    contentWidth: PageLayout.contentWidth,
+                    contentWidth: pageGeometry.contentWidth,
                     contentHeight: pageState.contentHeight,
                     zoom: canvasViewport.zoomScale,
                     contentOffset: canvasViewport.contentOffset,
@@ -843,7 +843,11 @@ struct NoteScreenView: View {
     }
 
     private var fitZoomScale: CGFloat {
-        PageLayout.minZoom(forViewportWidth: canvasSize.width)
+        PageLayout.minZoom(
+            forViewportWidth: canvasSize.width,
+            contentWidth: model.note?.pageGeometry.contentWidth
+                ?? PageGeometry.a4.contentWidth
+        )
     }
 
     private var isZoomAtFit: Bool {
@@ -908,7 +912,7 @@ struct NoteScreenView: View {
     }
 
     private func scrollCanvas(toPageIndex index: Int) {
-        guard let canvas = activeCanvasReference.canvasView else { return }
+        guard let canvas = canvasReference.canvasView else { return }
         let geometry = model.note?.pageGeometry ?? .a4
         let inset = canvas.contentInset.top
         let y = geometry.pageRect(index: index).minY * canvas.zoomScale - inset
@@ -920,7 +924,7 @@ struct NoteScreenView: View {
     }
 
     private func resetZoomToFit() {
-        (activeCanvasReference.canvasView as? PagedCanvasView)?.snapZoomToFit()
+        (canvasReference.canvasView as? PagedCanvasView)?.snapZoomToFit()
     }
 
     private func currentPageRendererContent() -> NotePageRenderer.Content {
@@ -933,7 +937,7 @@ struct NoteScreenView: View {
             pdfPagesByBand[band] = model.pdfCache.page(forBand: band)
         }
         let content = NotePageRenderer.Content(
-            drawing: activeCanvasReference.canvasView?.drawing
+            drawing: canvasReference.canvasView?.drawing
                 ?? persistedDrawing
                 ?? PKDrawing(),
             elements: model.canvasElements.elements,
@@ -944,7 +948,7 @@ struct NoteScreenView: View {
             pdfPagesByBand: pdfPagesByBand,
             pdfExpectedBands: pdfExpectedBands
         )
-        assert(content.geometry.pageHeight == pageState.pageGeometry.pageHeight)
+        assert(content.geometry == pageState.pageGeometry)
         return content
     }
 
@@ -1045,6 +1049,7 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
             .task {
                 cacheCurrentTool()
                 pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+                selectionController.contentWidth = pageState.pageGeometry.contentWidth
                 model.canvasElements.canvasReference = canvasReference
                 if let paneUndoManager {
                     model.canvasElements.undoManagerOverride = paneUndoManager
@@ -1106,6 +1111,7 @@ private struct NoteScreenLifecycleModifiers: ViewModifier {
                     }
                 }
                 pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+                selectionController.contentWidth = pageState.pageGeometry.contentWidth
                 pageState.updateContent(
                     drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
                     elements: model.canvasElements.elements,
@@ -1187,6 +1193,7 @@ private struct NoteScreenPageViewportChangeObservers: ViewModifier {
 
     let model: NoteScreenModel
     let canvasReference: NoteCanvasReference
+    let selectionController: CanvasSelectionController
     let pageState: NotePageState
     let thumbnailStore: PageThumbnailStore
     let canvasViewport: CanvasViewport
@@ -1204,8 +1211,9 @@ private struct NoteScreenPageViewportChangeObservers: ViewModifier {
                 thumbnailStore.markDirty()
                 schedulePDFWindowUpdate()
             }
-            .onChange(of: model.note?.pageAspectRatio) { _, _ in
-                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+            .onChange(of: model.note?.pageGeometry) { _, geometry in
+                pageState.pageGeometry = geometry ?? .a4
+                selectionController.contentWidth = pageState.pageGeometry.contentWidth
                 pageState.updateContent(
                     drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
                     elements: model.canvasElements.elements,
