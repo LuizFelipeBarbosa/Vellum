@@ -246,6 +246,8 @@ final class VellumAppModel {
         }
 
         if case .note = screen {
+            // Discarding the split arrangement here is a deliberate v1 scope
+            // decision; returning from other screens does not restore it yet.
             await split.closeAll()
         }
 

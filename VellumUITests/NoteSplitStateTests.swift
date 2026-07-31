@@ -114,6 +114,23 @@ final class NoteSplitStateTests: XCTestCase {
         XCTAssertEqual(relocatedPane.canvasGeneration, canvasGeneration)
     }
 
+    func testMovePaneToLaterRowInSourceColumnAdjustsForDetach() {
+        let container = makeContainer()
+        let a = makePane(container: container)
+        let b = makePane(container: container)
+        let c = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: a, at: nil)
+        state.stackPane(b, inColumn: 0, at: nil)
+        state.stackPane(c, inColumn: 0, at: nil)
+
+        XCTAssertTrue(
+            state.movePane(id: a.id, to: .row(column: 0, at: 2))
+        )
+
+        XCTAssertEqual(state.columns[0].panes.map(\.id), [b.id, a.id, c.id])
+    }
+
     func testMoveNoOpLeavesFractionsUnchanged() {
         let container = makeContainer()
         let top = makePane(container: container)
@@ -329,10 +346,12 @@ final class NoteSplitStateTests: XCTestCase {
         let state = NoteSplitState()
         state.insertColumn(with: pane, at: nil)
         state.toolBorrowedByElementSelection = .pen
+        state.selectedTool = .select
 
         state.removePane(id: pane.id)
 
         XCTAssertNil(state.toolBorrowedByElementSelection)
+        XCTAssertEqual(state.selectedTool, .pen)
     }
 
     func testRemovingLastPaneCollapsesColumnAndUsesNearestFocus() {

@@ -463,7 +463,7 @@ struct NoteSplitContainerView: View {
             for: lift.noteID,
             at: location,
             containerSize: containerSize,
-            holding: dragSession.resolution?.target
+            holding: dragSession.resolution?.target ?? dragSession.refusedTarget
         )
         guard drop.resolution != dragSession.resolution
                 || drop.refusedTarget != dragSession.refusedTarget else {
@@ -486,7 +486,7 @@ struct NoteSplitContainerView: View {
             for: lift.noteID,
             at: dragSession.location,
             containerSize: containerSize,
-            holding: dragSession.resolution?.target
+            holding: dragSession.resolution?.target ?? dragSession.refusedTarget
         )
         if drop.resolution != dragSession.resolution
             || drop.refusedTarget != dragSession.refusedTarget {
@@ -575,7 +575,15 @@ struct NoteSplitContainerView: View {
             let openedPaneID: UUID?
             switch target {
             case .existingPane:
-                openedPaneID = await app.openNote(lift.noteID)
+                // Focus-only: this target exists precisely because the note is already
+                // open. Routing it through openNote's replaceFocused fallback would
+                // re-introduce replace-by-drop if the pane closes mid-drag.
+                if let pane = app.split.pane(for: lift.noteID) {
+                    app.split.focus(pane.id)
+                    openedPaneID = pane.id
+                } else {
+                    openedPaneID = nil
+                }
             case .insertColumn(let index):
                 openedPaneID = await app.openNote(
                     lift.noteID,

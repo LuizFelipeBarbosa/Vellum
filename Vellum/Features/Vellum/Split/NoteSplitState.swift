@@ -3,6 +3,7 @@ import Observation
 import VellumCore
 
 /// Where a moved pane lands, expressed as the two insertions the grid supports.
+// Staged for the pane-rearrange follow-up; no production caller yet.
 enum PaneMoveDestination: Equatable, Sendable {
     case column(at: Int)
     case row(column: Int, at: Int)
@@ -123,6 +124,7 @@ final class NoteSplitState {
     /// Reinserts the same `NotePane` object, so a move never reloads the note,
     /// resets the canvas, or disturbs the undo stack.
     /// Returns false when the move is a no-op so callers can skip drop feedback.
+    // Staged for the pane-rearrange follow-up; no production caller yet.
     @discardableResult
     func movePane(id paneID: UUID, to destination: PaneMoveDestination) -> Bool {
         guard let source = paneIndex(of: paneID) else { return false }
@@ -158,7 +160,14 @@ final class NoteSplitState {
             let adjustedColumn = detached.columnCollapsed && column > source.column
                 ? column - 1
                 : column
-            stackPane(detached.pane, inColumn: adjustedColumn, at: row)
+            // The detach removed source.row from this column, so every later
+            // destination row resolved against the pre-move grid shifts up by one.
+            let adjustedRow = !detached.columnCollapsed
+                && column == source.column
+                && row > source.row
+                ? row - 1
+                : row
+            stackPane(detached.pane, inColumn: adjustedColumn, at: adjustedRow)
         }
 
         return true
@@ -211,7 +220,11 @@ final class NoteSplitState {
         let removedPaneWasFocused = focusedPaneID == id
         // Only the focused pane can own a live element-selection tool borrow.
         if removedPaneWasFocused {
+            let borrowedFrom = toolBorrowedByElementSelection
             toolBorrowedByElementSelection = nil
+            if selectedTool == .select, let borrowedFrom {
+                selectedTool = borrowedFrom
+            }
         }
         let column = columns[index.column]
         let rowFractions = SplitLayoutPolicy.fractionsRemoving(

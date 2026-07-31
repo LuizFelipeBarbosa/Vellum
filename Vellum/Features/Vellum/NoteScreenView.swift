@@ -9,12 +9,11 @@ import VellumCore
 struct NoteScreenView: View {
     @Bindable var model: NoteScreenModel
     @Bindable var app: VellumAppModel
-    var paneContext: PaneContext? = nil
+    var paneContext: PaneContext
 
     @State private var isShowingActivity = false
     @State private var isConfirmingDelete = false
     @State private var lastNonNilTool: (any PKTool)?
-    @State private var canvasReference = NoteCanvasReference()
     @State private var selectionController = CanvasSelectionController()
     @State private var shapeSnapController = ShapeSnapController()
     @State private var canvasViewport = CanvasViewport(contentOffset: .zero, zoomScale: 1)
@@ -31,7 +30,7 @@ struct NoteScreenView: View {
     @State private var topOverlayGlobalFrame: CGRect = .zero
 
     private var activeCanvasReference: NoteCanvasReference {
-        paneContext?.pane.canvasReference ?? canvasReference
+        paneContext.pane.canvasReference
     }
 
     private var selectedTool: ToolID {
@@ -40,17 +39,15 @@ struct NoteScreenView: View {
     }
 
     private var showsBacklinksRail: Bool {
-        paneContext.map(\.fitsBacklinksRail) ?? true
+        paneContext.fitsBacklinksRail
     }
 
     private var showsSuggestionsAndThumbnails: Bool {
-        paneContext.map {
-            $0.fitsSuggestionsAndThumbnails && $0.isFocused
-        } ?? true
+        paneContext.fitsSuggestionsAndThumbnails && paneContext.isFocused
     }
 
     private var showsEntityChips: Bool {
-        paneContext.map(\.fitsEntityChips) ?? true
+        paneContext.fitsEntityChips
     }
 
     var body: some View {
@@ -85,7 +82,7 @@ struct NoteScreenView: View {
                         leftClusterFrame = $0
                         rightClusterFrame = $1
                     },
-                    isCompact: paneContext?.hasCompactHeader ?? false
+                    isCompact: paneContext.hasCompactHeader
                 )
 
                 if !model.noteEntities.isEmpty && showsEntityChips {
@@ -105,7 +102,7 @@ struct NoteScreenView: View {
 
             modalOverlays
 
-            if let paneContext, paneContext.isSplit {
+            if paneContext.isSplit {
                 PaneFocusSurface(
                     paneContext: paneContext,
                     onFocus: { app.split.focus(paneContext.pane.id) }
@@ -125,15 +122,13 @@ struct NoteScreenView: View {
         }
         .preference(
             key: PaneHeaderFramesKey.self,
-            value: paneContext.map { paneContext in
-                [
-                    paneContext.pane.id: PaneHeaderFrames(
-                        leftClusterFrame: leftClusterFrame,
-                        rightClusterFrame: rightClusterFrame,
-                        topOverlayGlobalFrame: topOverlayGlobalFrame
-                    )
-                ]
-            } ?? [:]
+            value: [
+                paneContext.pane.id: PaneHeaderFrames(
+                    leftClusterFrame: leftClusterFrame,
+                    rightClusterFrame: rightClusterFrame,
+                    topOverlayGlobalFrame: topOverlayGlobalFrame
+                )
+            ]
         )
         .background(VellumTheme.paper)
         .modifier(
@@ -141,7 +136,7 @@ struct NoteScreenView: View {
                 model: model,
                 app: app,
                 canvasReference: activeCanvasReference,
-                paneUndoManager: paneContext?.pane.undoManager,
+                paneUndoManager: paneContext.pane.undoManager,
                 selectionController: selectionController,
                 shapeSnapController: shapeSnapController,
                 pageState: pageState,
@@ -173,9 +168,11 @@ struct NoteScreenView: View {
                 selectedTool = borrowedFrom
             }
         }
-        .onChange(of: paneContext?.isFocused) { wasFocused, isFocused in
+        .onChange(of: paneContext.isFocused) { wasFocused, isFocused in
             if wasFocused == true, isFocused == false {
                 selectionController.clearSelection()
+                model.isShowingSuggestions = false
+                isShowingThumbnails = false
             }
         }
         .modifier(
@@ -370,10 +367,10 @@ struct NoteScreenView: View {
                     onCanvasReady: { canvasView in
                         activeCanvasReference.canvasView = canvasView
                         Task { @MainActor in
-                            paneContext?.pane.canvasDidBecomeReady()
+                            paneContext.pane.canvasDidBecomeReady()
                         }
                     },
-                    paneUndoManager: paneContext?.pane.undoManager,
+                    paneUndoManager: paneContext.pane.undoManager,
                     isDrawingEnabled: selectedTool.usesDrawingGesture,
                     contentHeight: pageState.contentHeight,
                     topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + 16,
