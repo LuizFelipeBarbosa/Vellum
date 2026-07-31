@@ -136,26 +136,28 @@ public enum SplitGridPolicy {
         }
 
         let width = usableLength(containerSize.width)
-        if point.x <= 0 {
-            return [.insertColumn(at: 0)]
-        }
-        if point.x >= width {
-            return [.insertColumn(at: grid.columns.count)]
-        }
+        guard width > 0 else { return [.insertColumn(at: 0)] }
 
+        // The drag point comes from a long press that keeps reporting the finger
+        // outside the container, so the safe-area bands are ordinary drop points.
+        // Clamping resolves them through the tiling loop; returning early there
+        // would drop the cross-axis fallback exactly where a full axis needs it.
+        let x = min(max(point.x, 0), width)
         let widths = columnWidths(grid: grid, containerWidth: width)
         var columnStartX: CGFloat = 0
 
         for (columnIndex, columnWidth) in widths.enumerated() {
             let columnEndX = columnStartX + columnWidth
-            guard point.x <= columnEndX else {
+            // The last column absorbs the trailing edge: rounding in the share
+            // math can leave the tiled widths a hair short of the container.
+            guard x <= columnEndX || columnIndex == widths.count - 1 else {
                 columnStartX = columnEndX
                 continue
             }
 
             return dropTargetsInsideColumn(
                 atY: point.y,
-                localX: point.x - columnStartX,
+                localX: min(x - columnStartX, columnWidth),
                 columnIndex: columnIndex,
                 columnWidth: columnWidth,
                 column: grid.columns[columnIndex],
@@ -280,6 +282,40 @@ public enum SplitGridPolicy {
         case .existingPane:
             return nil
         }
+    }
+
+    /// A refused insertion owns no pane, so callers that must draw it use the
+    /// nearest existing pane instead of a hypothetical grid's coordinates.
+    public static func clampedPaneIndex(
+        for target: SplitGridDropTarget,
+        in grid: SplitGridSnapshot
+    ) -> PaneIndex? {
+        let index: PaneIndex
+        switch target {
+        case let .insertColumn(columnIndex):
+            index = PaneIndex(
+                column: min(max(columnIndex, 0), grid.columns.count - 1),
+                row: 0
+            )
+        case let .insertRow(columnIndex, rowIndex):
+            guard grid.columns.indices.contains(columnIndex) else {
+                return nil
+            }
+            let rowCount = grid.columns[columnIndex].rowFractions.count
+            index = PaneIndex(
+                column: columnIndex,
+                row: min(max(rowIndex, 0), rowCount - 1)
+            )
+        case let .existingPane(paneIndex):
+            index = paneIndex
+        }
+
+        guard grid.columns.indices.contains(index.column),
+              grid.columns[index.column].rowFractions.indices
+                .contains(index.row) else {
+            return nil
+        }
+        return index
     }
 
     /// Capacity checks reject only structurally invalid or geometrically infeasible insertions.
@@ -480,29 +516,15 @@ public enum SplitGridPolicy {
         }
 
         let height = usableLength(containerHeight)
-        if y <= 0 {
-            // At a pane corner both axes are boundaries; retaining horizontal
-            // precedence here keeps the long-standing corner insertion invariant.
-            if localX <= 0 {
-                return [.insertColumn(at: columnIndex)]
-            }
-            if localX >= columnWidth {
-                return [.insertColumn(at: columnIndex + 1)]
-            }
+        guard height > 0 else {
             return [.insertRow(column: columnIndex, at: 0)]
         }
-        if y >= height {
-            // The same tie rule applies at the bottom corners without evaluating
-            // out-of-container coordinates as though they were inside a wedge.
-            if localX <= 0 {
-                return [.insertColumn(at: columnIndex)]
-            }
-            if localX >= columnWidth {
-                return [.insertColumn(at: columnIndex + 1)]
-            }
-            return [.insertRow(column: columnIndex, at: rowCount)]
-        }
 
+        // Clamped like the horizontal axis, so a point above or below the
+        // container still ranks both axes. The clamped path reproduces the
+        // corner rule on its own: at a corner both edges score 0 and the tie
+        // order gives the column insertion precedence.
+        let clampedY = min(max(y, 0), height)
         let heights = rowHeights(
             column: column,
             containerHeight: height
@@ -511,12 +533,12 @@ public enum SplitGridPolicy {
 
         for (rowIndex, rowHeight) in heights.enumerated() {
             let rowEndY = rowStartY + rowHeight
-            guard y <= rowEndY else {
+            guard clampedY <= rowEndY || rowIndex == heights.count - 1 else {
                 rowStartY = rowEndY
                 continue
             }
 
-            let localY = y - rowStartY
+            let localY = min(clampedY - rowStartY, rowHeight)
 
             // Point distances would let a pane's shorter dimension dominate most
             // of a landscape or portrait pane. Normalizing makes every wedge

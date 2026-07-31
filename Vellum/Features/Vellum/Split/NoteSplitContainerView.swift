@@ -707,17 +707,17 @@ struct NoteSplitContainerView: View {
             intent = .split
 
         case .capacityFull:
+            // A refusal leaves the panes untransformed, so the ghost has to be
+            // framed on the committed grid: the refused insertion's own index
+            // belongs to a hypothetical grid this layout never adopts.
             guard let refusedTarget,
-                  let refusedGrid = SplitGridPolicy.gridInserting(
-                    refusedTarget,
-                    into: committedGrid
-                  ),
-                  let insertedIndex = SplitGridPolicy.insertedPaneIndex(
-                    for: refusedTarget
+                  let refusedIndex = SplitGridPolicy.clampedPaneIndex(
+                    for: refusedTarget,
+                    in: committedGrid
                   ),
                   let refusedFrame = SplitGridPolicy.paneFrame(
-                    at: insertedIndex,
-                    grid: refusedGrid,
+                    at: refusedIndex,
+                    grid: committedGrid,
                     containerSize: containerSize
                   ) else {
                 return nil

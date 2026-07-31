@@ -1649,20 +1649,21 @@ final class SplitPaneFlowUITests: XCTestCase {
         var offset: TimeInterval = 0
 
         // A finger drifts one way over a hold rather than oscillating about the
-        // press point. The net travel has to clear the scroll view's pan
-        // threshold — otherwise the pan never arms, the recognizers never race,
-        // and this test passes against the very bug it exists to catch — while
-        // staying inside the long press's allowableMovement so a working build
-        // still lifts the row.
+        // press point. The net travel stays under the scroll view's pan
+        // threshold: an armed pan now means the user is scrolling, and the lift
+        // is refused on purpose, so drift that arms it would assert the opposite
+        // of the intended behaviour. This keeps the drift inside both that
+        // threshold and the long press's allowableMovement, so a working build
+        // still lifts the row from a jittery hold.
         let holdDrift = [
+            CGVector(dx: 1, dy: 1),
             CGVector(dx: 1, dy: 2),
-            CGVector(dx: 2, dy: 5),
-            CGVector(dx: 2, dy: 8),
-            CGVector(dx: 3, dy: 11),
-            CGVector(dx: 3, dy: 13),
-            CGVector(dx: 4, dy: 15),
-            CGVector(dx: 4, dy: 16),
-            CGVector(dx: 4, dy: 17),
+            CGVector(dx: 2, dy: 3),
+            CGVector(dx: 2, dy: 3),
+            CGVector(dx: 2, dy: 4),
+            CGVector(dx: 2, dy: 4),
+            CGVector(dx: 3, dy: 5),
+            CGVector(dx: 3, dy: 5),
         ]
         for drift in holdDrift {
             offset += holdInterval

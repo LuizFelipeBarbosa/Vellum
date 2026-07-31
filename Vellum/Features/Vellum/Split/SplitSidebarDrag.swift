@@ -79,6 +79,18 @@ struct SplitSidebarRowDragGesture: UIGestureRecognizerRepresentable {
             true
         }
 
+        // Recognizing simultaneously with the scroll pan leaves nothing to fail
+        // the press once a scroll has started, and allowableMovement alone lets
+        // a slow scroll linger inside the press's window. This runs exactly at
+        // the press's possible-to-began transition, so refusing here sends it to
+        // failed and a list that is already moving keeps its touch.
+        func gestureRecognizerShouldBegin(
+            _ gestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            guard let scrollView else { return true }
+            return !scrollView.isDragging && !scrollView.isDecelerating
+        }
+
         // Row selection is a SwiftUI Button whose tap recognizer would
         // otherwise claim note touches outright; requiring it to wait for
         // the long press to fail makes hold-to-drag win while quick taps

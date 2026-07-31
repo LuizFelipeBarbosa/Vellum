@@ -300,6 +300,25 @@ struct SplitGridPolicyTests {
             }
         }
 
+        // Probes where normalized and absolute distances disagree, so dropping
+        // the division by the pane's own width and height fails here. In an
+        // 800x400 pane the point is 240pt from the left edge but only 160pt from
+        // the top, yet 0.3 of the width beats 0.4 of the height.
+        #expect(
+            SplitGridPolicy.dropTarget(
+                at: CGPoint(x: 240, y: 160),
+                grid: twoByTwoGrid,
+                containerSize: CGSize(width: 1_600, height: 800)
+            ) == .insertColumn(at: 0)
+        )
+        #expect(
+            SplitGridPolicy.dropTarget(
+                at: CGPoint(x: 160, y: 240),
+                grid: twoByTwoGrid,
+                containerSize: CGSize(width: 800, height: 1_600)
+            ) == .insertRow(column: 0, at: 0)
+        )
+
         #expect(
             SplitGridPolicy.dropTarget(
                 at: CGPoint(x: 200, y: 200),
@@ -400,6 +419,151 @@ struct SplitGridPolicyTests {
                 at: CGPoint(x: 32, y: 84),
                 grid: bothAxesFullGrid,
                 containerSize: size
+            ) == nil
+        )
+    }
+
+    @Test("Boundary rankings fall back when the row axis is full")
+    func boundaryDropTargetsFallBackToColumns() {
+        let size = CGSize(width: 1_400, height: 840)
+        let rowFullGrid = SplitGridSnapshot(columns: [
+            .init(widthFraction: 1, rowFractions: [1, 1, 1]),
+        ])
+
+        for y: CGFloat in [-5, 0, size.height, size.height + 5] {
+            let point = CGPoint(x: size.width / 2, y: y)
+            let targets = SplitGridPolicy.dropTargets(
+                at: point,
+                grid: rowFullGrid,
+                containerSize: size
+            )
+
+            #expect(
+                targets.count == 2,
+                "Boundary points must retain both axis candidates."
+            )
+            #expect(
+                SplitGridPolicy.feasibleDropTarget(
+                    at: point,
+                    grid: rowFullGrid,
+                    containerSize: size
+                ) == .insertColumn(at: 0),
+                "A full row axis must fall back to the available column axis."
+            )
+        }
+
+        let columnFullSize = CGSize(width: 640, height: 840)
+        let columnFullGrid = SplitGridSnapshot(columns: [
+            .init(widthFraction: 0.5, rowFractions: [1]),
+            .init(widthFraction: 0.5, rowFractions: [1]),
+        ])
+
+        for x: CGFloat in [-5, 0, columnFullSize.width, columnFullSize.width + 5] {
+            let point = CGPoint(x: x, y: columnFullSize.height / 2)
+            let targets = SplitGridPolicy.dropTargets(
+                at: point,
+                grid: columnFullGrid,
+                containerSize: columnFullSize
+            )
+            let expectedColumn = x <= 0 ? 0 : 1
+
+            #expect(
+                targets.count == 2,
+                "Container-edge points must retain both axis candidates."
+            )
+            #expect(
+                targets.first == .insertColumn(at: x <= 0 ? 0 : 2),
+                "The nearest container edge stays the first-ranked seam."
+            )
+            #expect(
+                SplitGridPolicy.feasibleDropTarget(
+                    at: point,
+                    grid: columnFullGrid,
+                    containerSize: columnFullSize
+                ) == .insertRow(column: expectedColumn, at: 0),
+                "A full column axis must fall back to the available row axis."
+            )
+        }
+    }
+
+    @Test("Container corners keep column precedence over the row fallback")
+    func boundaryCornersPreferColumnInsertions() {
+        let size = CGSize(width: 1_000, height: 800)
+        let expected: [(CGPoint, [SplitGridDropTarget])] = [
+            (
+                CGPoint(x: -5, y: -5),
+                [.insertColumn(at: 0), .insertRow(column: 0, at: 0)]
+            ),
+            (
+                CGPoint(x: -5, y: size.height + 5),
+                [.insertColumn(at: 0), .insertRow(column: 0, at: 2)]
+            ),
+            (
+                CGPoint(x: size.width + 5, y: -5),
+                [.insertColumn(at: 2), .insertRow(column: 1, at: 0)]
+            ),
+            (
+                CGPoint(x: size.width + 5, y: size.height + 5),
+                [.insertColumn(at: 2), .insertRow(column: 1, at: 2)]
+            ),
+            (
+                CGPoint(x: 500, y: 0),
+                [.insertColumn(at: 1), .insertRow(column: 0, at: 0)]
+            ),
+        ]
+
+        for (point, targets) in expected {
+            #expect(
+                SplitGridPolicy.dropTargets(
+                    at: point,
+                    grid: twoByTwoGrid,
+                    containerSize: size
+                ) == targets
+            )
+        }
+    }
+
+    @Test("A refused target resolves to a pane that exists in the committed grid")
+    func refusedTargetsClampOntoCommittedPanes() {
+        let grid = SplitGridSnapshot(columns: [
+            .init(widthFraction: 0.5, rowFractions: [1, 1]),
+            .init(widthFraction: 0.5, rowFractions: [1]),
+        ])
+
+        #expect(
+            SplitGridPolicy.clampedPaneIndex(
+                for: .insertColumn(at: 2),
+                in: grid
+            ) == PaneIndex(column: 1, row: 0)
+        )
+        #expect(
+            SplitGridPolicy.clampedPaneIndex(
+                for: .insertRow(column: 0, at: 2),
+                in: grid
+            ) == PaneIndex(column: 0, row: 1)
+        )
+        #expect(
+            SplitGridPolicy.clampedPaneIndex(
+                for: .insertColumn(at: 0),
+                in: grid
+            ) == PaneIndex(column: 0, row: 0)
+        )
+        #expect(
+            SplitGridPolicy.clampedPaneIndex(
+                for: .existingPane(PaneIndex(column: 1, row: 1)),
+                in: grid
+            ) == nil
+        )
+        #expect(
+            SplitGridPolicy.clampedPaneIndex(
+                for: .insertRow(column: 3, at: 0),
+                in: grid
+            ) == nil
+        )
+        #expect(
+            SplitGridPolicy.clampedPaneIndex(
+                for: .insertColumn(at: 0),
+                in: SplitGridSnapshot(columns: [])
             ) == nil
         )
     }

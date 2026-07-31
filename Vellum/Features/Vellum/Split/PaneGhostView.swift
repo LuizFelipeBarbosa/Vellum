@@ -27,10 +27,14 @@ struct PaneGhostView: View {
 
     private var fillColor: Color {
         switch intent {
-        case .split, .refused:
+        case .split:
             VellumTheme.paper
         case .alreadyOpen:
             VellumTheme.accent(0.12)
+        case .refused:
+            // A refusal covers a pane the drop will not change, so it dims that
+            // pane's content instead of hiding it behind opaque paper.
+            VellumTheme.paper.opacity(0.35)
         }
     }
 
