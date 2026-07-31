@@ -498,28 +498,64 @@ struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
     let onCancel: () -> Void
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var shouldReceiveTouch: ((UIGestureRecognizer, UITouch) -> Bool)?
+        var shouldBeginDrag: ((CGPoint) -> Bool)?
+        private weak var scrollView: UIScrollView?
+        private weak var lockedScrollView: UIScrollView?
+        private var wasScrollEnabled: Bool?
 
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldReceive touch: UITouch
         ) -> Bool {
-            shouldReceiveTouch?(gestureRecognizer, touch) ?? true
+            // Gating happens before the recognizer owns the touch, so the
+            // SwiftUI converter is unusable here. The backing scroll view
+            // supplies content-space, interface-oriented coordinates that
+            // remain correct when the iPad rotates.
+            var probe = touch.view
+            while let view = probe, !(view is UIScrollView) {
+                probe = view.superview
+            }
+            guard let scrollView = probe as? UIScrollView else { return false }
+            self.scrollView = scrollView
+            return shouldBeginDrag?(touch.location(in: scrollView)) ?? false
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
         }
 
         // Row selection is a SwiftUI Button whose tap recognizer would
         // otherwise claim thumbnail touches outright; requiring it to wait
         // for the long press to fail is what makes hold-to-lift win while
-        // quick taps still select. Scroll pans stay exempt so scrolling
-        // never waits out the press delay. Invariant: every non-pan
-        // recognizer in this subtree waits out the long press — if a new
-        // row interaction (context menu, pinch, DragGesture) feels dead,
-        // check here first.
+        // quick taps still select. Scroll pans stay exempt and recognize
+        // simultaneously, so ordinary scrolling starts immediately; the
+        // scroll view is locked only after the long press lifts a row.
+        // Invariant: every non-pan recognizer in this subtree waits out the
+        // long press — if a new row interaction (context menu, pinch,
+        // DragGesture) feels dead, check here first.
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldBeRequiredToFailBy other: UIGestureRecognizer
         ) -> Bool {
             !(other is UIPanGestureRecognizer)
+        }
+
+        func lockScrolling() {
+            guard lockedScrollView == nil, let scrollView else { return }
+            lockedScrollView = scrollView
+            wasScrollEnabled = scrollView.isScrollEnabled
+            scrollView.isScrollEnabled = false
+        }
+
+        func restoreScrolling() {
+            if let wasScrollEnabled {
+                lockedScrollView?.isScrollEnabled = wasScrollEnabled
+            }
+            lockedScrollView = nil
+            wasScrollEnabled = nil
         }
     }
 
@@ -533,7 +569,7 @@ struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
         context: Context
     ) -> UILongPressGestureRecognizer {
         let recognizer = UILongPressGestureRecognizer()
-        context.coordinator.shouldReceiveTouch = gate
+        context.coordinator.shouldBeginDrag = shouldBeginDrag
         recognizer.delegate = context.coordinator
         configure(recognizer)
         return recognizer
@@ -543,25 +579,8 @@ struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
         _ recognizer: UILongPressGestureRecognizer,
         context: Context
     ) {
-        context.coordinator.shouldReceiveTouch = gate
+        context.coordinator.shouldBeginDrag = shouldBeginDrag
         configure(recognizer)
-    }
-
-    // Gating must happen before the recognizer owns the touch, so the SwiftUI
-    // converter is unusable here. Converting into the list's backing
-    // UIScrollView yields content-space coordinates directly (scroll views
-    // scroll via bounds.origin) and stays interface-oriented, unlike
-    // window-base points, which diverge from SwiftUI's global space once the
-    // iPad rotates.
-    private var gate: (UIGestureRecognizer, UITouch) -> Bool {
-        { _, touch in
-            var probe = touch.view
-            while let view = probe, !(view is UIScrollView) {
-                probe = view.superview
-            }
-            guard let scrollView = probe else { return false }
-            return shouldBeginDrag(touch.location(in: scrollView))
-        }
     }
 
     func handleUIGestureRecognizerAction(
@@ -570,22 +589,27 @@ struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
     ) {
         switch recognizer.state {
         case .began:
+            context.coordinator.lockScrolling()
             onLift(convertedPanelY(for: recognizer, context: context))
         case .changed:
             onMove(convertedPanelY(for: recognizer, context: context))
         case .ended:
+            context.coordinator.restoreScrolling()
             onEnd()
         case .cancelled, .failed:
+            context.coordinator.restoreScrolling()
             onCancel()
         case .possible:
             break
         @unknown default:
+            context.coordinator.restoreScrolling()
             onCancel()
         }
     }
 
     private func configure(_ recognizer: UILongPressGestureRecognizer) {
         recognizer.minimumPressDuration = 0.3
+        recognizer.allowableMovement = 24
         recognizer.numberOfTouchesRequired = 1
         recognizer.cancelsTouchesInView = true
     }

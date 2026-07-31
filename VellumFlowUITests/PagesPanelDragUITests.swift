@@ -3,6 +3,7 @@ import XCTest
 /// Drives the pages panel with real touch events to cover the gesture
 /// arbitration that unit tests cannot: hold-and-drag reorder from the
 /// thumbnail center, tap-to-select, and delete-badge protection.
+@MainActor
 final class PagesPanelDragUITests: XCTestCase {
 
     /// Three real pages plus the trailing blank page the panel always appends.
@@ -14,21 +15,8 @@ final class PagesPanelDragUITests: XCTestCase {
     /// which never updates fails fast instead of adding pages forever.
     private static let maximumPageChange = 4
 
-    /// Pages this test added to reach `requiredPageTotal`, removed again in
-    /// teardown. Held on the case rather than in a teardown block so cleanup
-    /// still runs after the failure that stops the test method.
-    private var addedPages = 0
-
     override func setUpWithError() throws {
         continueAfterFailure = false
-        addedPages = 0
-    }
-
-    override func tearDownWithError() throws {
-        guard addedPages > 0 else { return }
-        let added = addedPages
-        addedPages = 0
-        deleteTrailingPages(added, in: XCUIApplication())
     }
 
     func testHoldAndDragFromThumbnailCenterReordersPages() throws {
@@ -58,7 +46,14 @@ final class PagesPanelDragUITests: XCTestCase {
         // Pin the note to three real pages instead of adding one
         // unconditionally: nothing here ever removed the extra page, so every
         // run used to leave the note bigger than it found it.
-        addedPages = prepareFixture(in: app, badge: badge)
+        // Registered before the assertions below so the pages this run added are
+        // removed even when a failure stops the test method early.
+        let addedPages = prepareFixture(in: app, badge: badge)
+        if addedPages > 0 {
+            addTeardownBlock { @MainActor in
+                self.deleteTrailingPages(addedPages, in: XCUIApplication())
+            }
+        }
         let total = pageTotal(of: badge)
         XCTAssertEqual(
             total, Self.requiredPageTotal,
@@ -77,10 +72,20 @@ final class PagesPanelDragUITests: XCTestCase {
         // would blame the reorder for a render that had simply not happened.
         waitForThumbnailsToRender(in: app)
 
-        // The original bug: a press starting on the thumbnail itself never
-        // lifted the row. After a real reorder the canvas scrolls to the
-        // moved page, so the tracker badge must read "2 / total".
-        row1.press(forDuration: 0.7, thenDragTo: row2)
+        // Jitter during the hold gives the scroll pan the same chance to
+        // recognize that real finger drift does. XCTest's convenience drag
+        // holds perfectly still and cannot reproduce that arbitration.
+        guard let reorderGesture = makeReorderGestureRecord(
+            in: app,
+            from: row1,
+            to: row2
+        ) else {
+            throw XCTSkip("XCTest synthesized pointer support is unavailable.")
+        }
+        XCTAssertTrue(
+            ShapeFlowTestHelpers.synthesize(reorderGesture),
+            "failed to synthesize the page reorder gesture"
+        )
 
         let moved = expectation(
             for: NSPredicate(format: "label == %@", "2 / \(total)"),
@@ -159,6 +164,77 @@ final class PagesPanelDragUITests: XCTestCase {
         XCTAssertTrue(
             loadingPlaceholders(in: app).firstMatch.waitForExistence(timeout: 5),
             "loading placeholders not visible to the accessibility tree"
+        )
+    }
+
+    // MARK: - Synthesized gestures
+
+    private func makeReorderGestureRecord(
+        in app: XCUIApplication,
+        from sourceRow: XCUIElement,
+        to destinationRow: XCUIElement
+    ) -> ShapeFlowTestHelpers.GestureRecord? {
+        let start = sourceRow.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).screenPoint
+        let end = destinationRow.coordinate(
+            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
+        ).screenPoint
+
+        let sampleInterval: TimeInterval = 0.05
+        // A finger drifts one way over a hold rather than oscillating about the
+        // press point. The net travel has to clear the scroll view's pan
+        // threshold — otherwise the pan never arms, the recognizers never race,
+        // and this test passes against the very bug it exists to catch — while
+        // staying inside the long press's allowableMovement so a working build
+        // still lifts the row.
+        let jitter = [
+            CGVector(dx: 1, dy: 2),
+            CGVector(dx: 2, dy: 5),
+            CGVector(dx: 2, dy: 8),
+            CGVector(dx: 3, dy: 11),
+            CGVector(dx: 3, dy: 13),
+            CGVector(dx: 4, dy: 15),
+            CGVector(dx: 4, dy: 16),
+            CGVector(dx: 4, dy: 17),
+        ]
+        var moves = jitter.enumerated().map { index, offset in
+            (
+                point: CGPoint(x: start.x + offset.dx, y: start.y + offset.dy),
+                offset: TimeInterval(index + 1) * sampleInterval
+            )
+        }
+        var gestureOffset = TimeInterval(jitter.count) * sampleInterval
+
+        let movementSteps = 12
+        let movementInterval: TimeInterval = 0.02
+        for step in 1...movementSteps {
+            let fraction = CGFloat(step) / CGFloat(movementSteps)
+            gestureOffset += movementInterval
+            moves.append(
+                (
+                    point: CGPoint(
+                        x: start.x + (end.x - start.x) * fraction,
+                        y: start.y + (end.y - start.y) * fraction
+                    ),
+                    offset: gestureOffset
+                )
+            )
+        }
+
+        for _ in 1...4 {
+            gestureOffset += sampleInterval
+            moves.append((point: end, offset: gestureOffset))
+        }
+
+        return ShapeFlowTestHelpers.makeGestureRecord(
+            named: "Pages panel reorder",
+            gesture: ShapeFlowTestHelpers.PointerGesture(
+                start: start,
+                moves: moves,
+                liftOffset: gestureOffset + sampleInterval
+            ),
+            targetProcessID: ShapeFlowTestHelpers.processID(of: app)
         )
     }
 
