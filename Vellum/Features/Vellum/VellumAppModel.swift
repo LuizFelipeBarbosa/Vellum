@@ -10,7 +10,6 @@ enum AppScreen: Hashable {
 
 enum PanePlacement {
     case replaceFocused
-    case replacePane(id: UUID)
     case newColumn(at: Int?)
     case stackInColumn(column: Int, at: Int?)
 }
@@ -261,12 +260,13 @@ final class VellumAppModel {
         }
     }
 
+    @discardableResult
     func openNote(
         _ id: UUID,
         isNewlyCreated: Bool = false,
         placement: PanePlacement = .replaceFocused
-    ) async {
-        guard !openingNoteIDs.contains(id) else { return }
+    ) async -> UUID? {
+        guard !openingNoteIDs.contains(id) else { return nil }
         openingNoteIDs.insert(id)
         defer { openingNoteIDs.remove(id) }
 
@@ -274,17 +274,17 @@ final class VellumAppModel {
             let note = try await container.workspace.loadNote(id: id)
             if note.isTrashed {
                 showToast("This note is in the Trash")
-                return
+                return nil
             }
         } catch {
             library.errorMessage = error.localizedDescription
-            return
+            return nil
         }
 
         if let existingPane = split.pane(for: id) {
             split.focus(existingPane.id)
             screen = .note
-            return
+            return existingPane.id
         }
 
         let noteModel = NoteScreenModel(
@@ -309,18 +309,6 @@ final class VellumAppModel {
             } else {
                 split.insertColumn(with: newPane, at: 0)
             }
-        case .replacePane(let paneID):
-            if let pane = split.panes.first(where: { $0.id == paneID }) {
-                await pane.noteModel.flushPendingSave()
-            }
-            if split.panes.contains(where: { $0.id == paneID }) {
-                split.replacePane(id: paneID, with: newPane)
-            } else if let focusedPane = split.focusedPane {
-                await focusedPane.noteModel.flushPendingSave()
-                split.replacePane(id: focusedPane.id, with: newPane)
-            } else {
-                split.insertColumn(with: newPane, at: 0)
-            }
         case .newColumn(let index):
             split.insertColumn(with: newPane, at: index)
         case .stackInColumn(let column, let row):
@@ -328,6 +316,7 @@ final class VellumAppModel {
         }
 
         screen = .note
+        return newPane.id
     }
 
     func handleSplitContainerResize(_ size: CGSize) {
