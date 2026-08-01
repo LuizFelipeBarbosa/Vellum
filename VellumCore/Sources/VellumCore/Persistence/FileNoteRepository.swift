@@ -4,40 +4,13 @@ enum FilePersistence {
     static let packageExtension = "native-note"
 
     static func encoder(prettyPrinted: Bool = true) -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .custom { date, encoder in
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            var container = encoder.singleValueContainer()
-            try container.encode(formatter.string(from: date))
-        }
-        encoder.outputFormatting = prettyPrinted ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
-        return encoder
+        VellumJSONCoding.encoder(
+            outputFormatting: prettyPrinted ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
+        )
     }
 
     static func decoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let value = try container.decode(String.self)
-
-            let fractionalFormatter = ISO8601DateFormatter()
-            fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = fractionalFormatter.date(from: value) {
-                return date
-            }
-
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime]
-            guard let date = formatter.date(from: value) else {
-                throw DecodingError.dataCorruptedError(
-                    in: container,
-                    debugDescription: "Expected an ISO 8601 date string."
-                )
-            }
-            return date
-        }
-        return decoder
+        VellumJSONCoding.decoder()
     }
 
     static func packageURL(rootDirectory: URL, noteID: UUID) -> URL {

@@ -14,7 +14,7 @@ enum SelectionPasteboard {
 
     @MainActor
     static func write(_ payload: SelectionPasteboardPayload) -> Bool {
-        guard let data = try? encoder().encode(payload) else { return false }
+        guard let data = try? VellumJSONCoding.encoder().encode(payload) else { return false }
         UIPasteboard.general.setData(data, forPasteboardType: pasteboardType)
         return true
     }
@@ -27,7 +27,7 @@ enum SelectionPasteboard {
               let data = UIPasteboard.general.data(forPasteboardType: pasteboardType) else {
             return nil
         }
-        return try? decoder().decode(SelectionPasteboardPayload.self, from: data)
+        return try? VellumJSONCoding.decoder().decode(SelectionPasteboardPayload.self, from: data)
     }
 
     @MainActor
@@ -74,41 +74,5 @@ enum SelectionPasteboard {
             }
         }
         return nil
-    }
-
-    private static func encoder() -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .custom { date, encoder in
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            var container = encoder.singleValueContainer()
-            try container.encode(formatter.string(from: date))
-        }
-        return encoder
-    }
-
-    private static func decoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let value = try container.decode(String.self)
-
-            let fractionalFormatter = ISO8601DateFormatter()
-            fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = fractionalFormatter.date(from: value) {
-                return date
-            }
-
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime]
-            guard let date = formatter.date(from: value) else {
-                throw DecodingError.dataCorruptedError(
-                    in: container,
-                    debugDescription: "Expected an ISO 8601 date string."
-                )
-            }
-            return date
-        }
-        return decoder
     }
 }
