@@ -22,7 +22,7 @@ public actor AskService {
                 title: note.title,
                 noteType: note.noteType,
                 pages: note.pages
-                    .sorted(by: Self.sortPages)
+                    .sorted(by: NotePage.byOrder)
                     .filter {
                         !$0.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     }
@@ -60,7 +60,4 @@ public actor AskService {
         }
     }
 
-    private static func sortPages(_ lhs: NotePage, _ rhs: NotePage) -> Bool {
-        StableOrder.ascending(lhs, rhs, by: \.order)
-    }
 }

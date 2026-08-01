@@ -285,7 +285,7 @@ public actor WorkspaceService {
     public func listNoteSummaries() async throws -> [NoteSummary] {
         var summaries: [NoteSummary] = []
         for note in try await notes.listNotes() {
-            let orderedPages = note.pages.sorted(by: Self.sortPages)
+            let orderedPages = note.pages.sorted(by: NotePage.byOrder)
             let preview = orderedPages
                 .map(\.plainText)
                 .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?
@@ -319,7 +319,7 @@ public actor WorkspaceService {
     public func requestAnalysis(noteID: UUID) async throws -> [AgentProposal] {
         let note = try await notes.loadNote(id: noteID)
         let canonicalText = note.pages
-            .sorted(by: Self.sortPages)
+            .sorted(by: NotePage.byOrder)
             .map(\.plainText)
             .joined(separator: "\n\n")
         let now = Date()
@@ -564,7 +564,4 @@ public actor WorkspaceService {
         )
     }
 
-    private static func sortPages(_ lhs: NotePage, _ rhs: NotePage) -> Bool {
-        StableOrder.ascending(lhs, rhs, by: \.order)
-    }
 }

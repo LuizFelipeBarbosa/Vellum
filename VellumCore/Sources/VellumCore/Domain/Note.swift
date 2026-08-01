@@ -166,6 +166,15 @@ public struct NotePage: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+extension NotePage {
+    /// Reading order of a note's pages. Two pages can carry the same `order` while a
+    /// reorder is being written, so every reader has to agree on the tiebreak or the
+    /// same note renders in a different sequence depending on who asked.
+    static func byOrder(_ lhs: NotePage, _ rhs: NotePage) -> Bool {
+        StableOrder.ascending(lhs, rhs, by: \.order)
+    }
+}
+
 public enum PageBackground: String, Codable, Sendable {
     case blank
     case ruled
