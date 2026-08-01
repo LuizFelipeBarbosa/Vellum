@@ -119,7 +119,7 @@ public struct PDFPageReference: Codable, Sendable, Equatable {
     }
 }
 
-public struct NotePage: Identifiable, Codable, Sendable {
+public struct NotePage: Identifiable, Codable, Equatable, Sendable {
     public let id: UUID
     public var order: Int
     public var plainText: String
