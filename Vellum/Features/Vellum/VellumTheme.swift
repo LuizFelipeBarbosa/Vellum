@@ -45,7 +45,6 @@ enum VellumTheme {
     static let bodyInk = dynamic(light: "#33302A", dark: "#DDD6C6")
     static let waveform = dynamic(light: "#B9AE97", dark: "#8F866F")
     static let toolbarMarker = dynamic(light: "#C9BFA8", dark: "#5A5344")
-    static let dottedUnderline = dynamic(light: "#B98A4E", dark: "#D9A968")
     static let studio = dynamic(light: "#9A6B35", dark: "#C99A5F")
     static let thesis = dynamic(light: "#4E6E58", dark: "#7FA98C")
     static let team = dynamic(light: "#6E5E7A", dark: "#A896B5")

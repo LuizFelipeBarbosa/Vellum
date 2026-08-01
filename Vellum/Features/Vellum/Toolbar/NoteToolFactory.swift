@@ -1,5 +1,4 @@
 import PencilKit
-import UIKit
 
 enum NoteToolFactory {
     @MainActor

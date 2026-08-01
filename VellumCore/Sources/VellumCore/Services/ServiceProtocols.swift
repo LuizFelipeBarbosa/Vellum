@@ -65,16 +65,3 @@ public protocol ActivityRepository: Sendable {
     func append(_ event: ActivityEvent) async throws
     func list(noteID: UUID?) async throws -> [ActivityEvent]
 }
-
-public protocol NoteSyncing: Sendable {
-    func enqueue(noteID: UUID) async
-    func synchronize() async throws
-}
-
-public protocol SourceImporting: Sendable {
-    func importSource(from url: URL) async throws -> ImportedSource
-}
-
-public protocol KnowledgeExporting: Sendable {
-    func exportWorkspace() async throws -> URL
-}

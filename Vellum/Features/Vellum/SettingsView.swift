@@ -1,4 +1,3 @@
-import Observation
 import SwiftUI
 
 struct SettingsView: View {

@@ -8,13 +8,6 @@ import VellumCore
 @MainActor
 @Observable
 final class NoteScreenModel {
-    enum EditorMode: String, CaseIterable, Identifiable {
-        case ink = "Ink"
-        case text = "Text"
-
-        var id: Self { self }
-    }
-
     enum SaveState: Equatable {
         case saved
         case saving
@@ -62,7 +55,6 @@ final class NoteScreenModel {
     }
     var drawingData: Data?
     var proposals: [AgentProposal] = []
-    var editorMode: EditorMode = .ink
     var saveState: SaveState = .saved
     var isLoading = false
     var isAnalyzing = false

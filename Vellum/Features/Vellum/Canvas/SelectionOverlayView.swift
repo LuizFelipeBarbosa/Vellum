@@ -81,13 +81,6 @@ enum SelectionHandle: CaseIterable, Hashable, Identifiable {
         }
     }
 
-    func anchorPoint(in bounds: CGRect) -> CGPoint {
-        CGPoint(
-            x: bounds.minX + unitPoint.x * bounds.width,
-            y: bounds.minY + unitPoint.y * bounds.height
-        )
-    }
-
     var accessibilityLabel: String {
         switch self {
         case .topLeft:

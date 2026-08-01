@@ -109,21 +109,6 @@ public struct Note: Identifiable, Codable, Sendable {
     }
 }
 
-extension Note {
-    /// nil when the page renders its own content (background == .pdf or .image); else the notebook style.
-    public func resolvedBackgroundStyle(forPageAt index: Int) -> PageBackgroundStyle? {
-        guard index >= 0 else { return nil }
-        guard pages.indices.contains(index) else { return backgroundStyle }
-
-        switch pages[index].background {
-        case .pdf, .image:
-            return nil
-        case .blank, .ruled, .grid:
-            return backgroundStyle
-        }
-    }
-}
-
 public struct PDFPageReference: Codable, Sendable, Equatable {
     public var assetPath: String
     public var pageIndex: Int

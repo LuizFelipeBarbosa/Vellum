@@ -247,38 +247,6 @@ public actor WorkspaceService {
         }
     }
 
-    @discardableResult
-    public func addLink(
-        fromNoteID: UUID,
-        to targetNoteID: UUID,
-        kind: LinkKind
-    ) async throws -> Note {
-        _ = try await notes.loadNote(id: targetNoteID)
-        var note = try await notes.loadNote(id: fromNoteID)
-        guard !note.links.contains(where: {
-            $0.targetNoteID == targetNoteID && $0.kind == kind
-        }) else {
-            return note
-        }
-        note.links.append(
-            NoteLink(id: UUID(), targetNoteID: targetNoteID, kind: kind, createdAt: Date())
-        )
-        let saved = try await saveNote(note)
-        try await log(
-            noteID: fromNoteID,
-            kind: .notesLinked,
-            message: "Linked note \(fromNoteID.uuidString) to \(targetNoteID.uuidString)."
-        )
-        return saved
-    }
-
-    @discardableResult
-    public func removeLink(fromNoteID: UUID, linkID: UUID) async throws -> Note {
-        var note = try await notes.loadNote(id: fromNoteID)
-        note.links.removeAll { $0.id == linkID }
-        return try await saveNote(note)
-    }
-
     public func listTasks() async throws -> [TaskItem] {
         try await tasks.list().sorted {
             if $0.isDone != $1.isDone {
@@ -289,24 +257,6 @@ public actor WorkspaceService {
             }
             return $0.createdAt < $1.createdAt
         }
-    }
-
-    @discardableResult
-    public func setTaskDone(id: UUID, done: Bool) async throws -> TaskItem {
-        guard var task = try await tasks.list().first(where: { $0.id == id }) else {
-            throw VellumError.persistenceFailure("Task \(id.uuidString) was not found.")
-        }
-        task.isDone = done
-        task.completedAt = done ? Date() : nil
-        try await tasks.save(task)
-        if done {
-            try await log(
-                noteID: task.noteID,
-                kind: .taskCompleted,
-                message: "Completed task \(task.id.uuidString)."
-            )
-        }
-        return task
     }
 
     public func activityDigest(since: Date) async throws -> ActivityDigest {

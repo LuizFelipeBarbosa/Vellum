@@ -1,5 +1,3 @@
-import Foundation
-import Observation
 import SwiftUI
 
 struct VellumRootView: View {
@@ -11,18 +9,6 @@ struct VellumRootView: View {
     }
 
     var body: some View {
-#if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-vellum-split-spike") {
-            SplitSpikeView()
-        } else {
-            normalContent
-        }
-#else
-        normalContent
-#endif
-    }
-
-    private var normalContent: some View {
         ZStack(alignment: .bottom) {
             VellumTheme.paper.ignoresSafeArea()
 
