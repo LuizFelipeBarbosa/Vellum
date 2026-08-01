@@ -50,6 +50,122 @@ struct NoteScreenView: View {
     }
 
     var body: some View {
+        noteSurface
+            .preference(
+                key: PaneHeaderFramesKey.self,
+                value: [
+                    paneContext.pane.id: PaneHeaderFrames(
+                        leftClusterFrame: leftClusterFrame,
+                        rightClusterFrame: rightClusterFrame,
+                        topOverlayGlobalFrame: topOverlayGlobalFrame
+                    )
+                ]
+            )
+            .background(VellumTheme.paper)
+            .modifier(
+                NoteScreenLifecycleModifiers(
+                    model: model,
+                    app: app,
+                    canvasReference: activeCanvasReference,
+                    paneUndoManager: paneContext.pane.undoManager,
+                    selectionController: selectionController,
+                    shapeSnapController: shapeSnapController,
+                    pageState: pageState,
+                    thumbnailStore: thumbnailStore,
+                    currentVisibleContentRect: { currentVisibleContentRect },
+                    cacheCurrentTool: cacheCurrentTool,
+                    scrollCanvas: scrollCanvas
+                )
+            )
+            .modifier(
+                NoteScreenPrimaryChangeObservers(
+                    model: model,
+                    app: app,
+                    selectionController: selectionController,
+                    selectedTool: selectedTool,
+                    cacheCurrentTool: cacheCurrentTool
+                )
+            )
+            .onChange(of: selectionController.selection != nil) { _, hasSelection in
+                // Selecting an element borrows the Select tool so shapes and photos use one edit flow.
+                // Once the selection ends the tool goes back, so selecting either never costs the
+                // pen you were drawing with. If the tool has moved on already, the user chose it.
+                guard !hasSelection,
+                      let borrowedFrom = app.split.toolBorrowedByElementSelection
+                else {
+                    return
+                }
+                app.split.toolBorrowedByElementSelection = nil
+                if selectedTool == .select {
+                    selectedTool = borrowedFrom
+                }
+            }
+            .onChange(of: paneContext.isFocused) { wasFocused, isFocused in
+                if wasFocused, !isFocused {
+                    selectionController.clearSelection()
+                    model.isShowingSuggestions = false
+                    isShowingThumbnails = false
+                    app.split.isShowingPaperOptions = false
+                }
+            }
+            .modifier(
+                NoteScreenCanvasContentChangeObservers(
+                    model: model,
+                    canvasReference: activeCanvasReference,
+                    pageState: pageState,
+                    thumbnailStore: thumbnailStore,
+                    isShowingThumbnails: isShowingThumbnails,
+                    currentPageRendererContent: currentPageRendererContent
+                )
+            )
+            .modifier(
+                NoteScreenPageViewportChangeObservers(
+                    model: model,
+                    canvasReference: activeCanvasReference,
+                    selectionController: selectionController,
+                    pageState: pageState,
+                    thumbnailStore: thumbnailStore,
+                    canvasViewport: canvasViewport,
+                    canvasSize: canvasSize
+                )
+            )
+            .modifier(
+                NoteScreenActivityPresentationModifiers(
+                    model: model,
+                    app: app,
+                    isShowingActivity: $isShowingActivity,
+                    exportOutput: $exportOutput,
+                    cleanUpExportDirectory: cleanUpExportDirectory,
+                    isConfirmingDelete: $isConfirmingDelete,
+                    deleteNote: deleteNote
+                )
+            )
+            .modifier(
+                NoteScreenPhotoImportModifiers(
+                    model: model,
+                    isShowingPhotosPicker: $model.isShowingPhotosPicker,
+                    photosPickerItem: $photosPickerItem,
+                    currentVisibleContentRect: { currentVisibleContentRect },
+                    onImageImported: selectImportedElement
+                )
+            )
+            .modifier(
+                NoteScreenFileImportAndAlertModifiers(
+                    model: model,
+                    isShowingFileImporter: $model.isShowingFileImporter,
+                    currentVisibleContentRect: { currentVisibleContentRect },
+                    onImageImported: selectImportedElement
+                )
+            )
+            .modifier(
+                NoteScreenAnimationModifiers(
+                    model: model,
+                    isShowingThumbnails: isShowingThumbnails
+                )
+            )
+    }
+
+    private var noteSurface: some View {
         ZStack(alignment: .top) {
             Group {
                 if model.isLoading && model.note == nil {
@@ -119,118 +235,6 @@ struct NoteScreenView: View {
                 paneCloseButton(paneContext)
             }
         }
-        .preference(
-            key: PaneHeaderFramesKey.self,
-            value: [
-                paneContext.pane.id: PaneHeaderFrames(
-                    leftClusterFrame: leftClusterFrame,
-                    rightClusterFrame: rightClusterFrame,
-                    topOverlayGlobalFrame: topOverlayGlobalFrame
-                )
-            ]
-        )
-        .background(VellumTheme.paper)
-        .modifier(
-            NoteScreenLifecycleModifiers(
-                model: model,
-                app: app,
-                canvasReference: activeCanvasReference,
-                paneUndoManager: paneContext.pane.undoManager,
-                selectionController: selectionController,
-                shapeSnapController: shapeSnapController,
-                pageState: pageState,
-                thumbnailStore: thumbnailStore,
-                currentVisibleContentRect: { currentVisibleContentRect },
-                cacheCurrentTool: cacheCurrentTool,
-                scrollCanvas: scrollCanvas
-            )
-        )
-        .modifier(
-            NoteScreenPrimaryChangeObservers(
-                model: model,
-                app: app,
-                selectionController: selectionController,
-                selectedTool: selectedTool,
-                cacheCurrentTool: cacheCurrentTool
-            )
-        )
-        .onChange(of: selectionController.selection != nil) { _, hasSelection in
-            // Selecting an element borrows the Select tool so shapes and photos use one edit flow.
-            // Once the selection ends the tool goes back, so selecting either never costs the
-            // pen you were drawing with. If the tool has moved on already, the user chose it.
-            guard !hasSelection,
-                  let borrowedFrom = app.split.toolBorrowedByElementSelection
-            else {
-                return
-            }
-            app.split.toolBorrowedByElementSelection = nil
-            if selectedTool == .select {
-                selectedTool = borrowedFrom
-            }
-        }
-        .onChange(of: paneContext.isFocused) { wasFocused, isFocused in
-            if wasFocused, !isFocused {
-                selectionController.clearSelection()
-                model.isShowingSuggestions = false
-                isShowingThumbnails = false
-                app.split.isShowingPaperOptions = false
-            }
-        }
-        .modifier(
-            NoteScreenCanvasContentChangeObservers(
-                model: model,
-                canvasReference: activeCanvasReference,
-                pageState: pageState,
-                thumbnailStore: thumbnailStore,
-                isShowingThumbnails: isShowingThumbnails,
-                currentPageRendererContent: currentPageRendererContent
-            )
-        )
-        .modifier(
-            NoteScreenPageViewportChangeObservers(
-                model: model,
-                canvasReference: activeCanvasReference,
-                selectionController: selectionController,
-                pageState: pageState,
-                thumbnailStore: thumbnailStore,
-                canvasViewport: canvasViewport,
-                canvasSize: canvasSize
-            )
-        )
-        .modifier(
-            NoteScreenActivityPresentationModifiers(
-                model: model,
-                app: app,
-                isShowingActivity: $isShowingActivity,
-                exportOutput: $exportOutput,
-                cleanUpExportDirectory: cleanUpExportDirectory,
-                isConfirmingDelete: $isConfirmingDelete,
-                deleteNote: deleteNote
-            )
-        )
-        .modifier(
-            NoteScreenPhotoImportModifiers(
-                model: model,
-                isShowingPhotosPicker: $model.isShowingPhotosPicker,
-                photosPickerItem: $photosPickerItem,
-                currentVisibleContentRect: { currentVisibleContentRect },
-                onImageImported: selectImportedElement
-            )
-        )
-        .modifier(
-            NoteScreenFileImportAndAlertModifiers(
-                model: model,
-                isShowingFileImporter: $model.isShowingFileImporter,
-                currentVisibleContentRect: { currentVisibleContentRect },
-                onImageImported: selectImportedElement
-            )
-        )
-        .modifier(
-            NoteScreenAnimationModifiers(
-                model: model,
-                isShowingThumbnails: isShowingThumbnails
-            )
-        )
     }
 
     private var entityChips: some View {
