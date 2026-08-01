@@ -638,9 +638,16 @@ struct NoteScreenView: View {
     @ViewBuilder
     private var modalOverlays: some View {
         if isShowingThumbnails && showsSuggestionsAndThumbnails {
-            thumbnailOverlay
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-                .zIndex(9)
+            NoteThumbnailOverlay(
+                model: model,
+                store: thumbnailStore,
+                pageState: pageState,
+                contentProvider: currentPageRendererContent,
+                onScrollToPage: { scrollCanvas(toPageIndex: $0) },
+                onDismiss: { isShowingThumbnails = false }
+            )
+            .transition(.move(edge: .trailing).combined(with: .opacity))
+            .zIndex(9)
         }
 
         if model.isShowingSuggestions && showsSuggestionsAndThumbnails {
@@ -662,57 +669,6 @@ struct NoteScreenView: View {
             .transition(.opacity.combined(with: .scale(scale: 0.96)))
             .zIndex(11)
         }
-    }
-
-    private var thumbnailOverlay: some View {
-        ZStack(alignment: .trailing) {
-            Color.black.opacity(0.001)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    isShowingThumbnails = false
-                }
-
-            ThumbnailPanelView(
-                store: thumbnailStore,
-                pages: model.note?.pages ?? [],
-                pageCount: pageState.pageCount,
-                currentPageIndex: pageState.currentPageIndex,
-                geometry: model.note?.pageGeometry ?? .a4,
-                contentProvider: currentPageRendererContent,
-                onSelect: { index in
-                    scrollCanvas(toPageIndex: index)
-                    isShowingThumbnails = false
-                },
-                onMovePages: { source, destination in
-                    // Remap only after the model confirms the mutation: a
-                    // rejected move must leave the cache untouched or rows
-                    // would show the wrong pages' thumbnails indefinitely.
-                    let pageCount = pageState.pageCount
-                    guard model.movePages(source: source, to: destination) else {
-                        return
-                    }
-                    thumbnailStore.applyMove(
-                        fromOffsets: source,
-                        toOffset: destination,
-                        pageCount: pageCount
-                    )
-                },
-                onDeletePage: { index in
-                    let pageCount = pageState.pageCount
-                    guard model.deletePage(at: index) else { return }
-                    thumbnailStore.applyDeletion(at: index, pageCount: pageCount)
-                },
-                onAddPage: {
-                    model.addPageAtEnd()
-                },
-                onDismiss: {
-                    isShowingThumbnails = false
-                }
-            )
-            .frame(width: 250)
-            .padding(18)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var activeTool: (any PKTool)? {
