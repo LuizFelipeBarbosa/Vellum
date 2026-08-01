@@ -89,7 +89,7 @@ func staleProposalCannotBeAccepted() async throws {
 
 @Test("A custom agent uses the same proposal acceptance seam")
 func scriptedAgentAcceptFlow() async throws {
-    let root = try makeWorkspaceTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let proposals = FileProposalRepository(rootDirectory: root)
@@ -117,7 +117,7 @@ func scriptedAgentAcceptFlow() async throws {
 
 @Test("Activity digest filters by date and totals agent action kinds")
 func workspaceActivityDigest() async throws {
-    let root = try makeWorkspaceTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let activity = FileActivityRepository(rootDirectory: root)
     let service = WorkspaceService(
@@ -151,7 +151,7 @@ func workspaceActivityDigest() async throws {
 
 @Test("Analysis context includes current space, spaces, and other notes")
 func requestAnalysisCarriesKnowledgeContext() async throws {
-    let root = try makeWorkspaceTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let spaces = FileSpaceRepository(rootDirectory: root)
@@ -452,7 +452,7 @@ private struct WorkspaceFixture {
     let service: WorkspaceService
 
     init(agent: any VellumAgent = MockVellumAgent()) throws {
-        let root = try makeWorkspaceTemporaryDirectory()
+        let root = try TemporaryDirectory.make()
         self.root = root
         notes = FileNoteRepository(rootDirectory: root)
         proposals = FileProposalRepository(rootDirectory: root)
@@ -473,11 +473,4 @@ private struct WorkspaceFixture {
     func cleanup() {
         try? FileManager.default.removeItem(at: root)
     }
-}
-
-private func makeWorkspaceTemporaryDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("VellumCoreWorkspaceTests-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
 }

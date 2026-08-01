@@ -9,7 +9,7 @@ import XCTest
 @MainActor
 final class PageMutationRejectionTests: XCTestCase {
     func testMovePagesReportsRejectionWithoutCanvas() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory)
 
@@ -20,7 +20,7 @@ final class PageMutationRejectionTests: XCTestCase {
     }
 
     func testDeletePageReportsRejectionWithoutCanvas() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory)
 
@@ -31,7 +31,7 @@ final class PageMutationRejectionTests: XCTestCase {
     }
 
     func testSetPageOrientationReportsRejectionWithoutCanvas() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory)
 
@@ -39,16 +39,6 @@ final class PageMutationRejectionTests: XCTestCase {
             model.setPageOrientation(.landscape),
             "setPageOrientation must report rejection when no canvas is attached"
         )
-    }
-
-    private func makeRootDirectory() throws -> URL {
-        let rootDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: rootDirectory,
-            withIntermediateDirectories: true
-        )
-        return rootDirectory
     }
 
     private func makeLoadedModel(rootDirectory: URL) async throws -> NoteScreenModel {

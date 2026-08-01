@@ -4,7 +4,7 @@ import Testing
 
 @Test("Create, list, load, rename, and delete a note")
 func noteLifecycle() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
 
@@ -29,7 +29,7 @@ func noteLifecycle() async throws {
 
 @Test("Note listing scopes filter active and trashed notes")
 func noteListingScopes() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let active = try await repository.createNote(title: "Active")
@@ -49,7 +49,7 @@ func noteListingScopes() async throws {
 
 @Test("Page plain text survives save and load")
 func pagePlainTextRoundTrip() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
 
@@ -63,7 +63,7 @@ func pagePlainTextRoundTrip() async throws {
 
 @Test("Drawing data survives an asset round trip")
 func binaryAssetRoundTrip() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Drawing")
@@ -84,7 +84,7 @@ func binaryAssetRoundTrip() async throws {
 
 @Test("Importing a note atomically persists its manifest and assets")
 func atomicNoteImport() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let pageID = UUID()
@@ -131,7 +131,7 @@ func atomicNoteImport() async throws {
 
 @Test("A failed atomic import leaves no package or staging directory")
 func failedAtomicNoteImportLeavesNoTrace() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let pageID = UUID()
@@ -176,7 +176,7 @@ func failedAtomicNoteImportLeavesNoTrace() async throws {
 
 @Test("Asset size reports byte count without requiring asset data")
 func assetSize() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Drawing")
@@ -206,7 +206,7 @@ func assetSize() async throws {
     "", "../x", "/abs", "a//b", "a/../../x", "pages/../..",
 ])
 func invalidAssetPaths(path: String) async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Paths")
@@ -227,7 +227,7 @@ func invalidAssetPaths(path: String) async throws {
 
 @Test("Autosave cannot resurrect a deleted note")
 func saveAfterDeleteDoesNotRecreatePackage() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Delete me")
@@ -242,7 +242,7 @@ func saveAfterDeleteDoesNotRecreatePackage() async throws {
 
 @Test("Loading an on-disk future schema version is reported explicitly")
 func loadUnsupportedSchemaVersion() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     var note = try await repository.createNote(title: "Future")
@@ -262,7 +262,7 @@ func loadUnsupportedSchemaVersion() async throws {
 
 @Test("Listing excludes future schemas while unsupported notes reports them")
 func listNotesSkipsFutureSchemaVersion() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let current = try await repository.createNote(title: "Current")
@@ -285,7 +285,7 @@ func listNotesSkipsFutureSchemaVersion() async throws {
 
 @Test("Loading a manifest with a malformed known element reports corruption")
 func loadNoteRejectsMalformedKnownElement() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Corrupt element")
@@ -314,7 +314,7 @@ func loadNoteRejectsMalformedKnownElement() async throws {
 
 @Test("Saving a future schema version is rejected without overwriting its manifest")
 func saveNoteRejectsFutureSchemaVersion() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     var note = try await repository.createNote(title: "Original")
@@ -342,7 +342,7 @@ func saveNoteRejectsFutureSchemaVersion() async throws {
 
 @Test("Deleting an asset removes it and ignores a missing file")
 func deleteAsset() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Delete asset")
@@ -357,7 +357,7 @@ func deleteAsset() async throws {
 
 @Test("Purging assets keeps referenced files and removes orphaned files")
 func purgeUnreferencedAssets() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Purge drawings")
@@ -423,7 +423,7 @@ func purgeUnreferencedAssets() async throws {
 
 @Test("Purging image assets keeps references and removes orphans")
 func purgeUnreferencedImageAssets() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Purge images")
@@ -461,7 +461,7 @@ func purgeUnreferencedImageAssets() async throws {
 
 @Test("Purging PDF assets keeps references and removes orphans")
 func purgeUnreferencedPDFAssets() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Purge PDFs")
@@ -489,7 +489,7 @@ func purgeUnreferencedPDFAssets() async throws {
 
 @Test("An uncommitted shadow drawing is invisible and purged after reload")
 func tornDrawingSaveIsInvisibleAndPurged() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Torn drawing")
@@ -522,7 +522,7 @@ func tornDrawingSaveIsInvisibleAndPurged() async throws {
 
 @Test("Purging assets honors the latest manifest instead of an earlier snapshot")
 func purgeHonorsLatestManifestNotStaleSnapshot() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = try await repository.createNote(title: "Latest purge manifest")
@@ -592,7 +592,7 @@ func purgeHonorsLatestManifestNotStaleSnapshot() async throws {
 
 @Test("A created note persists a blank background style")
 func createdNotePersistsBlankBackgroundStyle() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
 
@@ -606,7 +606,7 @@ func createdNotePersistsBlankBackgroundStyle() async throws {
 
 @Test("Saving a legacy manifest upgrades its schema and preserves legacy dots")
 func savingLegacyManifestUpgradesSchemaAndPreservesDots() async throws {
-    let root = try makeTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let pageID = UUID()
@@ -642,11 +642,4 @@ func savingLegacyManifestUpgradesSchemaAndPreservesDots() async throws {
     let loaded = try await repository.loadNote(id: legacy.id)
     #expect(loaded.schemaVersion == Note.currentSchemaVersion)
     #expect(loaded.backgroundStyle == .legacyDefault)
-}
-
-private func makeTemporaryDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("VellumCoreTests-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
 }

@@ -162,7 +162,7 @@ func v2NoteRoundTrip() throws {
 
 @Test("Saving a v1 note normalizes its schema version to the current version")
 func saveNormalizesSchemaVersion() async throws {
-    let root = try migrationTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = migrationNote(schemaVersion: 1)
@@ -175,7 +175,7 @@ func saveNormalizesSchemaVersion() async throws {
 
 @Test("A future inserted manifest is rejected")
 func insertedFutureSchemaIsRejected() async throws {
-    let root = try migrationTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = migrationNote(schemaVersion: Note.currentSchemaVersion + 1)
@@ -226,7 +226,7 @@ func v3ManifestDefaultsCanvasElements() throws {
 
 @Test("A v4 manifest preserves text and image canvas elements through persistence")
 func v4ManifestCanvasElementsRoundTrip() async throws {
-    let root = try migrationTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let data = Data(
@@ -289,7 +289,7 @@ func v4ManifestCanvasElementsRoundTrip() async throws {
 
 @Test("Insert note preserves IDs and creates every package directory")
 func insertNoteCreatesSuppliedSkeleton() async throws {
-    let root = try migrationTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
     let note = migrationNote(schemaVersion: 2)
@@ -408,11 +408,4 @@ private func migrationNote(schemaVersion: Int) -> Note {
             )
         ]
     )
-}
-
-private func migrationTemporaryDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("VellumCoreMigrationTests-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
 }

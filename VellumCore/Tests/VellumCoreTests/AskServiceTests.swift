@@ -4,7 +4,7 @@ import Testing
 
 @Test("A matching note produces an aligned citation")
 func askSingleNoteMatch() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     var note = try await notes.createNote(title: "Weather")
@@ -28,7 +28,7 @@ func askSingleNoteMatch() async throws {
 
 @Test("Trashed notes are excluded from Ask sources")
 func askExcludesTrashedNotes() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let workspace = WorkspaceService(
@@ -121,7 +121,7 @@ func askStopwordOnlyQuestion() async throws {
 
 @Test("An empty workspace returns the no-match answer")
 func askEmptyWorkspace() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let service = AskService(
         notes: FileNoteRepository(rootDirectory: root),
@@ -140,7 +140,7 @@ func askEmptyWorkspace() async throws {
 
 @Test("Asking logs activity only when a repository is supplied")
 func askActivityLoggingIsOptional() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let activity = FileActivityRepository(rootDirectory: root)
@@ -169,7 +169,7 @@ func askActivityLoggingIsOptional() async throws {
 
 @Test("Suggested questions are recent-first, deterministic, and limited to three")
 func suggestedQuestionsAreDeterministic() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let titles = ["Oldest", "Newest", "Middle", "Fourth", "Empty"]
@@ -221,11 +221,4 @@ func askExcerptSelectsMatchingSentence() async throws {
     #expect(excerpt == matchingSentence)
     #expect(!excerpt.contains("Unrelated opening"))
     #expect(!excerpt.contains("Unrelated ending"))
-}
-
-private func makeAskTemporaryDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("VellumCoreAskTests-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
 }

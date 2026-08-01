@@ -55,7 +55,7 @@ final class ImageImportTests: XCTestCase {
     }
 
     func testImageImportRoundTripsAssetElementAndCache() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
         let (note, model) = try await makeLoadedModel(
@@ -120,7 +120,7 @@ final class ImageImportTests: XCTestCase {
     }
 
     func testImageImportClampsWidthToPageWidthForWideImage() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
         let (_, model) = try await makeLoadedModel(
@@ -145,7 +145,7 @@ final class ImageImportTests: XCTestCase {
     }
 
     func testUndoRemovesImportedImageElement() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
         let (_, model) = try await makeLoadedModel(
@@ -223,16 +223,6 @@ final class ImageImportTests: XCTestCase {
             return Data()
         }
         return mutableData as Data
-    }
-
-    private func makeRootDirectory() throws -> URL {
-        let rootDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: rootDirectory,
-            withIntermediateDirectories: true
-        )
-        return rootDirectory
     }
 
     private func makeLoadedModel(
