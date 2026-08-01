@@ -188,7 +188,7 @@ private struct GraphFixture {
             notes: notes,
             proposals: FileProposalRepository(rootDirectory: root),
             activity: FileActivityRepository(rootDirectory: root),
-            agent: MockVellumAgent(),
+            agent: HeuristicVellumAgent(),
             spaces: spaces,
             entities: entities,
             tasks: FileTaskRepository(rootDirectory: root)

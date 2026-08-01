@@ -356,6 +356,9 @@ final class ShapeRecognitionFlowUITests: XCTestCase {
             ),
             targetProcessID: ShapeFlowTestHelpers.processID(of: app)
         ) else {
+            // Capability gate, not a fixture gate: the record is built out of the
+            // private XCPointerEventPath API, so a toolchain that no longer
+            // vends it cannot run this test at all.
             throw XCTSkip("XCTest synthesized pointer support is unavailable.")
         }
         XCTAssertTrue(ShapeFlowTestHelpers.synthesize(record), "failed to synthesize the drag")
@@ -390,12 +393,20 @@ final class ShapeRecognitionFlowUITests: XCTestCase {
         )
     }
 
+    /// A selected shape always publishes its vertex handles, so a missing one is a
+    /// defect in the app rather than a reason to stop testing: fail, then throw to
+    /// abandon a test whose remaining geometry would be meaningless.
+    private struct MissingVertexHandle: Error {
+        let index: Int
+    }
+
     private func handleCenter(at index: Int, in app: XCUIApplication) throws -> CGPoint {
         let handle = app.descendants(matching: .any)
             .matching(identifier: "vellum-shape-vertex-handle-\(index)")
             .firstMatch
         guard handle.waitForExistence(timeout: 5) else {
-            throw XCTSkip("shape vertex handle \(index) not found")
+            XCTFail("shape vertex handle \(index) not found")
+            throw MissingVertexHandle(index: index)
         }
         return CGPoint(x: handle.frame.midX, y: handle.frame.midY)
     }

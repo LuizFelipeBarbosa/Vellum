@@ -18,7 +18,7 @@ struct AppContainer: Sendable {
         let notes = FileNoteRepository(rootDirectory: rootDirectory)
         let proposals = FileProposalRepository(rootDirectory: rootDirectory)
         let activity = FileActivityRepository(rootDirectory: rootDirectory)
-        let agent = MockVellumAgent()
+        let agent = HeuristicVellumAgent()
         let spaces = FileSpaceRepository(rootDirectory: rootDirectory)
         let entities = FileEntityRepository(rootDirectory: rootDirectory)
         let tasks = FileTaskRepository(rootDirectory: rootDirectory)
@@ -34,7 +34,7 @@ struct AppContainer: Sendable {
         let graph = KnowledgeGraphService(notes: notes, spaces: spaces, entities: entities)
         let askService = AskService(
             notes: notes,
-            answerer: MockAskAnswerer(),
+            answerer: HeuristicAskAnswerer(),
             activity: activity
         )
 

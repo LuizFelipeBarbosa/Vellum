@@ -17,7 +17,7 @@ running analysis on every edit.
 
 The project makes two deliberate layout deviations from the original brief: the core
 is a SwiftPM package so it can be tested without Xcode or a simulator, and
-`MockVellumAgent` lives in that package rather than under `Platform/`.
+`HeuristicVellumAgent` lives in that package rather than under `Platform/`.
 
 ## Prerequisites
 
@@ -106,9 +106,9 @@ Export and PDF import are real, not stubs. `NoteExporter` renders notes to PDF, 
 or JPEG and is wired through `NoteHeaderChips` / `NoteScreenView`; `PDFImportService`
 builds notes from imported PDFs and is wired through `LibraryScreenModel`.
 
-## Mocks
+## Built-in agent implementations
 
-`MockVellumAgent` (implementing `VellumAgent`) and `MockAskAnswerer` (implementing
+`HeuristicVellumAgent` (implementing `VellumAgent`) and `HeuristicAskAnswerer` (implementing
 `AskAnswering`) are **shipping implementations**, not test doubles — deterministic
 on-device behavior behind protocol seams, constructed in
 `AppContainer.live(rootDirectory:)`. To use a real provider, implement the protocol in

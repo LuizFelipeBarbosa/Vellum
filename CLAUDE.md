@@ -168,9 +168,13 @@ selected` (`ShapeRecognitionFlowUITests.swift:290`). A full run ending with **ex
 that one failure** is green. A second failure is a regression. Two split-pane tests
 report as skipped via fixture-shape `XCTSkip` guards.
 
-## `Mock*` types are shipping code
+## The built-in agent implementations are shipping code
 
-`MockVellumAgent` and `MockAskAnswerer` (both in
+These were named `MockVellumAgent` / `MockAskAnswerer` until an audit agent read
+the name, concluded their tests covered a test double, and proposed deleting all
+167 lines. Renamed for that reason — do not reintroduce a `Mock` prefix here.
+
+`HeuristicVellumAgent` and `HeuristicAskAnswerer` (both in
 `VellumCore/Sources/VellumCore/Agent/`) are the **production** implementations of
 `VellumAgent` and `AskAnswering`, constructed in `AppContainer.live(rootDirectory:)`
 (`Vellum/App/AppContainer.swift:21,37`). They are deterministic on-device behavior

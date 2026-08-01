@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MockVellumAgent: VellumAgent, Sendable {
+public struct HeuristicVellumAgent: VellumAgent, Sendable {
     public init() {}
 
     public func analyze(

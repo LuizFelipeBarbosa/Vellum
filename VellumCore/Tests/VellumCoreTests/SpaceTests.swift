@@ -273,7 +273,7 @@ private struct SpaceFixture {
             notes: notes,
             proposals: proposals,
             activity: FileActivityRepository(rootDirectory: root),
-            agent: MockVellumAgent(),
+            agent: HeuristicVellumAgent(),
             spaces: spaces,
             entities: FileEntityRepository(rootDirectory: root),
             tasks: FileTaskRepository(rootDirectory: root)

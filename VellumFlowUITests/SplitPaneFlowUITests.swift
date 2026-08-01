@@ -334,6 +334,17 @@ final class SplitPaneFlowUITests: XCTestCase {
         let sidebarRowHeight: CGFloat = 56
         let contentHeight = CGFloat(rowCount) * sidebarRowHeight
         let viewportHeight = sidebar.frame.height
+        // KNOWN COVERAGE HOLE, and the one skip here that is not a capability
+        // gate. The sidebar is as tall as the split container, so on an iPad this
+        // viewport is ~1290pt and overflowing it takes ~24 note rows; the seeded
+        // workspace has 8. A test cannot arrange that from here: the only way to
+        // add notes is the library's New Note menu, and leaving ~16 extra notes in
+        // the shared workspace would push the "Site notes" card below the fold of
+        // the library grid, which every other flow test taps to open its fixture.
+        // Making this deterministic needs a DEBUG seeding hook in the app (the
+        // shape of -vellum-split-panes, e.g. a note-count argument), at which
+        // point this guard becomes an XCTFail. Until then it skips loudly rather
+        // than asserting scrolling that the fixture cannot produce.
         guard contentHeight >= viewportHeight + 200 else {
             throw XCTSkip(
                 "seeded sidebar fixture has \(rowCount) note rows "
@@ -806,7 +817,7 @@ final class SplitPaneFlowUITests: XCTestCase {
         )
     }
 
-    func testTapSidebarRowReplacesFocusedPane() throws {
+    func testTapSidebarRowReplacesFocusedPane() {
         let context = launchApp(splitPaneCount: 2)
         let initialState = waitForState(context.stateElement) {
             $0["panes"] == "2"
@@ -843,26 +854,13 @@ final class SplitPaneFlowUITests: XCTestCase {
         )
 
         let sidebar = showSidebar(in: context.app)
-        let sidebarButtons = sidebar.buttons
-        let hasDifferentSidebarRow = waitUntil(timeout: 10) {
-            sidebarButtons.allElementsBoundByIndex.contains { button in
-                button.exists
-                    && button.label != "Close notes"
-                    && button.label != openTitles[0]
-                    && button.label != openTitles[1]
-            }
-        }
-        guard hasDifferentSidebarRow else {
-            return XCTFail(
-                "no sidebar row exists that differs from both open pane titles, "
-                    + "state: \(stateString(of: context.stateElement))"
-            )
-        }
         guard let row = waitForSidebarRow(in: sidebar, matching: { label in
             label != openTitles[0] && label != openTitles[1]
         }) else {
-            throw XCTSkip(
-                "no sidebar row found that differs from both open pane titles"
+            return XCTFail(
+                "fixture needs a third note so a visible sidebar row differs from "
+                    + "both open pane titles \(openTitles), state: "
+                    + stateString(of: context.stateElement)
             )
         }
         let replacementTitle = row.label
@@ -1179,7 +1177,7 @@ final class SplitPaneFlowUITests: XCTestCase {
         )
     }
 
-    func testInteriorDropSplitsPane() throws {
+    func testInteriorDropSplitsPane() {
         let context = launchApp(splitPaneCount: 2)
         let initialState = waitForState(context.stateElement) {
             $0["panes"] == "2"
@@ -1220,8 +1218,10 @@ final class SplitPaneFlowUITests: XCTestCase {
         guard let row = waitForSidebarRow(in: sidebar, matching: { label in
             label != openTitles[0] && label != openTitles[1]
         }) else {
-            throw XCTSkip(
-                "no sidebar row found that differs from both open pane titles"
+            return XCTFail(
+                "fixture needs a third note so a visible sidebar row differs from "
+                    + "both open pane titles \(openTitles), state: "
+                    + stateString(of: context.stateElement)
             )
         }
         guard let record = makeSidebarDragGestureRecord(
@@ -1322,7 +1322,7 @@ final class SplitPaneFlowUITests: XCTestCase {
     // needs container-relative drop coordinates before this case can be tested
     // honestly. Bottom-edge stacking IS covered (single column); the multi-column
     // interior-bottom case is a known coverage gap, not a passing test.
-    func testCapacityFullShowsRefusalDuringDrag() throws {
+    func testCapacityFullShowsRefusalDuringDrag() {
         let sizingContext = launchApp(splitPaneCount: 1)
         let sizingState = waitForState(sizingContext.stateElement) {
             self.containerSize(from: $0) != nil
@@ -1334,24 +1334,35 @@ final class SplitPaneFlowUITests: XCTestCase {
         let maximumRows = max(Int(splitSize.height / 280), 1)
         sizingContext.app.terminate()
 
-        let context = launchApp(
-            gridRows: Array(repeating: maximumRows, count: maximumColumns)
-        )
+        // A drop is refused only when both of the targets it ranks are infeasible:
+        // the column axis is full AND the column under the finger is full. That
+        // takes maximumRows + maximumColumns - 1 panes, not a wholly filled grid,
+        // so the fixture no longer has to own maximumRows * maximumColumns notes
+        // to reach capacity. The full column goes last, which also puts its panes
+        // clear of the sidebar's cancel zone.
+        let gridRows = Array(repeating: 1, count: maximumColumns - 1) + [maximumRows]
+        let context = launchApp(gridRows: gridRows)
         let initialState = waitForState(context.stateElement, timeout: 15) {
-            let decoded = self.grid(from: $0)
-            return decoded.count == maximumColumns
-                && decoded.allSatisfy { $0.rows.count == maximumRows }
+            self.grid(from: $0).map { $0.rows.count } == gridRows
         }
         let initialGrid = grid(from: initialState)
-        guard initialGrid.count == maximumColumns,
-              initialGrid.allSatisfy({ $0.rows.count == maximumRows }) else {
-            throw XCTSkip(
-                "fixture could not fill split capacity \(maximumColumns)x"
-                    + "\(maximumRows), state: \(initialState)"
+        guard initialGrid.map({ $0.rows.count }) == gridRows else {
+            return XCTFail(
+                "fixture needs \(gridRows.reduce(0, +) + 1) notes to open a "
+                    + "\(maximumColumns)-column grid whose last column holds "
+                    + "\(maximumRows) rows, plus one note to drag; state: \(initialState)"
             )
         }
         let initialPaneCount = initialGrid.reduce(0) { $0 + $1.rows.count }
         let initialColumnCount = initialGrid.count
+
+        addTeardownBlock { @MainActor in
+            self.closePanesAddedAbove(
+                initialPaneCount,
+                in: context.app,
+                stateElement: context.stateElement
+            )
+        }
 
         let openTitles = Set(
             sortedTitleFields(in: context.app, expectedCount: initialPaneCount)
@@ -1361,18 +1372,46 @@ final class SplitPaneFlowUITests: XCTestCase {
         guard let row = waitForSidebarRow(in: sidebar, matching: { label in
             !openTitles.contains(label)
         }) else {
-            throw XCTSkip("fixture has no unopened note available for refusal drag")
+            return XCTFail(
+                "fixture needs one note beyond the \(initialPaneCount) opened into "
+                    + "panes, but every visible sidebar row is already open: \(openTitles)"
+            )
         }
 
-        let targetX = initialGrid[0].width * 0.65
-        let targetY = initialGrid[0].rows[0] * 0.65
+        // Drop into the middle of the full column's first pane. dropOffset is a
+        // fraction of the window while the grid fractions are of the split
+        // container, so go through the container's own frame rather than
+        // assuming the two share an origin.
+        guard let containerSize = containerSize(from: initialState) else { return }
+        let containerOrigin = context.stateElement.frame.origin
+        let lastColumn = initialGrid.count - 1
+        let lastColumnStartFraction = initialGrid
+            .prefix(lastColumn)
+            .reduce(0.0) { $0 + $1.width }
+        let dropInContainer = CGPoint(
+            x: CGFloat(lastColumnStartFraction + initialGrid[lastColumn].width / 2)
+                * containerSize.width,
+            y: CGFloat(initialGrid[lastColumn].rows[0] / 2) * containerSize.height
+        )
+        // Mirrors SplitContainerLayout.sidebarCancelZoneMaxX, which is internal to
+        // the app: a drop left of it cancels instead of resolving against a pane.
+        let sidebarCancelZoneMaxX: CGFloat = 336
+        XCTAssertGreaterThan(
+            dropInContainer.x,
+            sidebarCancelZoneMaxX,
+            "the drop point falls inside the sidebar cancel zone, state: \(initialState)"
+        )
+
+        let windowFrame = context.window.frame
         guard let record = makeSidebarDragGestureRecord(
             in: context.app,
             window: context.window,
             row: row,
             dropOffset: CGVector(
-                dx: CGFloat(targetX),
-                dy: CGFloat(targetY)
+                dx: (containerOrigin.x + dropInContainer.x - windowFrame.minX)
+                    / windowFrame.width,
+                dy: (containerOrigin.y + dropInContainer.y - windowFrame.minY)
+                    / windowFrame.height
             )
         ) else {
             return XCTFail("XCTest synthesized pointer support is unavailable.")

@@ -103,7 +103,7 @@ private struct TaskFixture {
             notes: FileNoteRepository(rootDirectory: root),
             proposals: proposals,
             activity: FileActivityRepository(rootDirectory: root),
-            agent: MockVellumAgent(),
+            agent: HeuristicVellumAgent(),
             spaces: FileSpaceRepository(rootDirectory: root),
             entities: FileEntityRepository(rootDirectory: root),
             tasks: tasks

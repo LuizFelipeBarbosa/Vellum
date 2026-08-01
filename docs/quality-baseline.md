@@ -94,3 +94,34 @@ Consequences for Wave 6:
 
 Re-run this build after every Wave 6 step. Any expression exceeding its number
 above is a regression to fix before proceeding.
+
+### How to measure it without fooling yourself
+
+Learned the hard way while acting on this table:
+
+1. **Only clean builds give a complete picture.** An incremental build reports
+   warnings *only for files that recompiled*, so an expression can silently drop
+   off the list because its file was untouched — which reads identically to
+   "fixed it". Use a fresh `-derivedDataPath` for any before/after comparison.
+2. **Near-threshold numbers swing ±25% run to run.** Anything in the 150–300ms
+   band should be treated as noise unless it moves by more than that. Only the
+   two four-digit entries in this table were unambiguous signal.
+3. **The table above is a snapshot at `742c23d` and does not reproduce later.**
+   By the time the split-container work started, `NoteScreenView.body` (212) and
+   `canvasArea` (190) had already been fixed, and only 4 rows still exceeded the
+   threshold. Re-measure the baseline at the commit you are actually starting
+   from rather than diffing against these numbers.
+
+### Outcome
+
+Both four-digit costs are gone. `NoteScreenView.body` and `canvasArea` dropped
+off the list entirely, and `NoteSplitContainerView.body` went from **1090ms
+(1122 on a clean re-measure) to under 150ms**, attributed step by step:
+1122 → 976 (extract `paneGrid`) → 401 (extract the dividers) → 398 (move divider
+math into `SplitContainerLayout` — a bare `reduce(0, +)` inside `.position` was
+leaving the operator overload to resolve against the whole view expression) →
+under threshold (extract `dockedToolbar` and the accessibility value).
+
+The lesson that generalises: the cost is concentrated in a few expressions, and
+extracting a *named seam* is what fixes it. Flattening seams away does the
+opposite — a flat `NoteScreenView.body` measured **8699ms**.

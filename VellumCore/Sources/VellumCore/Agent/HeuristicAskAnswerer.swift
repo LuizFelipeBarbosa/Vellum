@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MockAskAnswerer: AskAnswering, Sendable {
+public struct HeuristicAskAnswerer: AskAnswering, Sendable {
     private static let stopwords: Set<String> = [
         "the", "a", "an", "is", "are", "was", "were", "do", "does", "did",
         "what", "who", "when", "where", "how", "why", "this", "in", "on", "of",

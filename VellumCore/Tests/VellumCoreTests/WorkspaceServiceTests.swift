@@ -124,7 +124,7 @@ func workspaceActivityDigest() async throws {
         notes: FileNoteRepository(rootDirectory: root),
         proposals: FileProposalRepository(rootDirectory: root),
         activity: activity,
-        agent: MockVellumAgent(),
+        agent: HeuristicVellumAgent(),
         spaces: FileSpaceRepository(rootDirectory: root),
         entities: FileEntityRepository(rootDirectory: root),
         tasks: FileTaskRepository(rootDirectory: root)
@@ -485,7 +485,7 @@ private struct WorkspaceFixture {
     let tasks: FileTaskRepository
     let service: WorkspaceService
 
-    init(agent: any VellumAgent = MockVellumAgent()) throws {
+    init(agent: any VellumAgent = HeuristicVellumAgent()) throws {
         let root = try TemporaryDirectory.make()
         self.root = root
         notes = FileNoteRepository(rootDirectory: root)

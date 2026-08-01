@@ -13,12 +13,27 @@ Status legend: **FIXED** = landed on `chore/quality-audit-slop-removal`.
 
 | | |
 |---|---|
-| Production code | ~27.7k → ~26.5k lines |
-| Test code | ~28.8k → ~27.4k lines |
-| Files removed | 8 |
-| Real defects fixed | 3 (atomic note writes, activity-log clobber, `+infinity` trap) |
+| Files removed | 8; 12 added (extracted shared code + test support) |
+| Real defects fixed | 4 |
+| Latent traps closed | 2 (`Int(...)` overflow on large rotations; validation that would not have applied to future rules) |
 | Behavior regressions caught and reverted | 1 |
-| Audit findings that did not survive verification | 5 |
+| Audit findings that did not survive verification | 8 |
+| Type-checker: worst expression | 1090ms → under 150ms |
+
+The four real defects, none of which anyone was looking for:
+
+1. **`insertNote` wrote note packages non-atomically** while its sibling
+   `importNote` staged-and-renamed. `createNote` routes through it and
+   `listNotes` is fail-closed, so one interrupted note creation made the
+   **entire library** fail to load.
+2. **An unreadable activity log was silently destroyed** — `append` read it with
+   `(try? Data(contentsOf:)) ?? Data()` and then atomically wrote the result, so
+   any read failure other than "absent" overwrote the user's whole history with a
+   single event.
+3. **Note activity written before a package existed was unreachable** through
+   `list(noteID:)`, which read only the package log.
+4. **Row-index math reached `Int(...)` with `+infinity`, which traps.** NaN was
+   already handled by an existing `>= 0`; infinity was not.
 
 Test counts moved from 370 / 379 / 47 to **353 / 364 / 43** (VellumCore /
 VellumUITests / VellumFlowUITests). Every deletion is accounted for: 10 tests
@@ -83,9 +98,9 @@ path.
 | 0.2 | Long-press drag recognizer duplicated ~110 lines; the thumbnail copy never got three fixes (mid-scroll press refusal, `allowedTouchTypes`, `reset()` hook) | **ATTEMPTED, REVERTED** `d5a799e` → `db502d2` — see below |
 | 0.3 | Row-index math duplicated; only the newer copy is infinity-safe. NaN is already rejected by the existing `>= 0`, but `+infinity` reaches `Int(...)` and **traps at runtime** | **FIXED** `8988f60` |
 | 0.4 | `insertNote` never received `importNote`'s stage-then-atomically-rename. `createNote` routes through `insertNote` and `listNotes` is fail-closed, so one interrupted note creation makes the **entire library** throw | **FIXED** `a54dff4` |
-| 0.5 | `CanvasElementsStore.finishTextEditingSession` — ~24-line text-commit block inlined twice with **different undo semantics**; one copy has a no-op short-circuit and uses `removeElement`/`updateElementLive`, the other `removeElementLive` + `registerEditingSessionUndo` | **OPEN** |
-| 0.6 | `FileActivityRepository.append` falls back to a workspace-root log when a note package does not exist yet; `list(noteID:)` reads **only** the package log. Events appended before the package exists are permanently unreachable | **OPEN** |
-| 0.7 | `purgeNote` shares `loadNote`'s manifest-decode ladder but skips its `SchemaProbe` check, so a note written by a newer build can be purged through a path the loader would refuse | **OPEN** |
+| 0.5 | `CanvasElementsStore.finishTextEditingSession` — ~24-line text-commit block inlined twice with **different undo semantics** | **NOT A DEFECT** — the two paths are "active session" (collapses to one `registerEditingSessionUndo`) vs "bare finalize" (no baseline exists, so removal goes through transactional `removeElement`). The short-circuit is load-bearing and pinned by `testNonEmptyTextWithoutSessionTrimsGrowsAndIsIdempotent`. Shared construction extracted; undo handling left explicit and documented. `24e846b` |
+| 0.6 | `FileActivityRepository.append` falls back to a workspace-root log when a note package does not exist; `list(noteID:)` reads **only** the package log | **FIXED** `667a6db` — and the fallback turned out to be load-bearing, not a bug: `purgeNote` logs `.notePurged` *after* deleting the package, so a purge event necessarily outlives what it describes. Fixed on the `list` side instead |
+| 0.7 | `purgeNote` skips the `SchemaProbe` check `loadNote` performs | **NOT A DEFECT** — deliberate. Adding the probe would make a note written by a newer build permanently **unremovable**, which is strictly worse. Purge still fails closed on an undecodable manifest. Ladder extracted, asymmetry documented, test pins it. `d9ff0d2` |
 
 ### 0.2 in detail — the one change that had to be backed out
 
@@ -171,21 +186,34 @@ content type, destination, error sink, and has a completion callback — sharing
 needs four injected closures, more indirection than the duplication costs. Only
 the security-scope read is shared.
 
-### Still OPEN
+### Second pass — also FIXED
 
-- `FileEntityRepository` / `FileSpaceRepository` / `FileTaskRepository` are
-  byte-identical modulo the element type — a generic would collapse three files.
-- Three separate implementations of "snap an angle to the nearest quarter turn".
-- `sortPages` character-for-character identical in two services.
-- The `createdAt`-then-`uuidString` tiebreak comparator hand-written **11 times**.
-- `bounds(of:)` + a private `PointBounds` struct declared twice, plus a third
-  copy under a different name.
-- `WorkspaceService` duplicates its own mutation logic in the proposal-accept
-  switch, and **one copy bypasses validation**.
+- `FileEntityRepository` / `FileSpaceRepository` / `FileTaskRepository`, which
+  were byte-identical modulo the element type → one generic
+  `FileCollectionRepository<Element>`; the three protocols are untouched and the
+  concrete types survive as typealiases, so no call site changed (`bf3e1a3`).
+- Three implementations of "snap an angle to the nearest quarter turn" → one
+  (`6becbb1`). They agreed at the boundaries, but two differed in ways worth
+  recording: one let an *infinite* tolerance snap every angle, and
+  `ShapeGridSnapper` computed `Int(abs(quarterTurns))`, which **traps** on a
+  rotation large enough to overflow `Int`. Both resolved toward the safe copy.
+- `sortPages`, identical in two services → `NotePage.byOrder` (`adebc76`).
+- The `createdAt`-then-`uuidString` tiebreak comparator — **15** hand-written
+  instances, not 11 → `StableOrder` (`affe3ad`). This was a correctness surface
+  as much as duplication: 15 chances to get a tiebreak subtly wrong.
+- `bounds(of:)` + `PointBounds` ×3 → one (`6b7aa36`). The copies had diverged;
+  the **validating** one was kept, because the other depended on a
+  `finitePoints(...)` call ~700 lines upstream that no future caller could know
+  about.
+- `WorkspaceService`'s proposal-accept mutation duplication → routed through
+  `createSpace` (`3372c1e`). **The audit overstated this one:** the bypass is
+  latent, not live — the validation it skips sits inside `if let parentID`, and
+  the proposal path hardcodes `parentID: nil`. Real risk was that any future rule
+  added to `createSpace` would silently not apply to agent-filed spaces.
 
 ---
 
-## Defensive over-engineering — OPEN
+## Defensive over-engineering — FIXED (`e56c78c`, `5df0707`, `09d1b3a`)
 
 81 `isFinite` checks across 17 files. The cluster is real but the diagnosis
 matters: `JSONDecoder`'s default `.throw` strategy means non-finite geometry
@@ -203,8 +231,25 @@ re-implements `nonnegativeFinite` inline.
 
 One nuance worth preserving: in `FileNoteRepository`, `isRegularFile == true &&
 isDirectory != true` is genuinely redundant — but the **parallel block a few
-lines up is not**, because a symlink-to-directory can report `isDirectory == true`.
-Do not "fix" both the same way.
+lines up is not**, because a symlink-to-directory can report `isDirectory == true`
+and following it would let the purge delete outside the package. Only the
+redundant clause was dropped; both blocks now carry a comment saying which is
+which.
+
+**Outcome:** `ToolbarDockPolicy` went from 8 `isFinite` occurrences to 3, each
+with a genuinely reachable non-finite input (the two values that actually arrive
+from callers, plus the boundary sanitizer in `Geometry.init` that makes
+everything downstream safe). Every removal came with an explicit unreachability
+proof rather than a plausibility argument — e.g. `insetLength` is a finite value
+minus non-negatives, so it can only overflow *downward*, and NaN would need an
+`inf − inf` that no operand can supply; the adjacent `> minimumAxisLength` check
+already rejects `−inf`. One check was kept-as-inlined rather than deleted because
+it was provably *unobservable* rather than unreachable: `distance`'s result feeds
+only `<` comparisons, which order `+inf` exactly as they order
+`greatestFiniteMagnitude`.
+
+`SplitLayoutPolicy`'s inline re-implementation now shares one
+`CGFloat.nonnegativeFinite`.
 
 ---
 
@@ -217,9 +262,10 @@ is `.purple`; `team`→`.purple` while `teamSpace` is `.orange`; `reading`
 →`.yellow` while `readingSpace` is `.green`. Renamed to hue names with **zero
 visual change** — every case still resolves to the same hex pair (`6f11ba0`).
 
-**OPEN:** `MockVellumAgent` and `MockAskAnswerer` are the app's only *shipping*
-implementations (`AppContainer.swift:21,37`). The `Mock` prefix is actively
-misleading — it caused a false "delete these tests" finding in this very audit.
+**FIXED:** `MockVellumAgent` and `MockAskAnswerer` are the app's only *shipping*
+implementations (`AppContainer.swift:21,37`). The `Mock` prefix caused a false
+"delete these tests" finding in this very audit, so they are now
+`HeuristicVellumAgent` / `HeuristicAskAnswerer`.
 
 **OPEN:** `deleteNote` means opposite things one layer apart.
 
@@ -272,12 +318,31 @@ tolerance constant `4` now lives in two places.
 `VellumFlowUITests/ShapeFlowTestHelpers.swift` is the counter-example and the
 model to copy: every helper is used 4–40 times.
 
-### Fixture-dependent skips — OPEN
+### Fixture-dependent skips — mostly FIXED
 
-Eight `XCTSkip` sites; five in `SplitPaneFlowUITests` depend on **seed-data
-shape**, not device capability. A seed change silently turns a third of the
-split-pane suite green-by-skipping. The same "different sidebar row" condition is
-guarded with `XCTFail` at one site and `XCTSkip` twelve lines later.
+Eight `XCTSkip` sites, five depending on **seed-data shape** rather than device
+capability, two of them skipping in every run. Now **three**: two legitimate
+capability gates (the private `XCPointerEventPath` API being unavailable), now
+commented as such, and one documented hole.
+
+The interesting one: `testDropRefusesWhenSplitCapacityIsFull` was skipping every
+run because it tried to fill `maxColumns × maxRows` (12 panes) from an 8-note
+seed. Reading `SplitGridPolicy.dropTargets` shows a drop ranks only two targets —
+the best horizontal and vertical edge of the pane under the finger — so refusal
+needs just `maxRows + maxColumns - 1` panes (6). The fixture requirement dropped
+to 7 notes, which the seed always satisfies. **That test also had a latent bug:**
+its drop point was computed as a *window* fraction and landed inside the sidebar
+cancel zone, so it would have resolved to `cancelZone` rather than a capacity
+refusal — it could not have passed even with enough notes.
+
+**Still open, deliberately:** `testSidebarScrollsDuringAndAfterADrag` needs ~24
+sidebar rows to overflow a 1289pt viewport; the seed provides 8. The fix is a
+DEBUG note-count launch argument in the shape of `-vellum-split-panes`. It was
+*not* done because the flow-test workspace **persists on disk between runs**, so
+seeding ~16 extra notes would push the "Site notes" card below the fold of the
+library grid and break `ShapeFlowTestHelpers.openSiteNotes`, used by ~30 other
+tests. The same lift-vs-scroll arbitration is covered by `PagesPanelDragUITests`,
+which builds its own fixture.
 
 ### Flake — OPEN
 

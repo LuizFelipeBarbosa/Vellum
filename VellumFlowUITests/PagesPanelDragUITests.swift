@@ -80,6 +80,9 @@ final class PagesPanelDragUITests: XCTestCase {
             from: row1,
             to: row2
         ) else {
+            // Capability gate, not a fixture gate: the record is built out of the
+            // private XCPointerEventPath API, so a toolchain that no longer
+            // vends it cannot run this test at all.
             throw XCTSkip("XCTest synthesized pointer support is unavailable.")
         }
         XCTAssertTrue(
