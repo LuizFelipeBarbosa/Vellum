@@ -759,10 +759,7 @@ public enum ShapeRecognizer {
         _ angle: CGFloat,
         toleranceDegrees: CGFloat
     ) -> CGFloat {
-        let quarterTurn = CGFloat.pi / 2
-        let snapped = (angle / quarterTurn).rounded() * quarterTurn
-        let tolerance = max(0, toleranceDegrees) * .pi / 180
-        return abs(angle - snapped) <= tolerance ? snapped : angle
+        QuarterTurn(nearest: angle, toleranceDegrees: toleranceDegrees)?.angle ?? angle
     }
 
     private static func canonicalEllipseAngle(_ angle: CGFloat) -> CGFloat {
