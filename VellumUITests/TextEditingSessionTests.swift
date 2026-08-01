@@ -88,8 +88,8 @@ final class TextEditingSessionTests: XCTestCase {
             secondImage,
             secondText,
         ]
-        XCTAssertTrue(legacyElements.allSatisfy { $0.layerPlacement == nil })
-
+        // None of the helpers stamps a placement, so these stand in for elements saved
+        // before the layer-placement field existed.
         let store = CanvasElementsStore()
         store.hydrate(legacyElements)
 

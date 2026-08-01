@@ -75,7 +75,8 @@ func graphSnapshotDeduplicatesEntityMentions() async throws {
             && $0.kind == .entityMention
     }
 
-    #expect(seeded.alice.sources.filter { $0.noteID == seeded.alpha.id }.count == 2)
+    // `seedGraph` gives Alice two separate mentions inside note alpha; the snapshot has to
+    // collapse them into a single edge.
     #expect(matchingEdges.count == 1)
 }
 

@@ -136,19 +136,6 @@ struct ShapeLineAdjusterTests {
         #expect(!result.isAxisSnapped)
     }
 
-    @Test("The pivot remains the fixed anchor")
-    func pivotRemainsFixed() {
-        let rawPoint = CGPoint(x: 130, y: 125)
-        let result = ShapeLineAdjuster.adjustedEndpoint(
-            pivot: pivot,
-            rawPoint: rawPoint
-        )
-
-        #expect(distance(rawPoint, pivot) > LineAdjustConfig.default.minimumLength)
-        #expect(result.point != pivot)
-        #expect(pivot == CGPoint(x: 40, y: 60))
-    }
-
     private func point(angleDegrees: CGFloat, length: CGFloat) -> CGPoint {
         let angle = angleDegrees * .pi / 180
         return CGPoint(

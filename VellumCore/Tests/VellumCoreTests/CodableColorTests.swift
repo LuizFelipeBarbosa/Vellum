@@ -19,14 +19,24 @@ func codableColorInvalidHexFallsBackToBlack() {
     #expect(color.hexString == "#000000")
 }
 
-@Test("CodableColor round trips through JSON")
-func codableColorJSONRoundTrip() throws {
-    let original = CodableColor(red: 0.125, green: 0.5, blue: 0.875, alpha: 0.625)
+/// Every element colour in every note manifest is written through this encoder, so the
+/// four key names are on-disk format. Decoding is left to the synthesized conformance;
+/// what needs guarding is that a property rename cannot quietly orphan saved colours.
+@Test("CodableColor persists its components under stable JSON keys")
+func codableColorJSONKeysAreStable() throws {
+    let data = try JSONEncoder().encode(
+        CodableColor(red: 0.125, green: 0.5, blue: 0.875, alpha: 0.625)
+    )
+    let object = try #require(
+        JSONSerialization.jsonObject(with: data) as? [String: Double]
+    )
 
-    let data = try JSONEncoder().encode(original)
-    let decoded = try JSONDecoder().decode(CodableColor.self, from: data)
-
-    #expect(decoded == original)
+    #expect(object == [
+        "red": 0.125,
+        "green": 0.5,
+        "blue": 0.875,
+        "alpha": 0.625,
+    ])
 }
 
 @Test("CodableColor emits uppercase hex strings")

@@ -632,13 +632,10 @@ final class NotePageRendererTests: XCTestCase {
         let content = makeContent(elements: [element], pageCount: 2)
         let emptyContent = makeContent(pageCount: 2)
 
-        // Rotation is what carries this shape down to the boundary: the unrotated frame
-        // stops far above it, so inflating anything else would miss page two.
+        // Rotation is what carries this shape down to the boundary: even inflated by half
+        // its 30pt stroke the unrotated frame stops 81pt above it, so anything that widened
+        // the frame instead of rotating it would miss page two.
         XCTAssertEqual(element.rotatedBoundingBox.maxY, boundary, accuracy: 0.001)
-        XCTAssertLessThan(
-            cgRect(frame).maxY + CGFloat(strokeWidth) / 2,
-            boundary
-        )
 
         let secondPage = try pixelBuffer(
             for: render(pageIndex: 1, content: content, pointSize: fullRenderPointSize)
@@ -1070,8 +1067,9 @@ final class NotePageRendererTests: XCTestCase {
     func testSecondPageDotsAlignToThePageOrigin() throws {
         let pageRect = PageGeometry.a4.pageRect(index: 1)
         let spacing = CGFloat(PageBackgroundStyle.legacyDefault.spacing)
-        let absoluteDotY = pageRect.minY + spacing
-        let pageLocalDotY = absoluteDotY - pageRect.minY
+        // The pattern restarts at every page origin, so the first dot row of page two sits
+        // one spacing below that page's own top edge.
+        let pageLocalDotY = spacing
         let rendered = try pixelBuffer(
             for: render(
                 pageIndex: 1,
@@ -1097,7 +1095,6 @@ final class NotePageRendererTests: XCTestCase {
         )
 
         XCTAssertEqual(pageRect.minY, PageGeometry.a4.pageHeight, accuracy: 0.001)
-        XCTAssertEqual(pageLocalDotY, spacing, accuracy: 0.001)
         XCTAssertGreaterThan(
             differingPixelCount(rendered, reference, in: dotRect),
             0

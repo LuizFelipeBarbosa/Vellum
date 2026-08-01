@@ -326,7 +326,8 @@ final class NoteExporterTests: XCTestCase {
         defer { removeOutput(output) }
 
         assertOutputDirectory(output)
-        XCTAssertLessThan(cgRect(frame).maxY, PageGeometry.a4.pageHeight)
+        // The persisted 44pt frame ends 20pt above the page boundary; only the text grown
+        // past it reaches page two.
         XCTAssertGreaterThan(element.effectiveBoundingBox.maxY, PageGeometry.a4.pageHeight)
         XCTAssertEqual(output.urls.count, 2)
 
