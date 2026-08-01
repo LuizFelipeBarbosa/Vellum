@@ -27,6 +27,10 @@ struct NoteScreenView: View {
     @State private var leftClusterFrame: CGRect = .zero
     @State private var rightClusterFrame: CGRect = .zero
     @State private var topOverlayGlobalFrame: CGRect = .zero
+    @State private var pdfWindowUpdateTask: Task<Void, Never>?
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
 
     private var activeCanvasReference: NoteCanvasReference {
         paneContext.pane.canvasReference
@@ -50,6 +54,29 @@ struct NoteScreenView: View {
     }
 
     var body: some View {
+        // The screen's contract, applied outward from the surface: lifecycle,
+        // then the observers that react to it, then presentations, then
+        // animations. Each phase is its own method so the type checker solves
+        // it independently — one flat chain costs ~8s to type-check.
+        //
+        // The animations must stay outermost or the suggestions, thumbnail and
+        // paper-chooser transitions stop animating and the entity popover pops
+        // instead of sliding.
+        animating(
+            presenting(
+                observingPagination(
+                    observingCanvasContent(
+                        observingInteraction(
+                            screenSurface
+                        )
+                    )
+                )
+            )
+        )
+    }
+
+    /// The surface plus everything that establishes and tears down its wiring.
+    private var screenSurface: some View {
         noteSurface
             .preference(
                 key: PaneHeaderFramesKey.self,
@@ -70,15 +97,28 @@ struct NoteScreenView: View {
                 model.onPageOrientationChanged = nil
                 model.onOrientationFlipped = nil
             }
-            .modifier(
-                NoteScreenPrimaryChangeObservers(
-                    model: model,
-                    app: app,
-                    selectionController: selectionController,
-                    selectedTool: selectedTool,
-                    cacheCurrentTool: cacheCurrentTool
-                )
-            )
+    }
+
+    /// Observers for what the user is doing right now.
+    private func observingInteraction(_ content: some View) -> some View {
+        content
+            .onChange(of: selectedTool) { oldValue, newTool in
+                if oldValue == .text, newTool != .text {
+                    model.canvasElements.finishTextEditingSession(matching: nil)
+                }
+                selectionController.toolChanged()
+                cacheCurrentTool()
+            }
+            .onChange(of: app.toolPreferences.preferences) {
+                cacheCurrentTool()
+            }
+            .onChange(of: model.pendingProposals.count) { _, count in
+                if count == 0 {
+                    model.isShowingSuggestions = false
+                }
+            }
+            // Must stay after the selectedTool observer above, which can clear the
+            // selection this one reacts to.
             .onChange(of: selectionController.selection != nil) { _, hasSelection in
                 // Selecting an element borrows the Select tool so shapes and photos use one edit flow.
                 // Once the selection ends the tool goes back, so selecting either never costs the
@@ -93,6 +133,7 @@ struct NoteScreenView: View {
                     selectedTool = borrowedFrom
                 }
             }
+            // Must stay after the borrow observer above, which restores the borrowed tool.
             .onChange(of: paneContext.isFocused) { wasFocused, isFocused in
                 if wasFocused, !isFocused {
                     selectionController.clearSelection()
@@ -101,27 +142,63 @@ struct NoteScreenView: View {
                     app.split.isShowingPaperOptions = false
                 }
             }
-            .modifier(
-                NoteScreenCanvasContentChangeObservers(
-                    model: model,
-                    canvasReference: activeCanvasReference,
-                    pageState: pageState,
-                    thumbnailStore: thumbnailStore,
-                    isShowingThumbnails: isShowingThumbnails,
-                    currentPageRendererContent: currentPageRendererContent
+
+    }
+
+    /// Observers for the ink and elements on the page.
+    private func observingCanvasContent(_ content: some View) -> some View {
+        content
+            .onChange(of: model.drawingData) { _, _ in
+                refreshPageCount(
+                    drawingBounds: activeCanvasReference.canvasView?.drawing.bounds
+                        ?? (try? PKDrawing(data: model.drawingData ?? Data()))?.bounds
                 )
-            )
-            .modifier(
-                NoteScreenPageViewportChangeObservers(
-                    model: model,
-                    canvasReference: activeCanvasReference,
-                    selectionController: selectionController,
-                    pageState: pageState,
-                    thumbnailStore: thumbnailStore,
-                    canvasViewport: canvasViewport,
-                    canvasSize: canvasSize
-                )
-            )
+                thumbnailStore.markDirty()
+            }
+            .onChange(of: model.canvasElements.elements) { _, _ in
+                refreshPageCount()
+                thumbnailStore.markDirty()
+            }
+            .onChange(of: model.note?.backgroundStyle) { _, _ in
+                thumbnailStore.markDirty()
+            }
+    }
+
+    /// Observers for pagination, the viewport, and the appearance the PDF cache
+    /// renders against.
+    private func observingPagination(_ content: some View) -> some View {
+        content
+            .onChange(of: model.note?.pages.map(\.id)) { _, _ in
+                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+                refreshPageCount()
+                thumbnailStore.markDirty()
+                schedulePDFWindowUpdate()
+            }
+            .onChange(of: model.note?.pageGeometry) { _, geometry in
+                pageState.pageGeometry = geometry ?? .a4
+                selectionController.contentWidth = pageState.pageGeometry.contentWidth
+                refreshPageCount()
+                schedulePDFWindowUpdate()
+            }
+            .onChange(of: canvasViewport) { _, _ in
+                pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
+                schedulePDFWindowUpdate()
+            }
+            .onChange(of: canvasSize) { _, _ in
+                pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
+                schedulePDFWindowUpdate()
+            }
+            // initial: true is load-bearing — without it the PDF cache stays in
+            // light mode until the first appearance change, so PDFs render wrong
+            // on a dark-mode launch.
+            .onChange(of: colorScheme, initial: true) { _, newValue in
+                model.pdfCache.setAppearance(isDark: newValue == .dark)
+            }
+    }
+
+    /// Sheets, importers and the error alert.
+    private func presenting(_ content: some View) -> some View {
+        content
             .modifier(
                 NoteScreenActivityPresentationModifiers(
                     model: model,
@@ -150,6 +227,10 @@ struct NoteScreenView: View {
                     onImageImported: selectImportedElement
                 )
             )
+    }
+
+    private func animating(_ content: some View) -> some View {
+        content
             .modifier(
                 NoteScreenAnimationModifiers(
                     model: model,
@@ -769,6 +850,46 @@ struct NoteScreenView: View {
         )
     }
 
+    private func schedulePDFWindowUpdate() {
+        pdfWindowUpdateTask?.cancel()
+        guard !model.pdfBands.isEmpty,
+              canvasSize.width > 0,
+              canvasSize.height > 0,
+              pageState.pageCount > 0 else {
+            return
+        }
+
+        let cache = model.pdfCache
+        let viewport = canvasViewport
+        let viewportSize = canvasSize
+        let pageCount = pageState.pageCount
+        let geometry = pageState.pageGeometry
+        let scale = displayScale
+        pdfWindowUpdateTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(100))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            let visibleRect = viewport.visibleContentRect(viewportSize: viewportSize)
+            let firstBand = geometry.pageIndex(
+                forContentY: visibleRect.minY,
+                pageCount: pageCount
+            )
+            let lastBand = geometry.pageIndex(
+                forContentY: visibleRect.maxY,
+                pageCount: pageCount
+            )
+            cache.updateVisibleWindow(
+                bands: firstBand...lastBand,
+                bucket: viewport.zoomScale > 1.5 ? .zoomed : .fit,
+                displayScale: scale
+            )
+        }
+    }
+
     private var activeTool: (any PKTool)? {
         NoteToolFactory.tool(
             for: selectedTool,
@@ -892,157 +1013,6 @@ struct NoteScreenView: View {
         guard let directory = exportDirectoryToCleanUp else { return }
         try? FileManager.default.removeItem(at: directory)
         exportDirectoryToCleanUp = nil
-    }
-}
-
-private struct NoteScreenPrimaryChangeObservers: ViewModifier {
-    let model: NoteScreenModel
-    let app: VellumAppModel
-    let selectionController: CanvasSelectionController
-    let selectedTool: ToolID
-    let cacheCurrentTool: () -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .onChange(of: selectedTool) { oldValue, newTool in
-                if oldValue == .text, newTool != .text {
-                    model.canvasElements.finishTextEditingSession(matching: nil)
-                }
-                selectionController.toolChanged()
-                cacheCurrentTool()
-            }
-            .onChange(of: app.toolPreferences.preferences) {
-                cacheCurrentTool()
-            }
-            .onChange(of: model.pendingProposals.count) { _, count in
-                if count == 0 {
-                    model.isShowingSuggestions = false
-                }
-            }
-    }
-}
-
-private struct NoteScreenCanvasContentChangeObservers: ViewModifier {
-    let model: NoteScreenModel
-    let canvasReference: NoteCanvasReference
-    let pageState: NotePageState
-    let thumbnailStore: PageThumbnailStore
-    let isShowingThumbnails: Bool
-    let currentPageRendererContent: () -> NotePageRenderer.Content
-
-    func body(content: Content) -> some View {
-        content
-            .onChange(of: model.drawingData) { _, _ in
-                let drawingBounds = canvasReference.canvasView?.drawing.bounds
-                    ?? (try? PKDrawing(data: model.drawingData ?? Data()))?.bounds
-                    ?? .null
-                pageState.updateContent(
-                    drawingBounds: drawingBounds,
-                    elements: model.canvasElements.elements,
-                    minimumFilledPages: model.note?.pages.count ?? 0
-                )
-                thumbnailStore.markDirty()
-            }
-            .onChange(of: model.canvasElements.elements) { _, _ in
-                pageState.updateContent(
-                    drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
-                    elements: model.canvasElements.elements,
-                    minimumFilledPages: model.note?.pages.count ?? 0
-                )
-                thumbnailStore.markDirty()
-            }
-            .onChange(of: model.note?.backgroundStyle) { _, _ in
-                thumbnailStore.markDirty()
-            }
-    }
-}
-
-private struct NoteScreenPageViewportChangeObservers: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.displayScale) private var displayScale
-    @State private var pdfWindowUpdateTask: Task<Void, Never>?
-
-    let model: NoteScreenModel
-    let canvasReference: NoteCanvasReference
-    let selectionController: CanvasSelectionController
-    let pageState: NotePageState
-    let thumbnailStore: PageThumbnailStore
-    let canvasViewport: CanvasViewport
-    let canvasSize: CGSize
-
-    func body(content: Content) -> some View {
-        content
-            .onChange(of: model.note?.pages.map(\.id)) { _, _ in
-                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
-                pageState.updateContent(
-                    drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
-                    elements: model.canvasElements.elements,
-                    minimumFilledPages: model.note?.pages.count ?? 0
-                )
-                thumbnailStore.markDirty()
-                schedulePDFWindowUpdate()
-            }
-            .onChange(of: model.note?.pageGeometry) { _, geometry in
-                pageState.pageGeometry = geometry ?? .a4
-                selectionController.contentWidth = pageState.pageGeometry.contentWidth
-                pageState.updateContent(
-                    drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
-                    elements: model.canvasElements.elements,
-                    minimumFilledPages: model.note?.pages.count ?? 0
-                )
-                schedulePDFWindowUpdate()
-            }
-            .onChange(of: canvasViewport) { _, _ in
-                pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
-                schedulePDFWindowUpdate()
-            }
-            .onChange(of: canvasSize) { _, _ in
-                pageState.updateViewport(canvasViewport, viewportSize: canvasSize)
-                schedulePDFWindowUpdate()
-            }
-            .onChange(of: colorScheme, initial: true) { _, newValue in
-                model.pdfCache.setAppearance(isDark: newValue == .dark)
-            }
-    }
-
-    private func schedulePDFWindowUpdate() {
-        pdfWindowUpdateTask?.cancel()
-        guard !model.pdfBands.isEmpty,
-              canvasSize.width > 0,
-              canvasSize.height > 0,
-              pageState.pageCount > 0 else {
-            return
-        }
-
-        let cache = model.pdfCache
-        let viewport = canvasViewport
-        let viewportSize = canvasSize
-        let pageCount = pageState.pageCount
-        let geometry = pageState.pageGeometry
-        let scale = displayScale
-        pdfWindowUpdateTask = Task { @MainActor in
-            do {
-                try await Task.sleep(for: .milliseconds(100))
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-
-            let visibleRect = viewport.visibleContentRect(viewportSize: viewportSize)
-            let firstBand = geometry.pageIndex(
-                forContentY: visibleRect.minY,
-                pageCount: pageCount
-            )
-            let lastBand = geometry.pageIndex(
-                forContentY: visibleRect.maxY,
-                pageCount: pageCount
-            )
-            cache.updateVisibleWindow(
-                bands: firstBand...lastBand,
-                bucket: viewport.zoomScale > 1.5 ? .zoomed : .fit,
-                displayScale: scale
-            )
-        }
     }
 }
 
