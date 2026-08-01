@@ -2,23 +2,6 @@ import Foundation
 import SwiftUI
 import VellumCore
 
-struct PaneHeaderFrames: Equatable, Sendable {
-    var leftClusterFrame: CGRect
-    var rightClusterFrame: CGRect
-    var topOverlayGlobalFrame: CGRect
-}
-
-struct PaneHeaderFramesKey: PreferenceKey {
-    static let defaultValue: [UUID: PaneHeaderFrames] = [:]
-
-    static func reduce(
-        value: inout [UUID: PaneHeaderFrames],
-        nextValue: () -> [UUID: PaneHeaderFrames]
-    ) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
 @MainActor
 struct NoteSplitContainerView: View {
     @Bindable var app: VellumAppModel
