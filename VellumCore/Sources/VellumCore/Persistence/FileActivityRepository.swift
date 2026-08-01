@@ -25,15 +25,33 @@ public actor FileActivityRepository: ActivityRepository {
                 at: logURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            var log = (try? Data(contentsOf: logURL)) ?? Data()
+            var log = try existingLog(at: logURL)
             if !log.isEmpty, log.last != 0x0A {
                 log.append(0x0A)
             }
             log.append(try FilePersistence.encoder(prettyPrinted: false).encode(event))
             log.append(0x0A)
             try log.write(to: logURL, options: .atomic)
+        } catch let error as VellumError {
+            throw error
         } catch {
             throw VellumError.persistenceFailure("Could not append activity: \(error.localizedDescription)")
+        }
+    }
+
+    /// The history this append has to preserve. An absent log is legitimately empty,
+    /// but a log that is present and unreadable is not: the append rewrites the whole
+    /// file, so treating a failed read as "empty" would replace the user's entire
+    /// activity history with this one event. Refuse the append instead — a lost event
+    /// is recoverable, a wiped log is not.
+    private func existingLog(at url: URL) throws -> Data {
+        guard FileManager.default.fileExists(atPath: url.path) else { return Data() }
+        do {
+            return try Data(contentsOf: url)
+        } catch {
+            throw VellumError.persistenceFailure(
+                "Could not read activity log \(url.path): \(error.localizedDescription)"
+            )
         }
     }
 
