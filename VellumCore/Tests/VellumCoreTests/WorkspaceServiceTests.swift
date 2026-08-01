@@ -371,6 +371,40 @@ func trashLifecycleActivity() async throws {
     try await fixture.service.purgeNote(id: note.id)
     activity = try await fixture.service.activity(noteID: nil)
     #expect(activity.contains { $0.kind.rawValue == ActivityKind.notePurged.rawValue })
+    // The purge event is written after the package is gone, so it lands in the
+    // workspace log — the note-scoped list has to reach it there too.
+    activity = try await fixture.service.activity(noteID: note.id)
+    #expect(activity.map(\.kind.rawValue) == [ActivityKind.notePurged.rawValue])
+}
+
+@Test("Note-scoped listing reaches events appended without a package")
+func activityListedForNoteWithoutPackage() async throws {
+    let root = try TemporaryDirectory.make()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let activity = FileActivityRepository(rootDirectory: root)
+    let noteID = UUID()
+    let otherNoteID = UUID()
+    let events: [(UUID?, ActivityKind)] = [
+        (noteID, .notePurged),
+        (otherNoteID, .notePurged),
+        (nil, .workspaceSeeded),
+    ]
+    for (index, event) in events.enumerated() {
+        try await activity.append(
+            ActivityEvent(
+                id: UUID(),
+                noteID: event.0,
+                createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                kind: event.1,
+                message: "Test"
+            )
+        )
+    }
+
+    let listed = try await activity.list(noteID: noteID)
+
+    #expect(listed.map(\.noteID) == [noteID])
+    #expect(try await activity.list(noteID: nil).count == 3)
 }
 
 @Test("Note summaries expose preview, ink, links, space, and deterministic order")
