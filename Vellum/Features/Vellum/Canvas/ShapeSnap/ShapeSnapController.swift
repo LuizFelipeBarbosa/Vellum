@@ -279,20 +279,12 @@ final class ShapeSnapController {
 
         DispatchQueue.main.async { [weak self] in
             let liveSessionToken = elementsStore.beginLiveSession()
-            elementsStore.mutateDrawingLive { drawing in
-                let currentStrokeCount = drawing.strokes.count
-                guard currentStrokeCount > strokeCountBefore else { return }
-                let appendedStrokeRange = strokeCountBefore..<currentStrokeCount
-                drawing.strokes = drawing.strokes.enumerated().compactMap {
-                    index,
-                    stroke in
-                    if appendedStrokeRange.contains(index),
-                       stroke.renderBounds.intersects(inflatedCaptureBoundingBox) {
-                        return nil
-                    }
-                    return stroke
-                }
-            }
+            // Discard the result: mid-stroke, removing nothing is the ordinary outcome.
+            _ = Self.removeInkReplacedBySnap(
+                inflatedCaptureBoundingBox: inflatedCaptureBoundingBox,
+                strokeCountBeforeInk: strokeCountBefore,
+                elementsStore: elementsStore
+            )
             let element = CanvasElement(
                 content: .shape(builtElement.content),
                 frame: builtElement.frame,
@@ -458,28 +450,16 @@ final class ShapeSnapController {
         )
 
         let liveSessionToken = elementsStore.beginLiveSession()
-        var didRemoveInkedStroke = false
-        elementsStore.mutateDrawingLive { drawing in
-            // Only strokes appended since the dwell can be this stroke's ink. Bounds
-            // alone cannot tell them apart from an older sketch drawn in the same
-            // place — and PencilKit may not have appended anything yet at all.
-            let currentStrokeCount = drawing.strokes.count
-            guard currentStrokeCount > pendingLiftSnap.strokeCountBeforeInk else { return }
-            let appendedStrokeRange = pendingLiftSnap.strokeCountBeforeInk..<currentStrokeCount
-            drawing.strokes = drawing.strokes.enumerated().compactMap { index, stroke in
-                if appendedStrokeRange.contains(index),
-                   stroke.renderBounds.intersects(inflatedCaptureBoundingBox) {
-                    didRemoveInkedStroke = true
-                    return nil
-                }
-                return stroke
-            }
-        }
+        let didRemoveInkedStroke = Self.removeInkReplacedBySnap(
+            inflatedCaptureBoundingBox: inflatedCaptureBoundingBox,
+            strokeCountBeforeInk: pendingLiftSnap.strokeCountBeforeInk,
+            elementsStore: elementsStore
+        )
 
-        // The snapped shape exists to stand in for the ink it replaces. Failing to find
-        // that ink means we cannot say what this shape is standing in for, so inserting
-        // it would leave the user's sketch AND a perfect copy of it stacked on the page.
-        // Drop the snap instead: what the user drew is still there, untouched.
+        // Nothing removed means the stroke has not landed yet (see the note on
+        // removeInkReplacedBySnap). Inserting now would leave the user's sketch AND a
+        // perfect copy of it stacked on the page, so drop the snap instead: what the
+        // user drew is still there, untouched.
         guard didRemoveInkedStroke else { return }
 
         let builtElement = ShapeElementBuilder.element(
@@ -495,6 +475,40 @@ final class ShapeSnapController {
             )
         )
         elementsStore.commitLiveSession(liveSessionToken, label: "Draw Shape")
+    }
+
+    /// Removes the ink a snapped shape stands in for — strokes appended since the dwell
+    /// that fall inside the inflated capture box — and reports whether it removed any.
+    /// Only strokes appended since the dwell can be this stroke's ink; bounds alone
+    /// cannot tell them apart from an older sketch drawn in the same place.
+    ///
+    /// The two callers read "removed nothing" oppositely, which is not visible from here.
+    /// On the lift path PencilKit was never cancelled, so the user's stroke *will* land:
+    /// removing nothing means it has not arrived yet, and committing would duplicate it.
+    /// Mid-stroke, `drawingGestureRecognizer` is disabled before this runs, which cancels
+    /// the in-flight stroke so it never lands at all — there, removing nothing is the
+    /// ordinary outcome and the snap must still commit. Guarding both paths on this
+    /// result disables mid-stroke snapping in the common case.
+    private static func removeInkReplacedBySnap(
+        inflatedCaptureBoundingBox: CGRect,
+        strokeCountBeforeInk: Int,
+        elementsStore: CanvasElementsStore
+    ) -> Bool {
+        var didRemoveInkedStroke = false
+        elementsStore.mutateDrawingLive { drawing in
+            let currentStrokeCount = drawing.strokes.count
+            guard currentStrokeCount > strokeCountBeforeInk else { return }
+            let appendedStrokeRange = strokeCountBeforeInk..<currentStrokeCount
+            drawing.strokes = drawing.strokes.enumerated().compactMap { index, stroke in
+                if appendedStrokeRange.contains(index),
+                   stroke.renderBounds.intersects(inflatedCaptureBoundingBox) {
+                    didRemoveInkedStroke = true
+                    return nil
+                }
+                return stroke
+            }
+        }
+        return didRemoveInkedStroke
     }
 
     private func captureBoundingBox() -> CGRect? {
