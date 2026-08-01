@@ -81,55 +81,18 @@ struct NoteSplitContainerView: View {
                     containerSize: geometry.size
                 )
 
-                if previewGrid.columns.count > 1 {
-                    ForEach(
-                        0..<(previewGrid.columns.count - 1),
-                        id: \.self
-                    ) { dividerIndex in
-                        ColumnDividerView(
-                            app: app,
-                            dividerIndex: dividerIndex,
-                            containerWidth: geometry.size.width
-                        )
-                        .frame(height: geometry.size.height)
-                        .position(
-                            x: previewColumnWidths
-                                .prefix(dividerIndex + 1)
-                                .reduce(0, +),
-                            y: geometry.size.height / 2
-                        )
-                    }
-                }
+                columnDividers(
+                    previewGrid: previewGrid,
+                    columnWidths: previewColumnWidths,
+                    containerSize: geometry.size
+                )
 
-                ForEach(
-                    Array(previewGrid.columns.enumerated()),
-                    id: \.offset
-                ) { columnEntry in
-                    let columnIndex = columnEntry.offset
-                    let column = columnEntry.element
-
-                    if column.rowFractions.count > 1 {
-                        ForEach(
-                            0..<(column.rowFractions.count - 1),
-                            id: \.self
-                        ) { dividerIndex in
-                            RowDividerView(
-                                app: app,
-                                columnIndex: columnIndex,
-                                dividerIndex: dividerIndex,
-                                containerHeight: geometry.size.height
-                            )
-                            .frame(width: previewColumnWidths[columnIndex])
-                            .position(
-                                x: previewColumnWidths.prefix(columnIndex).reduce(0, +)
-                                    + previewColumnWidths[columnIndex] / 2,
-                                y: previewRowHeights[columnIndex]
-                                    .prefix(dividerIndex + 1)
-                                    .reduce(0, +)
-                            )
-                        }
-                    }
-                }
+                rowDividers(
+                    previewGrid: previewGrid,
+                    columnWidths: previewColumnWidths,
+                    rowHeights: previewRowHeights,
+                    containerSize: geometry.size
+                )
 
                 DockableToolbarContainer(
                     store: app.toolPreferences,
@@ -356,6 +319,76 @@ struct NoteSplitContainerView: View {
                 height: containerSize.height,
                 alignment: .leading
             )
+        }
+    }
+
+    /// Drag handles on the seams between columns. They sit on the *preview*
+    /// grid so they travel with the panes while a drop is being previewed.
+    @ViewBuilder
+    private func columnDividers(
+        previewGrid: SplitGridSnapshot,
+        columnWidths: [CGFloat],
+        containerSize: CGSize
+    ) -> some View {
+        if previewGrid.columns.count > 1 {
+            ForEach(
+                0..<(previewGrid.columns.count - 1),
+                id: \.self
+            ) { dividerIndex in
+                ColumnDividerView(
+                    app: app,
+                    dividerIndex: dividerIndex,
+                    containerWidth: containerSize.width
+                )
+                .frame(height: containerSize.height)
+                .position(
+                    x: SplitContainerLayout.columnDividerX(
+                        columnWidths: columnWidths,
+                        dividerIndex: dividerIndex
+                    ),
+                    y: containerSize.height / 2
+                )
+            }
+        }
+    }
+
+    /// Drag handles on the seams between the rows of each column.
+    @ViewBuilder
+    private func rowDividers(
+        previewGrid: SplitGridSnapshot,
+        columnWidths: [CGFloat],
+        rowHeights: [[CGFloat]],
+        containerSize: CGSize
+    ) -> some View {
+        ForEach(
+            Array(previewGrid.columns.enumerated()),
+            id: \.offset
+        ) { columnEntry in
+            let columnIndex = columnEntry.offset
+            let column = columnEntry.element
+
+            if column.rowFractions.count > 1 {
+                ForEach(
+                    0..<(column.rowFractions.count - 1),
+                    id: \.self
+                ) { dividerIndex in
+                    RowDividerView(
+                        app: app,
+                        columnIndex: columnIndex,
+                        dividerIndex: dividerIndex,
+                        containerHeight: containerSize.height
+                    )
+                    .frame(width: columnWidths[columnIndex])
+                    .position(
+                        SplitContainerLayout.rowDividerCenter(
+                            columnWidths: columnWidths,
+                            rowHeights: rowHeights,
+                            columnIndex: columnIndex,
+                            dividerIndex: dividerIndex
+                        )
+                    )
+                }
+            }
         }
     }
 

@@ -35,6 +35,32 @@ enum SplitContainerLayout {
     static let sidebarCancelZoneMaxX: CGFloat =
         sidebarOuterPadding + sidebarWidth + sidebarOuterPadding
 
+    /// The seam between column `dividerIndex` and the one after it.
+    static func columnDividerX(
+        columnWidths: [CGFloat],
+        dividerIndex: Int
+    ) -> CGFloat {
+        columnWidths.prefix(dividerIndex + 1).reduce(0, +)
+    }
+
+    /// The seam between row `dividerIndex` and the one after it, centred in its
+    /// own column.
+    static func rowDividerCenter(
+        columnWidths: [CGFloat],
+        rowHeights: [[CGFloat]],
+        columnIndex: Int,
+        dividerIndex: Int
+    ) -> CGPoint {
+        let leadingWidth: CGFloat = columnWidths.prefix(columnIndex).reduce(0, +)
+        let stackedHeight: CGFloat = rowHeights[columnIndex]
+            .prefix(dividerIndex + 1)
+            .reduce(0, +)
+        return CGPoint(
+            x: leadingWidth + columnWidths[columnIndex] / 2,
+            y: stackedHeight
+        )
+    }
+
     static func panePreviewTransform(
         at index: PaneIndex,
         target: SplitGridDropTarget?,
