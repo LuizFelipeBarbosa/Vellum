@@ -66,7 +66,7 @@ final class NoteExporterTests: XCTestCase {
     }
 
     func testPDFBackedPageWithoutInkExportsAsOnePDFPage() throws {
-        let pdfDocument = try makeSolidPDFDocument(
+        let pdfDocument = try PixelComparison.makeSolidPDFDocument(
             color: .blue,
             size: CGSize(width: 320, height: 320)
         )
@@ -186,7 +186,7 @@ final class NoteExporterTests: XCTestCase {
             drawing: PKDrawing(),
             elements: [offPageElement, inRangeElement],
             imagesByAssetPath: [
-                presentAssetPath: solidImage(
+                presentAssetPath: PixelComparison.solidImage(
                     color: .red,
                     size: CGSize(width: 100, height: 100)
                 ),
@@ -274,7 +274,7 @@ final class NoteExporterTests: XCTestCase {
             drawing: PKDrawing(),
             elements: [element],
             imagesByAssetPath: [
-                assetPath: solidImage(color: .red, size: CGSize(width: 300, height: 40)),
+                assetPath: PixelComparison.solidImage(color: .red, size: CGSize(width: 300, height: 40)),
             ],
             pageCount: 1
         )
@@ -331,7 +331,7 @@ final class NoteExporterTests: XCTestCase {
         XCTAssertGreaterThan(element.effectiveBoundingBox.maxY, PageGeometry.a4.pageHeight)
         XCTAssertEqual(output.urls.count, 2)
 
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: XCTUnwrap(UIImage(contentsOfFile: output.urls[1].path))
         )
         let referenceContent = NotePageRenderer.Content(
@@ -340,7 +340,7 @@ final class NoteExporterTests: XCTestCase {
             imagesByAssetPath: [:],
             pageCount: 2
         )
-        let reference = try pixelBuffer(
+        let reference = try PixelComparison.pixelBuffer(
             for: NotePageRenderer.image(
                 pageIndex: 1,
                 content: referenceContent,
@@ -356,7 +356,7 @@ final class NoteExporterTests: XCTestCase {
             .offsetBy(dx: 0, dy: -PageGeometry.a4.pageHeight)
 
         XCTAssertGreaterThan(
-            differingPixelCount(rendered, reference, in: pageLocalOverlap),
+            PixelComparison.differingPixelCount(rendered, reference, in: pageLocalOverlap),
             0
         )
     }
@@ -454,103 +454,12 @@ final class NoteExporterTests: XCTestCase {
             drawing: PKDrawing(strokes: [stroke]),
             elements: [textElement, imageElement],
             imagesByAssetPath: [
-                assetPath: solidImage(color: .red, size: CGSize(width: 8, height: 4)),
+                assetPath: PixelComparison.solidImage(color: .red, size: CGSize(width: 8, height: 4)),
             ],
             pageCount: 4
         )
     }
 
-
-    private func solidImage(color: UIColor, size: CGSize) -> UIImage {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        return UIGraphicsImageRenderer(size: size, format: format).image { context in
-            color.setFill()
-            context.fill(CGRect(origin: .zero, size: size))
-        }
-    }
-
-    private func makeSolidPDFDocument(
-        color: UIColor,
-        size: CGSize
-    ) throws -> PDFDocument {
-        let bounds = CGRect(origin: .zero, size: size)
-        let data = UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
-            context.beginPage()
-            context.cgContext.setFillColor(color.cgColor)
-            context.cgContext.fill(bounds)
-        }
-        return try XCTUnwrap(PDFDocument(data: data))
-    }
-
-    private func pixelBuffer(for image: UIImage) throws -> PixelBuffer {
-        let cgImage = try XCTUnwrap(image.cgImage)
-        var bytes = [UInt8](repeating: 0, count: cgImage.width * cgImage.height * 4)
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-            | CGBitmapInfo.byteOrder32Big.rawValue
-        let context = try XCTUnwrap(
-            CGContext(
-                data: &bytes,
-                width: cgImage.width,
-                height: cgImage.height,
-                bitsPerComponent: 8,
-                bytesPerRow: cgImage.width * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: bitmapInfo
-            )
-        )
-        context.draw(
-            cgImage,
-            in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height)
-        )
-        return PixelBuffer(width: cgImage.width, height: cgImage.height, bytes: bytes)
-    }
-
-    private func differingPixelCount(
-        _ lhs: PixelBuffer,
-        _ rhs: PixelBuffer,
-        in contentRect: CGRect
-    ) -> Int {
-        XCTAssertEqual(lhs.width, rhs.width)
-        XCTAssertEqual(lhs.height, rhs.height)
-
-        let minX = max(
-            0,
-            Int(floor(contentRect.minX / PageLayout.portraitContentWidth * CGFloat(lhs.width)))
-        )
-        let maxX = min(
-            lhs.width,
-            Int(ceil(contentRect.maxX / PageLayout.portraitContentWidth * CGFloat(lhs.width)))
-        )
-        let minY = max(
-            0,
-            Int(floor(contentRect.minY / PageGeometry.a4.pageHeight * CGFloat(lhs.height)))
-        )
-        let maxY = min(
-            lhs.height,
-            Int(ceil(contentRect.maxY / PageGeometry.a4.pageHeight * CGFloat(lhs.height)))
-        )
-
-        var count = 0
-        for y in minY..<maxY {
-            for x in minX..<maxX where lhs.pixel(x: x, y: y).differs(
-                from: rhs.pixel(x: x, y: y)
-            ) {
-                count += 1
-            }
-        }
-        return count
-    }
-
-    private func cgRect(_ rect: CanvasRect) -> CGRect {
-        CGRect(
-            x: CGFloat(rect.x),
-            y: CGFloat(rect.y),
-            width: CGFloat(rect.width),
-            height: CGFloat(rect.height)
-        )
-    }
 
     private func assertOutputDirectory(
         _ output: NoteExporter.Output,
@@ -585,35 +494,5 @@ final class NoteExporterTests: XCTestCase {
             .map(\.lastPathComponent)
             .filter { $0.hasPrefix("VellumExport-") }
         )
-    }
-
-    private struct PixelBuffer {
-        let width: Int
-        let height: Int
-        let bytes: [UInt8]
-
-        func pixel(x: Int, y: Int) -> Pixel {
-            let offset = (y * width + x) * 4
-            return Pixel(
-                red: bytes[offset],
-                green: bytes[offset + 1],
-                blue: bytes[offset + 2],
-                alpha: bytes[offset + 3]
-            )
-        }
-    }
-
-    private struct Pixel {
-        let red: UInt8
-        let green: UInt8
-        let blue: UInt8
-        let alpha: UInt8
-
-        func differs(from other: Pixel) -> Bool {
-            abs(Int(red) - Int(other.red)) > 4
-                || abs(Int(green) - Int(other.green)) > 4
-                || abs(Int(blue) - Int(other.blue)) > 4
-                || abs(Int(alpha) - Int(other.alpha)) > 4
-        }
     }
 }
