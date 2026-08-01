@@ -62,21 +62,14 @@ struct NoteScreenView: View {
                 ]
             )
             .background(VellumTheme.paper)
-            .modifier(
-                NoteScreenLifecycleModifiers(
-                    model: model,
-                    app: app,
-                    canvasReference: activeCanvasReference,
-                    paneUndoManager: paneContext.pane.undoManager,
-                    selectionController: selectionController,
-                    shapeSnapController: shapeSnapController,
-                    pageState: pageState,
-                    thumbnailStore: thumbnailStore,
-                    currentVisibleContentRect: { currentVisibleContentRect },
-                    cacheCurrentTool: cacheCurrentTool,
-                    scrollCanvas: scrollCanvas
-                )
-            )
+            .task { await establishCanvasWiring() }
+            .onDisappear {
+                // The only thing breaking the model -> closure -> model cycle.
+                model.onScrollToPage = nil
+                model.hasHiddenSelectionStrokes = nil
+                model.onPageOrientationChanged = nil
+                model.onOrientationFlipped = nil
+            }
             .modifier(
                 NoteScreenPrimaryChangeObservers(
                     model: model,
@@ -332,12 +325,7 @@ struct NoteScreenView: View {
                     drawingData: model.drawingData,
                     onDrawingChanged: { data in
                         model.drawingChanged(data)
-                        pageState.updateContent(
-                            drawingBounds: activeCanvasReference.canvasView?.drawing.bounds
-                                ?? .null,
-                            elements: model.canvasElements.elements,
-                            minimumFilledPages: model.note?.pages.count ?? 0
-                        )
+                        refreshPageCount()
                     },
                     isTransparent: true,
                     tool: activeTool,
@@ -356,12 +344,7 @@ struct NoteScreenView: View {
                     onViewportChanged: { canvasViewport = $0 },
                     onExternalDrawingChange: {
                         selectionController.externalDrawingDidChange()
-                        pageState.updateContent(
-                            drawingBounds: activeCanvasReference.canvasView?.drawing.bounds
-                                ?? .null,
-                            elements: model.canvasElements.elements,
-                            minimumFilledPages: model.note?.pages.count ?? 0
-                        )
+                        refreshPageCount()
                     },
                     onPencilSqueeze: { phase in
                         switch phase {
@@ -599,6 +582,135 @@ struct NoteScreenView: View {
         }
     }
 
+    /// Wires the canvas, selection and snap controllers to the model, loads the
+    /// note, then adopts its page geometry.
+    ///
+    /// Ordering here is load-bearing in three ways, and none of it is covered by
+    /// a test:
+    ///
+    /// - Every consumer is wired before any callback can fire.
+    /// - `pageState.pageGeometry` is set before `selectionController.contentWidth`
+    ///   reads it, and `canvasElements.canvasReference` before its undo override.
+    /// - The geometry/width/page-count adoption at the end must stay *after*
+    ///   `model.load()`, which is what populates `model.note`. Hoisting it renders
+    ///   a landscape or PDF note at A4 on first paint.
+    private func establishCanvasWiring() async {
+        // Local bindings, not members: the closures below capture some of these
+        // weakly, and `[weak selectionController]` on a member would silently
+        // capture self instead — pinning the view struct, and through it the pane,
+        // its UndoManager and the PKCanvasView, for as long as the model holds the
+        // closure. Closed panes would never deallocate.
+        let model = self.model
+        let app = self.app
+        let canvasReference = self.activeCanvasReference
+        let selectionController = self.selectionController
+        let shapeSnapController = self.shapeSnapController
+        let pageState = self.pageState
+        let thumbnailStore = self.thumbnailStore
+
+        cacheCurrentTool()
+        pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+        selectionController.contentWidth = pageState.pageGeometry.contentWidth
+        model.canvasElements.canvasReference = canvasReference
+        model.canvasElements.undoManagerOverride = paneContext.pane.undoManager
+        selectionController.canvasReference = canvasReference
+        selectionController.elementsStore = model.canvasElements
+        model.hasHiddenSelectionStrokes = { [weak selectionController] in
+            selectionController?.hasHiddenStrokes ?? false
+        }
+        shapeSnapController.canvasReference = canvasReference
+        shapeSnapController.elementsStore = model.canvasElements
+        model.canvasElements.onSnapshotApplied = { [weak selectionController] in
+            selectionController?.externalDrawingDidChange()
+        }
+        model.onScrollToPage = { index in
+            refreshPageCount()
+            Task { @MainActor in
+                await Task.yield()
+                scrollCanvas(toPageIndex: index)
+            }
+        }
+        model.onPageOrientationChanged = {
+            thumbnailStore.markDirty()
+        }
+        model.onOrientationFlipped = { contentY in
+            Task { @MainActor in
+                await Task.yield()
+                guard let canvas = canvasReference.canvasView as? PagedCanvasView else {
+                    return
+                }
+                let offsetY = PageLayout.anchoredOffsetY(
+                    visibleCenterContentY: contentY,
+                    scale: canvas.zoomScale,
+                    viewportHeight: canvas.bounds.height,
+                    contentHeight: canvas.contentHeightInContentSpace,
+                    minimumOffsetY: -canvas.topContentInset
+                )
+                canvas.setContentOffset(
+                    CGPoint(x: canvas.contentOffset.x, y: offsetY),
+                    animated: false
+                )
+            }
+        }
+        // One closure, assigned to both controllers, so the two snap paths can
+        // never disagree about the lattice.
+        let resolveSnapGrid = { [weak model, weak pageState] (point: CGPoint) -> ShapeSnapGrid? in
+            guard let model, let pageState, let note = model.note else { return nil }
+            let geometry = pageState.pageGeometry
+            let pageIndex = geometry.pageIndex(
+                forContentY: point.y,
+                pageCount: pageState.pageCount
+            )
+            // A PDF page draws no pattern, so there is no lattice to align to there.
+            guard !model.pdfBands.contains(pageIndex) else { return nil }
+            return ShapeGridSnapper.grid(
+                for: note.backgroundStyle,
+                pageRect: geometry.pageRect(index: pageIndex)
+            )
+        }
+        selectionController.snapGrid = resolveSnapGrid
+        shapeSnapController.snapGrid = resolveSnapGrid
+        selectionController.persistImageData = { [weak model] data in
+            await model?.persistPastedImageData(data)
+        }
+        selectionController.importSystemImage = { [weak model] data, target in
+            await model?.importImage(
+                data,
+                visibleContentRect: currentVisibleContentRect,
+                centeredAt: target
+            )
+        }
+        selectionController.onOperationFailed = { [weak model] message in
+            model?.errorMessage = message
+        }
+        cacheCurrentTool()
+        if model.note == nil {
+            await model.load()
+            if let message = model.pdfLoadFailureMessage {
+                app.showToast(message, actionLabel: "Retry") { [weak model] in
+                    Task { await model?.retryPDFLoad() }
+                }
+            }
+        }
+        pageState.pageGeometry = model.note?.pageGeometry ?? .a4
+        selectionController.contentWidth = pageState.pageGeometry.contentWidth
+        refreshPageCount()
+    }
+
+    /// Re-derives the page count from whatever is currently on the canvas.
+    ///
+    /// `drawingBounds` defaults to the live canvas. Only the persisted-drawing
+    /// observer supplies its own, because it can fire while the canvas is still nil.
+    private func refreshPageCount(drawingBounds: CGRect? = nil) {
+        pageState.updateContent(
+            drawingBounds: drawingBounds
+                ?? activeCanvasReference.canvasView?.drawing.bounds
+                ?? .null,
+            elements: model.canvasElements.elements,
+            minimumFilledPages: model.note?.pages.count ?? 0
+        )
+    }
+
     private var activeTool: (any PKTool)? {
         NoteToolFactory.tool(
             for: selectedTool,
@@ -722,127 +834,6 @@ struct NoteScreenView: View {
         guard let directory = exportDirectoryToCleanUp else { return }
         try? FileManager.default.removeItem(at: directory)
         exportDirectoryToCleanUp = nil
-    }
-}
-
-private struct NoteScreenLifecycleModifiers: ViewModifier {
-    let model: NoteScreenModel
-    let app: VellumAppModel
-    let canvasReference: NoteCanvasReference
-    let paneUndoManager: UndoManager?
-    let selectionController: CanvasSelectionController
-    let shapeSnapController: ShapeSnapController
-    let pageState: NotePageState
-    let thumbnailStore: PageThumbnailStore
-    let currentVisibleContentRect: () -> CGRect
-    let cacheCurrentTool: () -> Void
-    let scrollCanvas: (Int) -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .task {
-                cacheCurrentTool()
-                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
-                selectionController.contentWidth = pageState.pageGeometry.contentWidth
-                model.canvasElements.canvasReference = canvasReference
-                if let paneUndoManager {
-                    model.canvasElements.undoManagerOverride = paneUndoManager
-                }
-                selectionController.canvasReference = canvasReference
-                selectionController.elementsStore = model.canvasElements
-                model.hasHiddenSelectionStrokes = { [weak selectionController] in
-                    selectionController?.hasHiddenStrokes ?? false
-                }
-                shapeSnapController.canvasReference = canvasReference
-                shapeSnapController.elementsStore = model.canvasElements
-                model.canvasElements.onSnapshotApplied = { [weak selectionController] in
-                    selectionController?.externalDrawingDidChange()
-                }
-                model.onScrollToPage = { index in
-                    pageState.updateContent(
-                        drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
-                        elements: model.canvasElements.elements,
-                        minimumFilledPages: model.note?.pages.count ?? 0
-                    )
-                    Task { @MainActor in
-                        await Task.yield()
-                        scrollCanvas(index)
-                    }
-                }
-                model.onPageOrientationChanged = {
-                    thumbnailStore.markDirty()
-                }
-                model.onOrientationFlipped = { contentY in
-                    Task { @MainActor in
-                        await Task.yield()
-                        guard let canvas = canvasReference.canvasView as? PagedCanvasView else {
-                            return
-                        }
-                        let offsetY = PageLayout.anchoredOffsetY(
-                            visibleCenterContentY: contentY,
-                            scale: canvas.zoomScale,
-                            viewportHeight: canvas.bounds.height,
-                            contentHeight: canvas.contentHeightInContentSpace,
-                            minimumOffsetY: -canvas.topContentInset
-                        )
-                        canvas.setContentOffset(
-                            CGPoint(x: canvas.contentOffset.x, y: offsetY),
-                            animated: false
-                        )
-                    }
-                }
-                let resolveSnapGrid = { [weak model, weak pageState] (point: CGPoint) -> ShapeSnapGrid? in
-                    guard let model, let pageState, let note = model.note else { return nil }
-                    let geometry = pageState.pageGeometry
-                    let pageIndex = geometry.pageIndex(
-                        forContentY: point.y,
-                        pageCount: pageState.pageCount
-                    )
-                    // A PDF page draws no pattern, so there is no lattice to align to there.
-                    guard !model.pdfBands.contains(pageIndex) else { return nil }
-                    return ShapeGridSnapper.grid(
-                        for: note.backgroundStyle,
-                        pageRect: geometry.pageRect(index: pageIndex)
-                    )
-                }
-                selectionController.snapGrid = resolveSnapGrid
-                shapeSnapController.snapGrid = resolveSnapGrid
-                selectionController.persistImageData = { [weak model] data in
-                    await model?.persistPastedImageData(data)
-                }
-                selectionController.importSystemImage = { [weak model] data, target in
-                    await model?.importImage(
-                        data,
-                        visibleContentRect: currentVisibleContentRect(),
-                        centeredAt: target
-                    )
-                }
-                selectionController.onOperationFailed = { [weak model] message in
-                    model?.errorMessage = message
-                }
-                cacheCurrentTool()
-                if model.note == nil {
-                    await model.load()
-                    if let message = model.pdfLoadFailureMessage {
-                        app.showToast(message, actionLabel: "Retry") { [weak model] in
-                            Task { await model?.retryPDFLoad() }
-                        }
-                    }
-                }
-                pageState.pageGeometry = model.note?.pageGeometry ?? .a4
-                selectionController.contentWidth = pageState.pageGeometry.contentWidth
-                pageState.updateContent(
-                    drawingBounds: canvasReference.canvasView?.drawing.bounds ?? .null,
-                    elements: model.canvasElements.elements,
-                    minimumFilledPages: model.note?.pages.count ?? 0
-                )
-            }
-            .onDisappear {
-                model.onScrollToPage = nil
-                model.hasHiddenSelectionStrokes = nil
-                model.onPageOrientationChanged = nil
-                model.onOrientationFlipped = nil
-            }
     }
 }
 
