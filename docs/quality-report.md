@@ -9,6 +9,36 @@ claims were then re-verified by hand, and **two did not survive** — see
 Status legend: **FIXED** = landed on `chore/quality-audit-slop-removal`.
 **OPEN** = real, not yet acted on. **REJECTED** = investigated, not a defect.
 
+## What landed
+
+| | |
+|---|---|
+| Production code | ~27.7k → ~26.5k lines |
+| Test code | ~28.8k → ~27.4k lines |
+| Files removed | 8 |
+| Real defects fixed | 3 (atomic note writes, activity-log clobber, `+infinity` trap) |
+| Behavior regressions caught and reverted | 1 |
+| Audit findings that did not survive verification | 5 |
+
+Test counts moved from 370 / 379 / 47 to **353 / 364 / 43** (VellumCore /
+VellumUITests / VellumFlowUITests). Every deletion is accounted for: 10 tests
+covering deleted unreachable APIs, 2 with the SplitSpike harness, 2 with
+`RotationViewportSyncUITests`, and 26 collapsed into table-driven cases without
+losing a distinct scenario.
+
+Final verification, full run of all three suites:
+
+```
+VellumCore        353 tests, 14 suites   0 failures
+VellumUITests     364 tests              0 failures
+VellumFlowUITests  43 tests, 2 skipped   1 failure
+```
+
+That one failure is `ShapeRecognitionFlowUITests.testDraggingASelectedShapeSettlesItOnThePageLattice`,
+which fails deterministically on unmodified `main` and is recorded as the known
+baseline failure in `docs/quality-baseline.md`. Exactly-that-one-failure is the
+green condition, and it is met.
+
 ---
 
 ## The headline: this codebase is not typical LLM slop
@@ -22,9 +52,11 @@ rationale writing. There was no redundant-comment cleanup to do.
 Discipline is high in places that usually rot first:
 
 - **Concurrency.** `SWIFT_STRICT_CONCURRENCY: complete` with **zero**
-  `nonisolated`, **zero** `@preconcurrency`, zero `@unchecked Sendable` outside
-  one documented render-snapshot idiom. MainActor app, actor core, `Sendable`
-  values across the boundary.
+  `@preconcurrency` and no `@unchecked Sendable` outside one documented
+  render-snapshot idiom. MainActor app, actor core, `Sendable` values across the
+  boundary. (Correction: the audit reported zero `nonisolated`; there are two,
+  one of which this cleanup introduced on `StrokeEditing`, a pure-function
+  namespace. Both are legitimate.)
 - **State.** `@Observable` only — zero `ObservableObject`, `@Published`,
   `@StateObject`, `@ObservedObject`, `@EnvironmentObject` anywhere.
 - **Core purity.** All 52 files in `VellumCore/Sources/` import only `Foundation`
@@ -351,6 +383,28 @@ a matching `waitForExistence`.
 Also corrected: `.gitignore` and git hygiene are clean (an assumed problem that
 did not exist); `TheBrain.xcodeproj/` is untracked, so removing it is local-disk
 cleanup, not a commit; and `VellumUITests` has 379 test functions, not 411.
+
+**4. The eight single-use `ViewModifier` structs in `NoteScreenView` were not
+pure slop.** They looked like textbook over-abstraction: eight types, each
+applied exactly once, each re-declaring 4–10 stored properties purely to
+re-plumb state already in scope. The plan was to dissolve them into a flat
+~45-line `body` reading top-to-bottom.
+
+Measured, that flat chain costs **8699ms** to type-check — 40× the 212ms it
+replaced. The structs were solving a real problem; what was wrong was the
+*arbitrary grouping* (two `.onChange` handlers were left inline doing the same
+job as the extracted "ChangeObservers") and the re-plumbing.
+
+The fix keeps six seams but as **private methods returning `some View`** — an
+identical inference barrier to a `ViewModifier`'s `body`, with zero re-plumbing,
+because a method on the view can read the view's `private` state directly. Result:
+`NoteScreenView` 1436→1061 lines, and both `body` and `canvasArea` dropped off
+the >150ms list entirely (from 212ms and 190ms). The cost of a flat `body` is
+paid in one place; the benefit of the seams is kept.
+
+**5. `vellum-split-state` is parsed by two flow-test files, not three.**
+`VellumUITests/NoteSplitStateTests.swift` matches on `grid:` but is testing
+`NoteSplitState` resolution, not the readout string.
 
 **The measured type-checker baseline refuted a planning assumption too.**
 `NoteScreenView.canvasArea` was assumed to be the heaviest expression in the
