@@ -509,6 +509,17 @@ struct NoteSplitContainerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    // MARK: - Sidebar drag state machine
+    //
+    // Begin, move, end, commit, return-to-origin and reset are one machine.
+    // They share the dragID re-entrancy guard and the withAnimation completion
+    // handlers that decide when a session is really over, and they are the only
+    // writers of dragSession, dragHaptics and isShowingNoteSidebar -- all of
+    // which are private to this view. Splitting them across files would widen
+    // that state to internal and make the reader change files mid-transition,
+    // and it would buy nothing: this is plain imperative Swift with no
+    // type-checker cost.
+
     private func beginSidebarDrag(
         noteID: UUID,
         title: String,
