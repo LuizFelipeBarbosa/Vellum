@@ -17,36 +17,6 @@ final class CanvasElementsStore {
         let elements: [CanvasElement]
         let noteShape: NoteShape?
         let pages: [NotePage]?
-
-        static func == (lhs: Snapshot, rhs: Snapshot) -> Bool {
-            lhs.drawingData == rhs.drawingData
-                && lhs.elements == rhs.elements
-                && lhs.noteShape == rhs.noteShape
-                && pagesEqual(lhs.pages, rhs.pages)
-        }
-
-        private static func pagesEqual(
-            _ lhs: [NotePage]?,
-            _ rhs: [NotePage]?
-        ) -> Bool {
-            switch (lhs, rhs) {
-            case (nil, nil):
-                return true
-            case (.some(let lhs), .some(let rhs)):
-                guard lhs.count == rhs.count else { return false }
-                return zip(lhs, rhs).allSatisfy { lhsPage, rhsPage in
-                    lhsPage.id == rhsPage.id
-                        && lhsPage.order == rhsPage.order
-                        && lhsPage.plainText == rhsPage.plainText
-                        && lhsPage.drawingAssetPath == rhsPage.drawingAssetPath
-                        && lhsPage.background == rhsPage.background
-                        && lhsPage.pdfPage == rhsPage.pdfPage
-                        && lhsPage.elements == rhsPage.elements
-                }
-            default:
-                return false
-            }
-        }
     }
 
     private(set) var elements: [CanvasElement] = []
