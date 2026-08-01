@@ -76,12 +76,12 @@ public enum ToolbarDockPolicy {
         let releaseY = finite(releaseCenter.y, fallback: geometry.height / 2)
 
         var edge = ToolbarDockEdge.bottom
-        var shortestDistance = distance(releaseY, geometry.bottomEdge)
+        var shortestDistance = abs(releaseY - geometry.bottomEdge)
 
         let candidates: [(ToolbarDockEdge, CGFloat)] = [
-            (.top, distance(releaseY, geometry.top)),
-            (.left, distance(releaseX, geometry.leading)),
-            (.right, distance(releaseX, geometry.trailingEdge)),
+            (.top, abs(releaseY - geometry.top)),
+            (.left, abs(releaseX - geometry.leading)),
+            (.right, abs(releaseX - geometry.trailingEdge)),
         ]
         for candidate in candidates where candidate.1 < shortestDistance {
             edge = candidate.0
@@ -128,10 +128,8 @@ public enum ToolbarDockPolicy {
             insets: insets,
             edgeMargin: edgeMargin
         )
-        let fraction = clampedUnitValue(placement.fraction)
-
         let horizontalCenter = concreteCoordinate(
-            fraction: fraction,
+            fraction: placement.fraction,
             length: geometry.width,
             startInset: geometry.leading,
             endInset: geometry.trailing,
@@ -139,7 +137,7 @@ public enum ToolbarDockPolicy {
             margin: geometry.margin
         )
         let verticalCenter = concreteCoordinate(
-            fraction: fraction,
+            fraction: placement.fraction,
             length: geometry.height,
             startInset: geometry.top,
             endInset: geometry.bottom,
@@ -199,6 +197,8 @@ public enum ToolbarDockPolicy {
         }
     }
 
+    /// `coordinate` is expected finite: both callers pass a release point that
+    /// `nearestPlacement` has already made finite.
     private static func clampedFraction(
         coordinate: CGFloat,
         length: CGFloat,
@@ -218,10 +218,8 @@ public enum ToolbarDockPolicy {
             return 0.5
         }
 
-        let safeCoordinate = finite(coordinate, fallback: length / 2)
-        let clampedCoordinate = min(max(safeCoordinate, bounds.lowerBound), bounds.upperBound)
-        let fraction = clampedCoordinate / length
-        return fraction.isFinite ? clampedUnitValue(fraction) : 0.5
+        let clampedCoordinate = min(max(coordinate, bounds.lowerBound), bounds.upperBound)
+        return clampedUnitValue(clampedCoordinate / length)
     }
 
     private static func concreteCoordinate(
@@ -274,14 +272,13 @@ public enum ToolbarDockPolicy {
         toolbarLength: CGFloat,
         margin: CGFloat
     ) -> ClosedRange<CGFloat>? {
+        // Every input is finite and non-negative (`Geometry.init`), so `insetLength` and
+        // `end` can only leave the finite range downward and `start` only upward — each
+        // of which the comparisons below already reject.
         let insetLength = length - startInset - endInset
         let start = startInset + margin + toolbarLength / 2
         let end = length - endInset - margin - toolbarLength / 2
-        guard insetLength.isFinite,
-              insetLength > minimumAxisLength,
-              start.isFinite,
-              end.isFinite,
-              start <= end else {
+        guard insetLength > minimumAxisLength, start <= end else {
             return nil
         }
         return start...end
@@ -290,11 +287,6 @@ public enum ToolbarDockPolicy {
     private static func clampedUnitValue(_ value: CGFloat) -> CGFloat {
         guard value.isFinite else { return 0.5 }
         return min(max(value, 0), 1)
-    }
-
-    private static func distance(_ first: CGFloat, _ second: CGFloat) -> CGFloat {
-        let result = abs(first - second)
-        return result.isFinite ? result : .greatestFiniteMagnitude
     }
 
     private static func finite(_ value: CGFloat, fallback: CGFloat) -> CGFloat {
