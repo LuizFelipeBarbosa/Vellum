@@ -216,45 +216,22 @@ struct NoteSplitContainerView: View {
                         ) { paneEntry in
                             let rowIndex = paneEntry.offset
                             let pane = paneEntry.element
-                            let paneID = pane.id
-                            let paneIndex = PaneIndex(
-                                column: columnIndex,
-                                row: rowIndex
-                            )
-                            let transform = SplitContainerLayout.panePreviewTransform(
-                                at: paneIndex,
-                                target: previewTarget,
-                                committedGrid: committedGrid,
-                                previewGrid: previewGrid,
-                                containerSize: containerSize
-                            )
 
-                            NoteScreenView(
-                                model: pane.noteModel,
-                                app: app,
-                                paneContext: PaneContext(
-                                    pane: pane,
-                                    isFocused: app.split.focusedPaneID == paneID,
-                                    paneSize: CGSize(
-                                        width: columnWidths[columnIndex],
-                                        height: rowHeights[columnIndex][rowIndex]
-                                    ),
-                                    paneCount: panes.count,
-                                    canvasGeneration: pane.canvasGeneration
+                            paneCell(
+                                pane: pane,
+                                paneCount: panes.count,
+                                paneSize: CGSize(
+                                    width: columnWidths[columnIndex],
+                                    height: rowHeights[columnIndex][rowIndex]
+                                ),
+                                transform: SplitContainerLayout.panePreviewTransform(
+                                    at: PaneIndex(column: columnIndex, row: rowIndex),
+                                    target: previewTarget,
+                                    committedGrid: committedGrid,
+                                    previewGrid: previewGrid,
+                                    containerSize: containerSize
                                 )
                             )
-                            .frame(
-                                width: columnWidths[columnIndex],
-                                height: rowHeights[columnIndex][rowIndex]
-                            )
-                            .clipped()
-                            .geometryGroup()
-                            .scaleEffect(
-                                x: transform.scale.width,
-                                y: transform.scale.height,
-                                anchor: .topLeading
-                            )
-                            .offset(transform.offset)
                         }
                     }
                     .frame(
@@ -340,6 +317,36 @@ struct NoteSplitContainerView: View {
                 }
             }
         }
+    }
+
+    /// One pane at its committed size, carrying the scale and offset that walk
+    /// it toward its previewed slot while a drop is in flight.
+    private func paneCell(
+        pane: NotePane,
+        paneCount: Int,
+        paneSize: CGSize,
+        transform: PanePreviewTransform
+    ) -> some View {
+        NoteScreenView(
+            model: pane.noteModel,
+            app: app,
+            paneContext: PaneContext(
+                pane: pane,
+                isFocused: app.split.focusedPaneID == pane.id,
+                paneSize: paneSize,
+                paneCount: paneCount,
+                canvasGeneration: pane.canvasGeneration
+            )
+        )
+        .frame(width: paneSize.width, height: paneSize.height)
+        .clipped()
+        .geometryGroup()
+        .scaleEffect(
+            x: transform.scale.width,
+            y: transform.scale.height,
+            anchor: .topLeading
+        )
+        .offset(transform.offset)
     }
 
     /// The `vellum-split-state` readout the flow tests parse.
