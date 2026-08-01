@@ -51,8 +51,15 @@ struct NoteSplitSidebarView: View {
             }
             .scrollIndicators(.hidden)
             .gesture(
-                SplitSidebarRowDragGesture(
-                    noteIDs: summaries.map(\.id),
+                RowDragGesture(
+                    coordinateSpace: "splitContainer",
+                    rowForContentPoint: { contentPoint in
+                        RowDragMath.rowIndex(
+                            forContentY: contentPoint.y,
+                            rowHeight: SplitSidebarLayout.rowHeight,
+                            rowCount: summaries.count
+                        ).map { summaries[$0].id }
+                    },
                     onPrepare: onDragPrepare,
                     onBegin: { noteID, location in
                         guard let summary = app.library.summaries.first(

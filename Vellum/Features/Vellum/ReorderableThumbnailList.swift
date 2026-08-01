@@ -94,23 +94,24 @@ struct ReorderableThumbnailList: View {
             }
         )
         .gesture(
-            ReorderLongPressGesture(
-                shouldBeginDrag: { contentPoint in
-                    let shouldBegin = ThumbnailDragMath.dragStartIndex(
+            RowDragGesture(
+                coordinateSpace: "panel",
+                rowForContentPoint: { contentPoint in
+                    ThumbnailDragMath.dragStartIndex(
                         fingerContentX: contentPoint.x,
                         fingerContentY: contentPoint.y,
                         rowWidth: ThumbnailLayout.width,
                         rowHeight: effectiveRowHeight,
                         badgeZone: ThumbnailLayout.badgeZone,
                         pageCount: pages.count
-                    ) != nil
-                    if shouldBegin {
-                        reorderHaptics.prepare()
-                    }
-                    return shouldBegin
+                    )
                 },
-                onLift: beginDrag,
-                onMove: moveDrag,
+                onPrepare: { reorderHaptics.prepare() },
+                // The lifted row is re-derived from the panel-space finger
+                // position, which the drag then tracks; the gated row index
+                // only decides whether a press may start.
+                onBegin: { _, location in beginDrag(location.y) },
+                onMove: { moveDrag($0.y) },
                 onEnd: endDrag,
                 onCancel: cancelDrag
             )
@@ -490,134 +491,3 @@ private struct ThumbnailRowView: View {
     }
 }
 
-struct ReorderLongPressGesture: UIGestureRecognizerRepresentable {
-    let shouldBeginDrag: (CGPoint) -> Bool
-    let onLift: (CGFloat) -> Void
-    let onMove: (CGFloat) -> Void
-    let onEnd: () -> Void
-    let onCancel: () -> Void
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var shouldBeginDrag: ((CGPoint) -> Bool)?
-        private weak var scrollView: UIScrollView?
-        private weak var lockedScrollView: UIScrollView?
-        private var wasScrollEnabled: Bool?
-
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldReceive touch: UITouch
-        ) -> Bool {
-            // Gating happens before the recognizer owns the touch, so the
-            // SwiftUI converter is unusable here. The backing scroll view
-            // supplies content-space, interface-oriented coordinates that
-            // remain correct when the iPad rotates.
-            var probe = touch.view
-            while let view = probe, !(view is UIScrollView) {
-                probe = view.superview
-            }
-            guard let scrollView = probe as? UIScrollView else { return false }
-            self.scrollView = scrollView
-            return shouldBeginDrag?(touch.location(in: scrollView)) ?? false
-        }
-
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            true
-        }
-
-        // Row selection is a SwiftUI Button whose tap recognizer would
-        // otherwise claim thumbnail touches outright; requiring it to wait
-        // for the long press to fail is what makes hold-to-lift win while
-        // quick taps still select. Scroll pans stay exempt and recognize
-        // simultaneously, so ordinary scrolling starts immediately; the
-        // scroll view is locked only after the long press lifts a row.
-        // Invariant: every non-pan recognizer in this subtree waits out the
-        // long press — if a new row interaction (context menu, pinch,
-        // DragGesture) feels dead, check here first.
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldBeRequiredToFailBy other: UIGestureRecognizer
-        ) -> Bool {
-            !(other is UIPanGestureRecognizer)
-        }
-
-        func lockScrolling() {
-            guard lockedScrollView == nil, let scrollView else { return }
-            lockedScrollView = scrollView
-            wasScrollEnabled = scrollView.isScrollEnabled
-            scrollView.isScrollEnabled = false
-        }
-
-        func restoreScrolling() {
-            if let wasScrollEnabled {
-                lockedScrollView?.isScrollEnabled = wasScrollEnabled
-            }
-            lockedScrollView = nil
-            wasScrollEnabled = nil
-        }
-    }
-
-    func makeCoordinator(
-        converter: CoordinateSpaceConverter
-    ) -> Coordinator {
-        Coordinator()
-    }
-
-    func makeUIGestureRecognizer(
-        context: Context
-    ) -> UILongPressGestureRecognizer {
-        let recognizer = UILongPressGestureRecognizer()
-        context.coordinator.shouldBeginDrag = shouldBeginDrag
-        recognizer.delegate = context.coordinator
-        configure(recognizer)
-        return recognizer
-    }
-
-    func updateUIGestureRecognizer(
-        _ recognizer: UILongPressGestureRecognizer,
-        context: Context
-    ) {
-        context.coordinator.shouldBeginDrag = shouldBeginDrag
-        configure(recognizer)
-    }
-
-    func handleUIGestureRecognizerAction(
-        _ recognizer: UILongPressGestureRecognizer,
-        context: Context
-    ) {
-        switch recognizer.state {
-        case .began:
-            context.coordinator.lockScrolling()
-            onLift(convertedPanelY(for: recognizer, context: context))
-        case .changed:
-            onMove(convertedPanelY(for: recognizer, context: context))
-        case .ended:
-            context.coordinator.restoreScrolling()
-            onEnd()
-        case .cancelled, .failed:
-            context.coordinator.restoreScrolling()
-            onCancel()
-        case .possible:
-            break
-        @unknown default:
-            context.coordinator.restoreScrolling()
-            onCancel()
-        }
-    }
-
-    private func configure(_ recognizer: UILongPressGestureRecognizer) {
-        recognizer.minimumPressDuration = 0.3
-        recognizer.allowableMovement = 24
-        recognizer.numberOfTouchesRequired = 1
-        recognizer.cancelsTouchesInView = true
-    }
-
-    private func convertedPanelY(
-        for recognizer: UILongPressGestureRecognizer,
-        context: Context
-    ) -> CGFloat {
-        context.converter.location(in: .named("panel")).y
-    }
-}
