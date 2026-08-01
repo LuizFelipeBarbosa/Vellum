@@ -11,12 +11,6 @@ struct NoteSplitContainerView: View {
     @State private var dragSession = SplitDragSession()
     @State private var dragHaptics = ReorderHaptics()
 
-    private var noteSidebarWidth: CGFloat { 300 }
-    private var noteSidebarOuterPadding: CGFloat { 18 }
-    private var noteSidebarCancelZoneMaxX: CGFloat {
-        noteSidebarOuterPadding + noteSidebarWidth + noteSidebarOuterPadding
-    }
-
     var body: some View {
         GeometryReader { geometry in
             let columns = app.split.columns
@@ -50,7 +44,7 @@ struct NoteSplitContainerView: View {
                     containerHeight: geometry.size.height
                 )
             }
-            let ghost = paneGhostConfiguration(
+            let ghost = SplitContainerLayout.paneGhostConfiguration(
                 lift: lift,
                 resolution: resolution,
                 refusedTarget: refusedTarget,
@@ -69,9 +63,10 @@ struct NoteSplitContainerView: View {
             let topLeftPaneHeaderFrames = columns.first?.panes.first.flatMap {
                 paneHeaderFrames[$0.id]
             }
-            let toggleCenter = sidebarToggleCenter(
+            let toggleCenter = SplitContainerLayout.sidebarToggleCenter(
                 for: topLeftPaneHeaderFrames,
-                containerGlobalOrigin: containerGlobalOrigin
+                containerGlobalOrigin: containerGlobalOrigin,
+                isSidebarShowing: isShowingNoteSidebar
             )
 
             ZStack(alignment: .topLeading) {
@@ -99,7 +94,7 @@ struct NoteSplitContainerView: View {
                                         column: columnIndex,
                                         row: rowIndex
                                     )
-                                    let transform = panePreviewTransform(
+                                    let transform = SplitContainerLayout.panePreviewTransform(
                                         at: paneIndex,
                                         target: previewTarget,
                                         committedGrid: committedGrid,
@@ -202,7 +197,7 @@ struct NoteSplitContainerView: View {
                 DockableToolbarContainer(
                     store: app.toolPreferences,
                     containerSize: geometry.size,
-                    topObstructions: topDockObstructions(
+                    topObstructions: SplitContainerLayout.topDockObstructions(
                         for: firstPaneHeaderFrames,
                         containerGlobalOrigin: geometry.frame(in: .global).origin
                     )
@@ -308,13 +303,13 @@ struct NoteSplitContainerView: View {
                         // readout problem.
                         "panes:\(panes.count);"
                             + "columns:\(columns.count);"
-                            + "focused:\(formattedPaneIndex(focusedPaneIndex));"
+                            + "focused:\(SplitStateReadout.paneIndex(focusedPaneIndex));"
                             + "orientation:\(app.split.focusedPane?.noteModel.note?.pageOrientation.rawValue ?? "none");"
                             + "dragging:\(lift == nil ? 0 : 1);"
-                            + "target:\(formattedDragTarget(resolution));"
+                            + "target:\(SplitStateReadout.dragTarget(resolution));"
                             + "size:\(Int(geometry.size.width.rounded()))x\(Int(geometry.size.height.rounded()));"
-                            + "grid:\(formattedGrid(committedGrid));"
-                            + "preview:\(formattedGrid(previewGrid))"
+                            + "grid:\(SplitStateReadout.grid(committedGrid));"
+                            + "preview:\(SplitStateReadout.grid(previewGrid))"
                     )
             }
             .coordinateSpace(name: "splitContainer")
@@ -401,8 +396,8 @@ struct NoteSplitContainerView: View {
                 },
                 onDragCancelled: cancelSidebarDrag
             )
-            .frame(width: noteSidebarWidth)
-            .padding(noteSidebarOuterPadding)
+            .frame(width: SplitContainerLayout.sidebarWidth)
+            .padding(SplitContainerLayout.sidebarOuterPadding)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -526,7 +521,7 @@ struct NoteSplitContainerView: View {
         containerSize: CGSize,
         holding heldTarget: SplitGridDropTarget?
     ) -> (resolution: SidebarDropResolution, refusedTarget: SplitGridDropTarget?) {
-        guard location.x > noteSidebarCancelZoneMaxX else {
+        guard location.x > SplitContainerLayout.sidebarCancelZoneMaxX else {
             return (.cancelZone, nil)
         }
 
@@ -633,219 +628,4 @@ struct NoteSplitContainerView: View {
         dragSession.refusedTarget = nil
         dragSession.originLocation = .zero
     }
-
-    private func panePreviewTransform(
-        at index: PaneIndex,
-        target: SplitGridDropTarget?,
-        committedGrid: SplitGridSnapshot,
-        previewGrid: SplitGridSnapshot,
-        containerSize: CGSize
-    ) -> PanePreviewTransform {
-        guard let target,
-              let committedFrame = SplitGridPolicy.paneFrame(
-                at: index,
-                grid: committedGrid,
-                containerSize: containerSize
-              ),
-              let previewFrame = SplitGridPolicy.paneFrame(
-                at: SplitGridPolicy.paneIndexAfterInserting(target, index),
-                grid: previewGrid,
-                containerSize: containerSize
-              ),
-              committedFrame.width > 0,
-              committedFrame.height > 0 else {
-            return .identity
-        }
-
-        return PanePreviewTransform(
-            scale: CGSize(
-                width: previewFrame.width / committedFrame.width,
-                height: previewFrame.height / committedFrame.height
-            ),
-            offset: CGSize(
-                width: previewFrame.minX - committedFrame.minX,
-                height: previewFrame.minY - committedFrame.minY
-            )
-        )
-    }
-
-    private func paneGhostConfiguration(
-        lift: SplitDragLift?,
-        resolution: SidebarDropResolution?,
-        refusedTarget: SplitGridDropTarget?,
-        committedGrid: SplitGridSnapshot,
-        previewGrid: SplitGridSnapshot,
-        containerSize: CGSize
-    ) -> PaneGhostConfiguration? {
-        guard let lift else { return nil }
-
-        let frame: CGRect
-        let intent: PaneGhostIntent
-        switch resolution {
-        case .target(.existingPane(let index)):
-            guard let existingFrame = SplitGridPolicy.paneFrame(
-                at: index,
-                grid: committedGrid,
-                containerSize: containerSize
-            ) else {
-                return nil
-            }
-            frame = existingFrame
-            intent = .alreadyOpen
-
-        case .target(let target):
-            guard let insertedIndex = SplitGridPolicy.insertedPaneIndex(for: target),
-                  let insertedFrame = SplitGridPolicy.paneFrame(
-                    at: insertedIndex,
-                    grid: previewGrid,
-                    containerSize: containerSize
-                  ) else {
-                return nil
-            }
-            frame = insertedFrame
-            intent = .split
-
-        case .capacityFull:
-            // A refusal leaves the panes untransformed, so the ghost has to be
-            // framed on the committed grid: the refused insertion's own index
-            // belongs to a hypothetical grid this layout never adopts.
-            guard let refusedTarget,
-                  let refusedIndex = SplitGridPolicy.clampedPaneIndex(
-                    for: refusedTarget,
-                    in: committedGrid
-                  ),
-                  let refusedFrame = SplitGridPolicy.paneFrame(
-                    at: refusedIndex,
-                    grid: committedGrid,
-                    containerSize: containerSize
-                  ) else {
-                return nil
-            }
-            frame = refusedFrame
-            intent = .refused
-
-        case .cancelZone, nil:
-            return nil
-        }
-
-        return PaneGhostConfiguration(
-            title: lift.title,
-            spaceColor: lift.spaceColor,
-            intent: intent,
-            frame: frame
-        )
-    }
-
-    private func sidebarToggleCenter(
-        for frames: PaneHeaderFrames?,
-        containerGlobalOrigin: CGPoint
-    ) -> CGPoint {
-        let buttonRadius: CGFloat = 22
-        let gap: CGFloat = 12
-        let fallbackFrame = CGRect(x: 20, y: 10, width: 0, height: 44)
-        let leftClusterFrame = if let frames,
-                                  frames.leftClusterFrame != .zero {
-            frames.leftClusterFrame.offsetBy(
-                dx: -containerGlobalOrigin.x,
-                dy: -containerGlobalOrigin.y
-            )
-        } else {
-            fallbackFrame
-        }
-        let topOverlayFrame = if let frames,
-                                 frames.topOverlayGlobalFrame != .zero {
-            frames.topOverlayGlobalFrame.offsetBy(
-                dx: -containerGlobalOrigin.x,
-                dy: -containerGlobalOrigin.y
-            )
-        } else {
-            fallbackFrame
-        }
-        let centerX = isShowingNoteSidebar
-            ? noteSidebarCancelZoneMaxX + buttonRadius
-            : leftClusterFrame.minX + buttonRadius
-
-        return CGPoint(
-            x: centerX,
-            y: topOverlayFrame.maxY + gap + buttonRadius
-        )
-    }
-
-    private func topDockObstructions(
-        for frames: PaneHeaderFrames?,
-        containerGlobalOrigin: CGPoint
-    ) -> TopDockObstructions? {
-        guard let frames,
-              frames.leftClusterFrame != .zero,
-              frames.rightClusterFrame != .zero else {
-            return nil
-        }
-        return TopDockObstructions(
-            navbarTop: frames.leftClusterFrame.minY - containerGlobalOrigin.y,
-            overlayBottom: frames.topOverlayGlobalFrame.maxY - containerGlobalOrigin.y,
-            gapMinX: frames.leftClusterFrame.maxX - containerGlobalOrigin.x,
-            gapMaxX: frames.rightClusterFrame.minX - containerGlobalOrigin.x
-        )
-    }
-
-    private func formattedGrid(_ grid: SplitGridSnapshot) -> String {
-        let encoded = grid.columns.map { column in
-            let width = formattedFraction(column.widthFraction)
-            let rows = column.rowFractions
-                .map { formattedFraction($0) }
-                .joined(separator: ",")
-            return "\(width)[\(rows)]"
-        }
-        .joined(separator: "|")
-        return encoded.isEmpty ? "none" : encoded
-    }
-
-    private func formattedPaneIndex(_ index: PaneIndex?) -> String {
-        guard let index else { return "-1" }
-        return "\(index.column).\(index.row)"
-    }
-
-    private func formattedDragTarget(
-        _ resolution: SidebarDropResolution?
-    ) -> String {
-        switch resolution {
-        case .cancelZone:
-            "none"
-        case .capacityFull:
-            "none-capacity"
-        case .target(.insertColumn(let index)):
-            "col-\(index)"
-        case .target(.insertRow(let column, let row)):
-            "row-\(column).\(row)"
-        case .target(.existingPane(let paneIndex)):
-            "focus-\(paneIndex.column).\(paneIndex.row)"
-        case nil:
-            "none"
-        }
-    }
-
-    private func formattedFraction(_ fraction: CGFloat) -> String {
-        String(
-            format: "%.2f",
-            locale: Locale(identifier: "en_US_POSIX"),
-            Double(fraction)
-        )
-    }
-}
-
-private struct PanePreviewTransform {
-    let scale: CGSize
-    let offset: CGSize
-
-    static let identity = PanePreviewTransform(
-        scale: CGSize(width: 1, height: 1),
-        offset: .zero
-    )
-}
-
-private struct PaneGhostConfiguration {
-    let title: String
-    let spaceColor: Color?
-    let intent: PaneGhostIntent
-    let frame: CGRect
 }
