@@ -13,8 +13,14 @@ enum ShapeSnapPolicy {
     static let snapOnLiftDefaultsKey = "vellum.shapeSnapOnLift"
 
     static func resolveFromLaunchArguments() -> ShapeSnapPolicy {
-        if ProcessInfo.processInfo.arguments.contains("-vellum-shape-snap-on-lift")
-            || UserDefaults.standard.bool(forKey: snapOnLiftDefaultsKey) {
+        // The launch argument is a debug-only override; the kill switch above
+        // is what has to keep working in a shipped build.
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-vellum-shape-snap-on-lift") {
+            return .snapOnLift
+        }
+        #endif
+        if UserDefaults.standard.bool(forKey: snapOnLiftDefaultsKey) {
             return .snapOnLift
         }
         return .snapMidStroke

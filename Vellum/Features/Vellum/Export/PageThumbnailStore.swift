@@ -42,12 +42,17 @@ final class PageThumbnailStore {
     private var remapVersion = 0
     private let renderer = PageThumbnailRenderer()
 
+    #if DEBUG
     // UI tests pass this argument to hold the loading placeholder on screen
-    // long enough to assert against; production keeps the 500ms coalescing.
+    // long enough to assert against (VellumFlowUITests/PagesPanelDragUITests).
+    // Release builds compile to the constant below, so the hook never ships.
     private let debounceMilliseconds =
         ProcessInfo.processInfo.arguments.contains("-thumbnail-slow-render")
             ? 3000
             : 500
+    #else
+    private let debounceMilliseconds = 500
+    #endif
 
     /// Marks thumbnails stale while keeping existing images visible instead of
     /// blanking to a spinner while rows re-render in the background.
