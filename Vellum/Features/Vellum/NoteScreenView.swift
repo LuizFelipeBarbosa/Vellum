@@ -199,44 +199,88 @@ struct NoteScreenView: View {
     /// Sheets, importers and the error alert.
     private func presenting(_ content: some View) -> some View {
         content
-            .modifier(
-                NoteScreenActivityPresentationModifiers(
-                    model: model,
-                    app: app,
-                    isShowingActivity: $isShowingActivity,
-                    exportOutput: $exportOutput,
-                    cleanUpExportDirectory: cleanUpExportDirectory,
-                    isConfirmingDelete: $isConfirmingDelete,
-                    deleteNote: deleteNote
-                )
+            .sheet(isPresented: $isShowingActivity) {
+                NavigationStack {
+                    ActivityView(
+                        workspace: app.container.workspace,
+                        noteID: model.noteID
+                    )
+                }
+            }
+            .sheet(item: $exportOutput, onDismiss: cleanUpExportDirectory) { output in
+                ShareSheetView(items: output.urls)
+            }
+            .confirmationDialog(
+                "Move to Trash?",
+                isPresented: $isConfirmingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Move to Trash", role: .destructive) {
+                    deleteNote()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The note moves to the Trash. You can restore it there later.")
+            }
+            .photosPicker(
+                isPresented: $model.isShowingPhotosPicker,
+                selection: $photosPickerItem,
+                matching: .images
             )
-            .modifier(
-                NoteScreenPhotoImportModifiers(
-                    model: model,
-                    isShowingPhotosPicker: $model.isShowingPhotosPicker,
-                    photosPickerItem: $photosPickerItem,
-                    currentVisibleContentRect: { currentVisibleContentRect },
-                    onImageImported: selectImportedElement
+            .onChange(of: photosPickerItem) {
+                Task {
+                    if let item = photosPickerItem,
+                       let data = try? await item.loadTransferable(type: Data.self) {
+                        if let id = await model.importImage(
+                            data,
+                            visibleContentRect: currentVisibleContentRect
+                        ) {
+                            selectImportedElement(id: id)
+                        }
+                    }
+                    photosPickerItem = nil
+                }
+            }
+            .fileImporter(
+                isPresented: $model.isShowingFileImporter,
+                allowedContentTypes: [.image]
+            ) { result in
+                guard let file = SecurityScopedFile.read(result, onFailure: {
+                    model.errorMessage = $0
+                }) else { return }
+
+                Task {
+                    if let id = await model.importImage(
+                        file.data,
+                        visibleContentRect: currentVisibleContentRect
+                    ) {
+                        selectImportedElement(id: id)
+                    }
+                }
+            }
+            .alert(
+                "Vellum",
+                isPresented: Binding(
+                    get: { model.errorMessage != nil },
+                    set: { isPresented in
+                        if !isPresented { model.errorMessage = nil }
+                    }
                 )
-            )
-            .modifier(
-                NoteScreenFileImportAndAlertModifiers(
-                    model: model,
-                    isShowingFileImporter: $model.isShowingFileImporter,
-                    currentVisibleContentRect: { currentVisibleContentRect },
-                    onImageImported: selectImportedElement
-                )
-            )
+            ) {
+                Button("OK", role: .cancel) {
+                    model.errorMessage = nil
+                }
+            } message: {
+                Text(model.errorMessage ?? "An unknown error occurred.")
+            }
     }
 
     private func animating(_ content: some View) -> some View {
         content
-            .modifier(
-                NoteScreenAnimationModifiers(
-                    model: model,
-                    isShowingThumbnails: isShowingThumbnails
-                )
-            )
+            .animation(.easeOut(duration: 0.18), value: model.selectedEntity?.id)
+            .animation(.easeOut(duration: 0.2), value: model.isShowingSuggestions)
+            .animation(.easeOut(duration: 0.2), value: isShowingThumbnails)
+            .animation(.easeOut(duration: 0.2), value: model.isShowingBackgroundChooser)
     }
 
     private var noteSurface: some View {
@@ -1013,129 +1057,5 @@ struct NoteScreenView: View {
         guard let directory = exportDirectoryToCleanUp else { return }
         try? FileManager.default.removeItem(at: directory)
         exportDirectoryToCleanUp = nil
-    }
-}
-
-private struct NoteScreenActivityPresentationModifiers: ViewModifier {
-    let model: NoteScreenModel
-    let app: VellumAppModel
-    @Binding var isShowingActivity: Bool
-    @Binding var exportOutput: NoteExporter.Output?
-    let cleanUpExportDirectory: () -> Void
-    @Binding var isConfirmingDelete: Bool
-    let deleteNote: () -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .sheet(isPresented: $isShowingActivity) {
-                NavigationStack {
-                    ActivityView(
-                        workspace: app.container.workspace,
-                        noteID: model.noteID
-                    )
-                }
-            }
-            .sheet(item: $exportOutput, onDismiss: cleanUpExportDirectory) { output in
-                ShareSheetView(items: output.urls)
-            }
-            .confirmationDialog(
-                "Move to Trash?",
-                isPresented: $isConfirmingDelete,
-                titleVisibility: .visible
-            ) {
-                Button("Move to Trash", role: .destructive) {
-                    deleteNote()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The note moves to the Trash. You can restore it there later.")
-            }
-    }
-}
-
-private struct NoteScreenPhotoImportModifiers: ViewModifier {
-    let model: NoteScreenModel
-    @Binding var isShowingPhotosPicker: Bool
-    @Binding var photosPickerItem: PhotosPickerItem?
-    let currentVisibleContentRect: () -> CGRect
-    let onImageImported: (UUID) -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .photosPicker(
-                isPresented: $isShowingPhotosPicker,
-                selection: $photosPickerItem,
-                matching: .images
-            )
-            .onChange(of: photosPickerItem) {
-                Task {
-                    if let item = photosPickerItem,
-                       let data = try? await item.loadTransferable(type: Data.self) {
-                        if let id = await model.importImage(
-                            data,
-                            visibleContentRect: currentVisibleContentRect()
-                        ) {
-                            onImageImported(id)
-                        }
-                    }
-                    photosPickerItem = nil
-                }
-            }
-    }
-}
-
-private struct NoteScreenFileImportAndAlertModifiers: ViewModifier {
-    let model: NoteScreenModel
-    @Binding var isShowingFileImporter: Bool
-    let currentVisibleContentRect: () -> CGRect
-    let onImageImported: (UUID) -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .fileImporter(
-                isPresented: $isShowingFileImporter,
-                allowedContentTypes: [.image]
-            ) { result in
-                guard let file = SecurityScopedFile.read(result, onFailure: {
-                    model.errorMessage = $0
-                }) else { return }
-
-                Task {
-                    if let id = await model.importImage(
-                        file.data,
-                        visibleContentRect: currentVisibleContentRect()
-                    ) {
-                        onImageImported(id)
-                    }
-                }
-            }
-            .alert(
-                "Vellum",
-                isPresented: Binding(
-                    get: { model.errorMessage != nil },
-                    set: { isPresented in
-                        if !isPresented { model.errorMessage = nil }
-                    }
-                )
-            ) {
-                Button("OK", role: .cancel) {
-                    model.errorMessage = nil
-                }
-            } message: {
-                Text(model.errorMessage ?? "An unknown error occurred.")
-            }
-    }
-}
-
-private struct NoteScreenAnimationModifiers: ViewModifier {
-    let model: NoteScreenModel
-    let isShowingThumbnails: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .animation(.easeOut(duration: 0.18), value: model.selectedEntity?.id)
-            .animation(.easeOut(duration: 0.2), value: model.isShowingSuggestions)
-            .animation(.easeOut(duration: 0.2), value: isShowingThumbnails)
-            .animation(.easeOut(duration: 0.2), value: model.isShowingBackgroundChooser)
     }
 }
