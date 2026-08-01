@@ -94,58 +94,12 @@ struct NoteSplitContainerView: View {
                     containerSize: geometry.size
                 )
 
-                DockableToolbarContainer(
-                    store: app.toolPreferences,
+                dockedToolbar(
+                    focusedPane: focusedPane,
+                    headerFrames: firstPaneHeaderFrames,
                     containerSize: geometry.size,
-                    topObstructions: SplitContainerLayout.topDockObstructions(
-                        for: firstPaneHeaderFrames,
-                        containerGlobalOrigin: geometry.frame(in: .global).origin
-                    )
-                ) { dockEdge, availableAxisLength in
-                    NoteToolbarView(
-                        store: app.toolPreferences,
-                        selectedTool: Binding(
-                            get: { app.split.selectedTool },
-                            set: { app.split.selectedTool = $0 }
-                        ),
-                        activeOptionsTool: Binding(
-                            get: { app.split.activeOptionsTool },
-                            set: { app.split.activeOptionsTool = $0 }
-                        ),
-                        isShowingPaperOptions: Binding(
-                            get: { app.split.isShowingPaperOptions },
-                            set: { app.split.isShowingPaperOptions = $0 }
-                        ),
-                        canvasReference: focusedPane?.canvasReference
-                            ?? fallbackCanvasReference,
-                        backgroundStyle: focusedPane.map { pane in
-                            Binding(
-                                get: { pane.noteModel.backgroundStyle },
-                                set: { pane.noteModel.backgroundStyle = $0 }
-                            )
-                        },
-                        pageOrientation: app.split.focusedPane?
-                            .noteModel.note?.pageOrientation ?? .portrait,
-                        isPageOrientationAvailable: app.split.focusedPane?
-                            .noteModel.pdfBands.isEmpty ?? false,
-                        onSetPageOrientation: { orientation in
-                            _ = app.split.focusedPane?
-                                .noteModel.setPageOrientation(orientation)
-                        },
-                        orientationWouldPushContentOffPage: { orientation in
-                            app.split.focusedPane?.noteModel
-                                .orientationWouldPushContentOffPage(to: orientation) ?? false
-                        },
-                        onInsertPhoto: {
-                            app.split.focusedPane?.noteModel.isShowingPhotosPicker = true
-                        },
-                        onInsertFile: {
-                            app.split.focusedPane?.noteModel.isShowingFileImporter = true
-                        },
-                        dockEdge: dockEdge,
-                        availableAxisLength: availableAxisLength
-                    )
-                }
+                    containerGlobalOrigin: containerGlobalOrigin
+                )
                 .zIndex(4)
 
                 EdgeSwipeDetector(isEnabled: !isShowingNoteSidebar) {
@@ -196,20 +150,16 @@ struct NoteSplitContainerView: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityIdentifier("vellum-split-state")
                     .accessibilityValue(
-                        // Short, high-signal fields first. The accessibility value is
-                        // length-limited, and the two grid strings are long enough that
-                        // trailing fields were being truncated away entirely -- which
-                        // read as "the drag never resolved a target" rather than as a
-                        // readout problem.
-                        "panes:\(panes.count);"
-                            + "columns:\(columns.count);"
-                            + "focused:\(SplitStateReadout.paneIndex(focusedPaneIndex));"
-                            + "orientation:\(app.split.focusedPane?.noteModel.note?.pageOrientation.rawValue ?? "none");"
-                            + "dragging:\(lift == nil ? 0 : 1);"
-                            + "target:\(SplitStateReadout.dragTarget(resolution));"
-                            + "size:\(Int(geometry.size.width.rounded()))x\(Int(geometry.size.height.rounded()));"
-                            + "grid:\(SplitStateReadout.grid(committedGrid));"
-                            + "preview:\(SplitStateReadout.grid(previewGrid))"
+                        splitStateAccessibilityValue(
+                            paneCount: panes.count,
+                            columnCount: columns.count,
+                            focusedPaneIndex: focusedPaneIndex,
+                            isDragging: lift != nil,
+                            resolution: resolution,
+                            committedGrid: committedGrid,
+                            previewGrid: previewGrid,
+                            containerSize: geometry.size
+                        )
                     )
             }
             .coordinateSpace(name: "splitContainer")
@@ -389,6 +339,97 @@ struct NoteSplitContainerView: View {
                     )
                 }
             }
+        }
+    }
+
+    /// The `vellum-split-state` readout the flow tests parse.
+    ///
+    /// Short, high-signal fields first. The accessibility value is
+    /// length-limited, and the two grid strings are long enough that trailing
+    /// fields were being truncated away entirely -- which read as "the drag
+    /// never resolved a target" rather than as a readout problem. Appending a
+    /// field, or reordering these, silently truncates `grid:` and `preview:`.
+    private func splitStateAccessibilityValue(
+        paneCount: Int,
+        columnCount: Int,
+        focusedPaneIndex: PaneIndex?,
+        isDragging: Bool,
+        resolution: SidebarDropResolution?,
+        committedGrid: SplitGridSnapshot,
+        previewGrid: SplitGridSnapshot,
+        containerSize: CGSize
+    ) -> String {
+        "panes:\(paneCount);"
+            + "columns:\(columnCount);"
+            + "focused:\(SplitStateReadout.paneIndex(focusedPaneIndex));"
+            + "orientation:\(app.split.focusedPane?.noteModel.note?.pageOrientation.rawValue ?? "none");"
+            + "dragging:\(isDragging ? 1 : 0);"
+            + "target:\(SplitStateReadout.dragTarget(resolution));"
+            + "size:\(Int(containerSize.width.rounded()))x\(Int(containerSize.height.rounded()));"
+            + "grid:\(SplitStateReadout.grid(committedGrid));"
+            + "preview:\(SplitStateReadout.grid(previewGrid))"
+    }
+
+    /// The floating tool palette. It edits the focused pane through bindings
+    /// rather than owning any state, so that redocking it never disturbs which
+    /// note is being drawn on.
+    private func dockedToolbar(
+        focusedPane: NotePane?,
+        headerFrames: PaneHeaderFrames?,
+        containerSize: CGSize,
+        containerGlobalOrigin: CGPoint
+    ) -> some View {
+        DockableToolbarContainer(
+            store: app.toolPreferences,
+            containerSize: containerSize,
+            topObstructions: SplitContainerLayout.topDockObstructions(
+                for: headerFrames,
+                containerGlobalOrigin: containerGlobalOrigin
+            )
+        ) { dockEdge, availableAxisLength in
+            NoteToolbarView(
+                store: app.toolPreferences,
+                selectedTool: Binding(
+                    get: { app.split.selectedTool },
+                    set: { app.split.selectedTool = $0 }
+                ),
+                activeOptionsTool: Binding(
+                    get: { app.split.activeOptionsTool },
+                    set: { app.split.activeOptionsTool = $0 }
+                ),
+                isShowingPaperOptions: Binding(
+                    get: { app.split.isShowingPaperOptions },
+                    set: { app.split.isShowingPaperOptions = $0 }
+                ),
+                canvasReference: focusedPane?.canvasReference
+                    ?? fallbackCanvasReference,
+                backgroundStyle: focusedPane.map { pane in
+                    Binding(
+                        get: { pane.noteModel.backgroundStyle },
+                        set: { pane.noteModel.backgroundStyle = $0 }
+                    )
+                },
+                pageOrientation: app.split.focusedPane?
+                    .noteModel.note?.pageOrientation ?? .portrait,
+                isPageOrientationAvailable: app.split.focusedPane?
+                    .noteModel.pdfBands.isEmpty ?? false,
+                onSetPageOrientation: { orientation in
+                    _ = app.split.focusedPane?
+                        .noteModel.setPageOrientation(orientation)
+                },
+                orientationWouldPushContentOffPage: { orientation in
+                    app.split.focusedPane?.noteModel
+                        .orientationWouldPushContentOffPage(to: orientation) ?? false
+                },
+                onInsertPhoto: {
+                    app.split.focusedPane?.noteModel.isShowingPhotosPicker = true
+                },
+                onInsertFile: {
+                    app.split.focusedPane?.noteModel.isShowingFileImporter = true
+                },
+                dockEdge: dockEdge,
+                availableAxisLength: availableAxisLength
+            )
         }
     }
 
