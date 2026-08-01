@@ -4,13 +4,13 @@ import Testing
 
 @Test("A matching note produces an aligned citation")
 func askSingleNoteMatch() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     var note = try await notes.createNote(title: "Weather")
     note.pages[0].plainText = "Ordinary introduction. Zephyr winds arrive every evening. Closing detail."
     try await notes.saveNote(note)
-    let service = AskService(notes: notes, answerer: MockAskAnswerer(), activity: nil)
+    let service = AskService(notes: notes, answerer: HeuristicAskAnswerer(), activity: nil)
 
     let answer = try await service.ask("What do my notes say about zephyr?")
 
@@ -28,14 +28,14 @@ func askSingleNoteMatch() async throws {
 
 @Test("Trashed notes are excluded from Ask sources")
 func askExcludesTrashedNotes() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let workspace = WorkspaceService(
         notes: notes,
         proposals: FileProposalRepository(rootDirectory: root),
         activity: FileActivityRepository(rootDirectory: root),
-        agent: MockVellumAgent(),
+        agent: HeuristicVellumAgent(),
         spaces: FileSpaceRepository(rootDirectory: root),
         entities: FileEntityRepository(rootDirectory: root),
         tasks: FileTaskRepository(rootDirectory: root)
@@ -47,7 +47,7 @@ func askExcludesTrashedNotes() async throws {
     trashed.pages[0].plainText = "Zephyr appears in this trashed note."
     try await notes.saveNote(trashed)
     try await workspace.deleteNote(id: trashed.id)
-    let service = AskService(notes: notes, answerer: MockAskAnswerer(), activity: nil)
+    let service = AskService(notes: notes, answerer: HeuristicAskAnswerer(), activity: nil)
 
     let answer = try await service.ask("What do my notes say about zephyr?")
 
@@ -80,7 +80,7 @@ func askRankingIsStable() async throws {
             pages: [AskPage(pageID: UUID(), plainText: "Comet returns with another comet.")]
         ),
     ])
-    let answerer = MockAskAnswerer()
+    let answerer = HeuristicAskAnswerer()
 
     let first = try await answerer.answer(question: "Tell me about comet", context: context)
     let second = try await answerer.answer(question: "Tell me about comet", context: context)
@@ -98,7 +98,7 @@ func askRankingIsStable() async throws {
 
 @Test("A stopword-only question returns the fixed no-match answer")
 func askStopwordOnlyQuestion() async throws {
-    let answer = try await MockAskAnswerer().answer(
+    let answer = try await HeuristicAskAnswerer().answer(
         question: "What is this?",
         context: AskContext(
             sources: [
@@ -121,11 +121,11 @@ func askStopwordOnlyQuestion() async throws {
 
 @Test("An empty workspace returns the no-match answer")
 func askEmptyWorkspace() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let service = AskService(
         notes: FileNoteRepository(rootDirectory: root),
-        answerer: MockAskAnswerer(),
+        answerer: HeuristicAskAnswerer(),
         activity: nil
     )
 
@@ -140,13 +140,13 @@ func askEmptyWorkspace() async throws {
 
 @Test("Asking logs activity only when a repository is supplied")
 func askActivityLoggingIsOptional() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let activity = FileActivityRepository(rootDirectory: root)
     let loggedService = AskService(
         notes: notes,
-        answerer: MockAskAnswerer(),
+        answerer: HeuristicAskAnswerer(),
         activity: activity
     )
 
@@ -159,7 +159,7 @@ func askActivityLoggingIsOptional() async throws {
 
     let unloggedService = AskService(
         notes: notes,
-        answerer: MockAskAnswerer(),
+        answerer: HeuristicAskAnswerer(),
         activity: nil
     )
     _ = try await unloggedService.ask("Tell me about zephyr again")
@@ -169,7 +169,7 @@ func askActivityLoggingIsOptional() async throws {
 
 @Test("Suggested questions are recent-first, deterministic, and limited to three")
 func suggestedQuestionsAreDeterministic() async throws {
-    let root = try makeAskTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let titles = ["Oldest", "Newest", "Middle", "Fourth", "Empty"]
@@ -182,7 +182,7 @@ func suggestedQuestionsAreDeterministic() async throws {
         }
         try await notes.saveNote(note)
     }
-    let service = AskService(notes: notes, answerer: MockAskAnswerer(), activity: nil)
+    let service = AskService(notes: notes, answerer: HeuristicAskAnswerer(), activity: nil)
 
     let first = try await service.suggestedQuestions()
     let second = try await service.suggestedQuestions()
@@ -215,17 +215,10 @@ func askExcerptSelectsMatchingSentence() async throws {
         ]
     )
 
-    let answer = try await MockAskAnswerer().answer(question: "What about quartz?", context: context)
+    let answer = try await HeuristicAskAnswerer().answer(question: "What about quartz?", context: context)
     let excerpt = try #require(answer.citations.first?.excerpt)
 
     #expect(excerpt == matchingSentence)
     #expect(!excerpt.contains("Unrelated opening"))
     #expect(!excerpt.contains("Unrelated ending"))
-}
-
-private func makeAskTemporaryDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("VellumCoreAskTests-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
 }

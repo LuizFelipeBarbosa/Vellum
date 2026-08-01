@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import VellumCore
 
@@ -10,50 +11,26 @@ struct DwellDetectorTests {
         minimumTravel: 12
     )
 
-    @Test("Stationary run arms after the travel gate")
-    func stationaryRunArmsAfterTravelGate() {
+    /// Every case walks the pointer along the x axis, one sample each 0.1s. A stationary run
+    /// can only begin once the pointer has travelled past the 12pt gate, and any step past
+    /// the 3pt movement tolerance re-anchors it. The expectation is the index of the sample
+    /// the run should start at, so the boundaries stay legible next to each other.
+    @Test("Stationary runs start only after the travel gate", arguments: [
+        // (x of each successive sample, index of the sample the run starts at)
+        ([0, 13, 14] as [CGFloat], Int?.some(1)), // arms at the sample that crossed the gate
+        ([0, 13, 14, 18], Int?.some(3)), // a 4pt step re-anchors the run
+        ([0, 1, -1, 1], Int?.none), // never travels 12pt, so never arms
+        ([0, 12, 15], Int?.some(1)), // 12pt and 3pt are both inclusive boundaries
+    ])
+    func stationaryRunStartsOnlyAfterTravelGate(xs: [CGFloat], armingIndex: Int?) {
         var detector = DwellDetector(config: config)
+        let times = xs.indices.map { TimeInterval($0) / 10 }
 
-        detector.ingest(CGPoint(x: 0, y: 0), at: 0)
-        detector.ingest(CGPoint(x: 13, y: 0), at: 0.1)
-        detector.ingest(CGPoint(x: 14, y: 0), at: 0.2)
+        for (index, x) in xs.enumerated() {
+            detector.ingest(CGPoint(x: x, y: 0), at: times[index])
+        }
 
-        #expect(detector.stationarySince == 0.1)
-    }
-
-    @Test("Movement beyond tolerance starts a new stationary run")
-    func movementBeyondToleranceReanchors() {
-        var detector = DwellDetector(config: config)
-
-        detector.ingest(CGPoint(x: 0, y: 0), at: 0)
-        detector.ingest(CGPoint(x: 13, y: 0), at: 0.1)
-        detector.ingest(CGPoint(x: 14, y: 0), at: 0.2)
-        detector.ingest(CGPoint(x: 18, y: 0), at: 0.3)
-
-        #expect(detector.stationarySince == 0.3)
-    }
-
-    @Test("A stationary cluster cannot arm before minimum travel")
-    func stationaryClusterDoesNotArmEarly() {
-        var detector = DwellDetector(config: config)
-
-        detector.ingest(CGPoint(x: 0, y: 0), at: 0)
-        detector.ingest(CGPoint(x: 1, y: 0), at: 0.1)
-        detector.ingest(CGPoint(x: -1, y: 0), at: 0.2)
-        detector.ingest(CGPoint(x: 1, y: 0), at: 0.3)
-
-        #expect(detector.stationarySince == nil)
-    }
-
-    @Test("Movement tolerance is inclusive")
-    func movementToleranceIsInclusive() {
-        var detector = DwellDetector(config: config)
-
-        detector.ingest(CGPoint(x: 0, y: 0), at: 0)
-        detector.ingest(CGPoint(x: 12, y: 0), at: 0.1)
-        detector.ingest(CGPoint(x: 15, y: 0), at: 0.2)
-
-        #expect(detector.stationarySince == 0.1)
+        #expect(detector.stationarySince == armingIndex.map { times[$0] })
     }
 
     @Test("Reset clears the travel gate and stationary state")

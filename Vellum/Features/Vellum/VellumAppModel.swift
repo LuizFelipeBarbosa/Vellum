@@ -223,10 +223,6 @@ final class VellumAppModel {
         #endif
     }
 
-    var activityLine: String {
-        "\(activityMessage) · \(activityCount) recent — review"
-    }
-
     func refreshStats() async {
         do {
             noteCount = library.summaries.count

@@ -36,21 +36,16 @@ public enum ShapeLineAdjuster {
         let deltaX = rawPoint.x - pivot.x
         let deltaY = rawPoint.y - pivot.y
         let angle = atan2(deltaY, deltaX)
-        let quarterTurn = CGFloat.pi / 2
-        let nearestQuarterTurn = (angle / quarterTurn).rounded()
-        let snapTolerance = max(
-            0,
-            config.axisSnapDegrees.isFinite ? config.axisSnapDegrees : 0
-        ) * .pi / 180
-        let shouldSnap = abs(angle - nearestQuarterTurn * quarterTurn) <= snapTolerance
 
         var point = rawPoint
-        if shouldSnap {
-            let axisIndex = Int(nearestQuarterTurn)
-            if abs(axisIndex) % 2 == 0 {
-                point.y = pivot.y
-            } else {
+        if let quarterTurn = QuarterTurn(
+            nearest: angle,
+            toleranceDegrees: config.axisSnapDegrees
+        ) {
+            if quarterTurn.swapsAxes {
                 point.x = pivot.x
+            } else {
+                point.y = pivot.y
             }
         }
 

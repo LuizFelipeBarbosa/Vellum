@@ -8,9 +8,9 @@ import XCTest
 @MainActor
 final class SelectionTransformTests: XCTestCase {
     func testPinchScaleTwoXKeepsSelectionCenterInvariant() throws {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 50, y: 40)]
                 ),
             ],
@@ -38,10 +38,10 @@ final class SelectionTransformTests: XCTestCase {
     }
 
     func testCornerDragScaleTwoXPinsTheOppositeCorner() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 30, y: 40, width: 60, height: 36)
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 120))
         let originalBounds = try XCTUnwrap(harness.controller.selectionBounds)
 
@@ -70,13 +70,13 @@ final class SelectionTransformTests: XCTestCase {
 
     func testRotationNinetyDegreesUsesVerifiedCompositeOrder() throws {
         let originalRotation = 0.25
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 70, y: 25, width: 30, height: 24),
             rotation: originalRotation
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 45)]
                 ),
             ],
@@ -100,19 +100,18 @@ final class SelectionTransformTests: XCTestCase {
             accuracy: 0.000_001
         )
 
-        // Independently mirrors the verified row-vector application order:
-        // p * T(-c) * S * R * T(c), which maps c back to c.
-        let expected = CGAffineTransform(
-            translationX: -center.x,
-            y: -center.y
-        )
-        .concatenating(CGAffineTransform(scaleX: 1, y: 1))
-        .concatenating(CGAffineTransform(rotationAngle: .pi / 2))
-        .concatenating(
-            CGAffineTransform(translationX: center.x, y: center.y)
-        )
+        // A quarter turn and nothing else: the linear part is exactly [0 1; -1 0] — no scale,
+        // no shear, no mirror — and the selection center is the point it pivots about. Those
+        // six numbers fix the transform completely without restating how it is composed.
         let actual = harness.canvasView.drawing.strokes[0].transform
-        assertTransform(actual, equals: expected)
+        XCTAssertEqual(actual.a, 0, accuracy: 0.000_001)
+        XCTAssertEqual(actual.b, 1, accuracy: 0.000_001)
+        XCTAssertEqual(actual.c, -1, accuracy: 0.000_001)
+        XCTAssertEqual(actual.d, 0, accuracy: 0.000_001)
+
+        let pivoted = center.applying(actual)
+        XCTAssertEqual(pivoted.x, center.x, accuracy: 0.000_001)
+        XCTAssertEqual(pivoted.y, center.y, accuracy: 0.000_001)
     }
 
     func testShapeHandleTransformScalesFrameStrokeWidthAndRotation() throws {
@@ -123,7 +122,7 @@ final class SelectionTransformTests: XCTestCase {
             rotation: originalRotation,
             strokeWidth: originalStrokeWidth
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 150, y: 120))
         let scale = CGSize(width: 2, height: 1.5)
         let appliedRotation = Double.pi / 4
@@ -178,11 +177,11 @@ final class SelectionTransformTests: XCTestCase {
     func testRotatedElementCornerDragPinsTheAnchorInCanvasSpace() throws {
         let rotation = 0.4
         let factor: CGFloat = 1.5
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 35, y: 45, width: 80, height: 48),
             rotation: rotation
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         harness.controller.selectElement(id: element.id)
         let originalFrame = CGRect(
             x: element.frame.x,
@@ -231,14 +230,14 @@ final class SelectionTransformTests: XCTestCase {
     }
 
     func testMixedHandleTransformIsExactlyOneUndoStep() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 65, y: 20, width: 32, height: 28),
             rotation: 0.2
         )
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 45)]
         )
-        let harness = makeHarness(strokes: [stroke], elements: [element])
+        let harness = CanvasHarness.make(strokes: [stroke], elements: [element])
         select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 130, y: 90))
 
         let originalTransform = harness.canvasView.drawing.strokes[0].transform
@@ -269,13 +268,13 @@ final class SelectionTransformTests: XCTestCase {
     }
 
     func testRestyleColorChangesOnlySelectedStrokeAndSurvivesDrawingRoundTrip() throws {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 50, y: 40)],
                     color: .black
                 ),
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 250, y: 250), CGPoint(x: 280, y: 280)],
                     color: .blue
                 ),
@@ -302,7 +301,7 @@ final class SelectionTransformTests: XCTestCase {
         let creationDate = Date(timeIntervalSince1970: 1_234_567)
         let originalTransform = CGAffineTransform(translationX: 7, y: 9)
             .concatenating(CGAffineTransform(rotationAngle: 0.15))
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 20, y: 20),
                 CGPoint(x: 35, y: 30),
@@ -312,7 +311,7 @@ final class SelectionTransformTests: XCTestCase {
             transform: originalTransform,
             creationDate: creationDate
         )
-        let harness = makeHarness(strokes: [stroke], elements: [])
+        let harness = CanvasHarness.make(strokes: [stroke], elements: [])
         select(in: harness, from: CGPoint(x: -20, y: -20), to: CGPoint(x: 140, y: 140))
         let targetWidth = 13.0
 
@@ -336,7 +335,7 @@ final class SelectionTransformTests: XCTestCase {
         }
         originalShape.strokeColor = originalColor
         element.content = .shape(originalShape)
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 150, y: 120))
 
         harness.controller.restyleSelection(color: nil, strokeWidth: 11)
@@ -364,7 +363,7 @@ final class SelectionTransformTests: XCTestCase {
         let untouched = makeShapeElement(
             frame: CanvasRect(x: 300, y: 300, width: 60, height: 40)
         )
-        let harness = makeHarness(strokes: [], elements: [selected, untouched])
+        let harness = CanvasHarness.make(strokes: [], elements: [selected, untouched])
         select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 120))
 
         harness.controller.beginMoveDrag()
@@ -382,7 +381,7 @@ final class SelectionTransformTests: XCTestCase {
 
     func testLiveTransformScalesAboutTheCenterDuringAPinch() throws {
         let element = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         select(in: harness, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 120, y: 120))
         let bounds = try XCTUnwrap(harness.controller.selectionBounds)
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
@@ -408,7 +407,7 @@ final class SelectionTransformTests: XCTestCase {
         let element = makeShapeElement(
             frame: CanvasRect(x: 20, y: 30, width: 60, height: 40)
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         harness.controller.selectElement(id: element.id)
         let bounds = try XCTUnwrap(harness.controller.selectionBounds)
         let anchor = bounds.origin
@@ -444,7 +443,7 @@ final class SelectionTransformTests: XCTestCase {
             frame: CanvasRect(x: 30, y: 40, width: 70, height: 45),
             rotation: 0.4
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         harness.controller.selectElement(id: element.id)
         let originalCenter = CGPoint(
             x: element.frame.x + element.frame.width / 2,
@@ -472,10 +471,10 @@ final class SelectionTransformTests: XCTestCase {
     }
 
     func testAnchoredShrinkNeverFlipsAndFloorsAtMinimumExtent() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 30, y: 40, width: 60, height: 36)
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         harness.controller.selectElement(id: element.id)
         let originalBounds = try XCTUnwrap(harness.controller.selectionBounds)
         let anchor = originalBounds.origin
@@ -517,7 +516,7 @@ final class SelectionTransformTests: XCTestCase {
         // A horizontal line: its frame is inflated to a minimum extent, so the line itself sits
         // at the middle of the frame, not at its top edge.
         let line = makeLineShape(from: CGPoint(x: 30, y: 100), to: CGPoint(x: 150, y: 100))
-        let harness = makeHarness(strokes: [], elements: [line])
+        let harness = CanvasHarness.make(strokes: [], elements: [line])
         harness.controller.snapGrid = { _ in
             ShapeSnapGrid(origin: .zero, spacing: 24, snapsX: true, snapsY: true)
         }
@@ -543,7 +542,7 @@ final class SelectionTransformTests: XCTestCase {
 
     func testDraggingAShapeFarFromTheLatticeIsNotPulled() {
         let line = makeLineShape(from: CGPoint(x: 30, y: 100), to: CGPoint(x: 150, y: 100))
-        let harness = makeHarness(strokes: [], elements: [line])
+        let harness = CanvasHarness.make(strokes: [], elements: [line])
         harness.controller.snapGrid = { _ in
             ShapeSnapGrid(origin: .zero, spacing: 24, snapsX: true, snapsY: true)
         }
@@ -558,8 +557,8 @@ final class SelectionTransformTests: XCTestCase {
     }
 
     func testDraggingInkOnlyIsNeverSnapped() {
-        let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 50, y: 40)])],
+        let harness = CanvasHarness.make(
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 50, y: 40)])],
             elements: []
         )
         harness.controller.snapGrid = { _ in
@@ -576,7 +575,7 @@ final class SelectionTransformTests: XCTestCase {
 
     func testLiveTransformIsIdentityWithoutASelection() {
         let element = makeShapeElement(frame: CanvasRect(x: 20, y: 20, width: 60, height: 40))
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
 
         assertTransform(
             harness.controller.liveTransform(forElementWith: element.id),
@@ -585,7 +584,7 @@ final class SelectionTransformTests: XCTestCase {
     }
 
     private func select(
-        in harness: Harness,
+        in harness: CanvasHarness,
         from start: CGPoint,
         to end: CGPoint
     ) {
@@ -594,71 +593,7 @@ final class SelectionTransformTests: XCTestCase {
         harness.controller.endCapture()
     }
 
-    private func makeHarness(strokes: [PKStroke], elements: [CanvasElement]) -> Harness {
-        let canvasView = PKCanvasView()
-        canvasView.drawing = PKDrawing(strokes: strokes)
 
-        let canvasReference = NoteCanvasReference()
-        canvasReference.canvasView = canvasView
-
-        let undoManager = UndoManager()
-        let store = CanvasElementsStore()
-        store.canvasReference = canvasReference
-        store.undoManagerOverride = undoManager
-        store.hydrate(elements)
-
-        let controller = CanvasSelectionController()
-        controller.canvasReference = canvasReference
-        controller.elementsStore = store
-        undoManager.removeAllActions()
-
-        return Harness(
-            canvasView: canvasView,
-            canvasReference: canvasReference,
-            store: store,
-            undoManager: undoManager,
-            controller: controller
-        )
-    }
-
-    private func makeStroke(
-        locations: [CGPoint],
-        color: UIColor = .black,
-        size: CGSize = CGSize(width: 4, height: 4),
-        transform: CGAffineTransform = .identity,
-        creationDate: Date = Date()
-    ) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: size,
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: color),
-            path: PKStrokePath(controlPoints: points, creationDate: creationDate),
-            transform: transform
-        )
-    }
-
-    private func makeElement(frame: CanvasRect, rotation: Double = 0) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Selected",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
-            frame: frame,
-            rotation: rotation
-        )
-    }
 
     /// A line built the way the recognizer builds one, so its frame carries the same minimum
     /// extent inflation a real horizontal line has.
@@ -759,11 +694,4 @@ final class SelectionTransformTests: XCTestCase {
         }
     }
 
-    private struct Harness {
-        let canvasView: PKCanvasView
-        let canvasReference: NoteCanvasReference
-        let store: CanvasElementsStore
-        let undoManager: UndoManager
-        let controller: CanvasSelectionController
-    }
 }

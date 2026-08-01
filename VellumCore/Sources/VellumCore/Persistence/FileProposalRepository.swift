@@ -27,12 +27,7 @@ public actor FileProposalRepository: AgentProposalRepository {
             let proposals = try files.map { file in
                 try FilePersistence.decoder().decode(AgentProposal.self, from: Data(contentsOf: file))
             }
-            return proposals.sorted {
-                if $0.createdAt == $1.createdAt {
-                    return $0.id.uuidString < $1.id.uuidString
-                }
-                return $0.createdAt < $1.createdAt
-            }
+            return proposals.sorted { StableOrder.ascending($0, $1, by: \.createdAt) }
         } catch {
             throw VellumError.persistenceFailure("Could not decode proposals for note \(noteID.uuidString): \(error.localizedDescription)")
         }

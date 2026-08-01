@@ -44,7 +44,7 @@ enum PageReorderer {
             guard newBand != band else { return stroke }
 
             let delta = CGFloat(newBand - band) * geometry.pageHeight
-            return copy(stroke, translatedBy: CGSize(width: 0, height: delta))
+            return StrokeEditing.copy(stroke, translatedBy: CGSize(width: 0, height: delta))
         }
 
         let reorderedElements = elements.map { element in
@@ -90,24 +90,6 @@ enum PageReorderer {
             drawing: PKDrawing(strokes: strokes),
             elements: reorderedElements,
             pages: reorderedPages
-        )
-    }
-
-    private static func copy(
-        _ stroke: PKStroke,
-        translatedBy translation: CGSize
-    ) -> PKStroke {
-        PKStroke(
-            ink: stroke.ink,
-            path: stroke.path,
-            transform: stroke.transform.concatenating(
-                CGAffineTransform(
-                    translationX: translation.width,
-                    y: translation.height
-                )
-            ),
-            mask: stroke.mask,
-            randomSeed: stroke.randomSeed
         )
     }
 }

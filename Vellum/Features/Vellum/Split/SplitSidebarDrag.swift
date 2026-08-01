@@ -14,6 +14,13 @@ enum SidebarDropResolution: Equatable {
     case cancelZone
     case capacityFull
     case target(SplitGridDropTarget)
+
+    var target: SplitGridDropTarget? {
+        if case .target(let target) = self {
+            return target
+        }
+        return nil
+    }
 }
 
 @MainActor
@@ -154,8 +161,9 @@ struct SplitSidebarRowDragGesture: UIGestureRecognizerRepresentable {
 
     private var gate: (UIScrollView, UITouch) -> UUID? {
         { scrollView, touch in
-            guard let rowIndex = SplitSidebarDragMath.rowIndex(
+            guard let rowIndex = RowDragMath.rowIndex(
                 forContentY: touch.location(in: scrollView).y,
+                rowHeight: SplitSidebarLayout.rowHeight,
                 rowCount: noteIDs.count
             ) else {
                 return nil

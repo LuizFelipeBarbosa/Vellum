@@ -18,8 +18,10 @@ final class SelectionActionStripPositionTests: XCTestCase {
         )
         let stripFrame = frame(centeredAt: position, size: stripSize)
 
-        XCTAssertEqual(position.y, avoidRect.minY - 12 - stripSize.height / 2, accuracy: 0.001)
-        XCTAssertEqual(stripFrame.maxY, avoidRect.minY - 12, accuracy: 0.001)
+        // The 40pt-tall strip is centered 12pt above the avoidance rect's top edge:
+        // 200 - 12 - 20 for the center, 200 - 12 for its bottom.
+        XCTAssertEqual(position.y, 168, accuracy: 0.001)
+        XCTAssertEqual(stripFrame.maxY, 188, accuracy: 0.001)
         XCTAssertFalse(stripFrame.intersects(avoidRect))
     }
 
@@ -62,12 +64,6 @@ final class SelectionActionStripPositionTests: XCTestCase {
         let avoidRect = CGRect(x: 100, y: -50, width: 300, height: 150)
         let stripSize = CGSize(width: 120, height: 40)
         let viewportSize = CGSize(width: 600, height: 600)
-        let margin: CGFloat = 8
-        let gap: CGFloat = 12
-        let aboveFits = avoidRect.minY - gap - stripSize.height >= margin
-        let belowFits =
-            avoidRect.maxY + gap + stripSize.height <= viewportSize.height - margin
-        let expectedBelowY = avoidRect.maxY + gap + stripSize.height / 2
 
         let position = SelectionActionStripView.position(
             avoiding: avoidRect,
@@ -75,9 +71,9 @@ final class SelectionActionStripPositionTests: XCTestCase {
             in: viewportSize
         )
 
-        XCTAssertFalse(aboveFits)
-        XCTAssertTrue(belowFits)
-        XCTAssertEqual(position.y, expectedBelowY, accuracy: 0.001)
+        // The selection starts above the viewport, so only the below placement fits: the
+        // strip centers 12pt under the rect's bottom edge, 100 + 12 + 20.
+        XCTAssertEqual(position.y, 132, accuracy: 0.001)
     }
 
     func testPositionPinsInsideViewportBottomWhenNeitherPlacementFits() {
@@ -143,37 +139,28 @@ final class SelectionActionStripPositionTests: XCTestCase {
     }
 
     func testUnrotatedSelectionAvoidsResizeAndRotationHandleChrome() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 100, y: 200, width: 120, height: 60)
         )
-        let harness = makeHarness(elements: [element])
+        let harness = CanvasHarness.make(elements: [element])
         harness.controller.selectElement(id: element.id)
 
         let selectionBounds = try XCTUnwrap(harness.controller.selectionBounds)
         let avoidanceBounds = try XCTUnwrap(harness.controller.stripAvoidanceBounds)
-        let resizeHitSize = SelectionHandleGeometry.resizeHitSize
-        let rotationHitSize = SelectionHandleGeometry.rotationHitSize
-        let rotationCenter = CGPoint(
-            x: selectionBounds.midX,
-            y: selectionBounds.minY - SelectionHandleGeometry.rotationOffset
-        )
-        let expected = selectionBounds
-            .insetBy(dx: -resizeHitSize / 2, dy: -resizeHitSize / 2)
-            .union(
-                frame(
-                    centeredAt: rotationCenter,
-                    size: CGSize(width: rotationHitSize, height: rotationHitSize)
-                )
-            )
 
-        assertEqual(avoidanceBounds, expected)
+        // The 100,200 120x60 selection grows by half a 28pt resize hit target on every side
+        // (86,186 148x88) and then up to swallow the 32pt rotation target, whose center sits
+        // 28pt above the top edge (144,156 32x32). Pinned to numbers so a change to any of
+        // the three handle sizes has to be re-stated here.
+        XCTAssertEqual(selectionBounds, CGRect(x: 100, y: 200, width: 120, height: 60))
+        assertEqual(avoidanceBounds, CGRect(x: 86, y: 156, width: 148, height: 118))
     }
 
     func testAvoidanceBoundsContainsEveryHandleHitRect() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 100, y: 200, width: 120, height: 60)
         )
-        let harness = makeHarness(elements: [element])
+        let harness = CanvasHarness.make(elements: [element])
         harness.controller.selectElement(id: element.id)
 
         let selectionBounds = try XCTUnwrap(harness.controller.selectionBounds)
@@ -207,11 +194,11 @@ final class SelectionActionStripPositionTests: XCTestCase {
     }
 
     func testRotatedSelectionAvoidsPaintedBoundingBox() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 100, y: 200, width: 200, height: 50),
             rotation: .pi / 4
         )
-        let harness = makeHarness(elements: [element])
+        let harness = CanvasHarness.make(elements: [element])
         harness.controller.selectElement(id: element.id)
 
         let selectionBounds = try XCTUnwrap(harness.controller.selectionBounds)
@@ -237,7 +224,7 @@ final class SelectionActionStripPositionTests: XCTestCase {
     }
 
     func testNoSelectionHasNoStripAvoidanceBounds() {
-        let harness = makeHarness(elements: [])
+        let harness = CanvasHarness.make(elements: [])
 
         XCTAssertNil(harness.controller.stripAvoidanceBounds)
     }
@@ -321,50 +308,5 @@ final class SelectionActionStripPositionTests: XCTestCase {
         XCTAssertEqual(actual.height, expected.height, accuracy: accuracy, file: file, line: line)
     }
 
-    private func makeHarness(elements: [CanvasElement]) -> Harness {
-        let canvasView = PKCanvasView()
-        let canvasReference = NoteCanvasReference()
-        canvasReference.canvasView = canvasView
 
-        let undoManager = UndoManager()
-        let store = CanvasElementsStore()
-        store.canvasReference = canvasReference
-        store.undoManagerOverride = undoManager
-        store.hydrate(elements)
-
-        let controller = CanvasSelectionController()
-        controller.canvasReference = canvasReference
-        controller.elementsStore = store
-        undoManager.removeAllActions()
-
-        return Harness(
-            canvasView: canvasView,
-            canvasReference: canvasReference,
-            store: store,
-            undoManager: undoManager,
-            controller: controller
-        )
-    }
-
-    private func makeElement(frame: CanvasRect, rotation: Double = 0) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Selected",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
-            frame: frame,
-            rotation: rotation
-        )
-    }
-
-    private struct Harness {
-        let canvasView: PKCanvasView
-        let canvasReference: NoteCanvasReference
-        let store: CanvasElementsStore
-        let undoManager: UndoManager
-        let controller: CanvasSelectionController
-    }
 }

@@ -1,6 +1,4 @@
-import Observation
 import SwiftUI
-import UniformTypeIdentifiers
 import VellumCore
 
 struct VellumLibraryView: View {
@@ -164,37 +162,7 @@ struct VellumLibraryView: View {
         } message: {
             Text("The notes move to the Trash. You can restore them there later.")
         }
-        .fileImporter(
-            isPresented: $isImportingPDF,
-            allowedContentTypes: [.pdf]
-        ) { result in
-            switch result {
-            case .success(let url):
-                let isAccessing = url.startAccessingSecurityScopedResource()
-                defer {
-                    if isAccessing {
-                        url.stopAccessingSecurityScopedResource()
-                    }
-                }
-
-                do {
-                    let data = try Data(contentsOf: url)
-                    let suggestedTitle = url.deletingPathExtension().lastPathComponent
-                    Task {
-                        guard let noteID = await model.library.createNoteFromPDF(
-                            data: data,
-                            suggestedTitle: suggestedTitle
-                        ) else { return }
-                        await model.refreshStats()
-                        await model.openNote(noteID)
-                    }
-                } catch {
-                    model.library.errorMessage = error.localizedDescription
-                }
-            case .failure(let error):
-                model.library.errorMessage = error.localizedDescription
-            }
-        }
+        .pdfImporter(isPresented: $isImportingPDF, model: model)
         .alert(
             "Vellum",
             isPresented: Binding(

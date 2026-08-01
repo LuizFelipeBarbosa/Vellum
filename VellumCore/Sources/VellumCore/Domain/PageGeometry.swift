@@ -103,15 +103,10 @@ public struct PageGeometry: Equatable, Sendable {
         ) + 1
     }
 
-    /// Returns the number of non-blank pages to export for content extending to `bottom`.
-    public func exportPageCount(forContentBottom bottom: CGFloat) -> Int {
-        exportPageCount(forContentBottom: bottom, minimumFilledPages: 0)
-    }
-
     /// Returns the pages-aware number of non-blank pages to export.
     public func exportPageCount(
         forContentBottom bottom: CGFloat,
-        minimumFilledPages: Int
+        minimumFilledPages: Int = 0
     ) -> Int {
         let inkDerivedFilledCount = bottom > 0
             ? Int((bottom / pageHeight).rounded(.up))

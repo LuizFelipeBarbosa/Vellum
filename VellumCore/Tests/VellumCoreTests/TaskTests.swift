@@ -53,43 +53,6 @@ func taskAcceptanceDedupesAcrossRevisions() async throws {
     #expect(try await fixture.tasks.list().count == 1)
 }
 
-@Test("Completing a task sets completedAt and logs activity")
-func setTaskDone() async throws {
-    let fixture = try TaskFixture()
-    defer { fixture.cleanup() }
-    let note = try await fixture.service.createNote(title: "Actions")
-    let task = TaskItem(id: UUID(), noteID: note.id, pageID: nil, text: "Done", isDone: false, createdAt: Date(), completedAt: nil)
-    try await fixture.tasks.save(task)
-
-    let completed = try await fixture.service.setTaskDone(id: task.id, done: true)
-
-    #expect(completed.isDone)
-    #expect(completed.completedAt != nil)
-    #expect(try await fixture.service.activity(noteID: note.id).contains { $0.kind == .taskCompleted })
-}
-
-@Test("Reopening a task clears completedAt")
-func reopenTask() async throws {
-    let fixture = try TaskFixture()
-    defer { fixture.cleanup() }
-    let note = try await fixture.service.createNote(title: "Actions")
-    let task = TaskItem(id: UUID(), noteID: note.id, pageID: nil, text: "Reopen", isDone: true, createdAt: Date(), completedAt: Date())
-    try await fixture.tasks.save(task)
-    let reopened = try await fixture.service.setTaskDone(id: task.id, done: false)
-    #expect(!reopened.isDone)
-    #expect(reopened.completedAt == nil)
-}
-
-@Test("Missing tasks report a persistence failure")
-func missingTaskFails() async throws {
-    let fixture = try TaskFixture()
-    defer { fixture.cleanup() }
-    let id = UUID()
-    await #expect(throws: VellumError.persistenceFailure("Task \(id.uuidString) was not found.")) {
-        try await fixture.service.setTaskDone(id: id, done: true)
-    }
-}
-
 @Test("Deleting a note removes only its tasks")
 func deleteNotePrunesTasks() async throws {
     let fixture = try TaskFixture()
@@ -140,7 +103,7 @@ private struct TaskFixture {
             notes: FileNoteRepository(rootDirectory: root),
             proposals: proposals,
             activity: FileActivityRepository(rootDirectory: root),
-            agent: MockVellumAgent(),
+            agent: HeuristicVellumAgent(),
             spaces: FileSpaceRepository(rootDirectory: root),
             entities: FileEntityRepository(rootDirectory: root),
             tasks: tasks

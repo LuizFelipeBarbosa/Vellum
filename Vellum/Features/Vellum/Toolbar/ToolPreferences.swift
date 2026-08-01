@@ -33,6 +33,12 @@ enum ToolID: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Text and Select drive their own gestures, so PencilKit's drawing gesture
+    /// must stand down for them.
+    var usesDrawingGesture: Bool {
+        self != .text && self != .select
+    }
+
     var inkConfigKeyPath: WritableKeyPath<ToolPreferences, InkToolConfig>? {
         switch self {
         case .pen: \ToolPreferences.pen

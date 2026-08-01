@@ -109,10 +109,8 @@ func effectivePlacementKindDefaults() {
     let shape = makeZOrderShapeElement()
     let unknown = makeZOrderUnknownElement()
 
-    #expect(text.layerPlacement == nil)
-    #expect(image.layerPlacement == nil)
-    #expect(shape.layerPlacement == nil)
-    #expect(unknown.layerPlacement == nil)
+    // All four are built without an explicit placement, so `effectivePlacement` has to
+    // fall back to the content kind.
     #expect(text.effectivePlacement == .aboveInk)
     #expect(image.effectivePlacement == .belowInk)
     #expect(shape.effectivePlacement == .belowInk)

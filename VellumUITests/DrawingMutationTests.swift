@@ -481,31 +481,10 @@ final class DrawingMutationTests: XCTestCase {
         XCTAssertEqual(pages[0].elements, store.elements)
     }
 
+
+    /// The single stroke this file's persistence assertions round-trip.
     private func makeStroke() -> PKStroke {
-        let points = [
-            PKStrokePoint(
-                location: CGPoint(x: 10, y: 12),
-                timeOffset: 0,
-                size: CGSize(width: 4, height: 4),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            ),
-            PKStrokePoint(
-                location: CGPoint(x: 32, y: 36),
-                timeOffset: 0.1,
-                size: CGSize(width: 4, height: 4),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            ),
-        ]
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
+        CanvasFixtures.makeStroke(from: CGPoint(x: 10, y: 12), to: CGPoint(x: 32, y: 36))
     }
 
     private func makePages(count: Int) -> [NotePage] {

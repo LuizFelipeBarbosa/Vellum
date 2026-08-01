@@ -68,7 +68,7 @@ final class PhotoInteractionFlowUITests: XCTestCase {
         wait(for: [penRestored], timeout: 5)
     }
 
-    func testSelectedPhotoStripHasArrangeAndLacksStyleAndPaste() throws {
+    func testSelectedPhotoStripHasArrangeAndLacksStyle() throws {
         let app = XCUIApplication()
         app.launch()
 
@@ -85,10 +85,6 @@ final class PhotoInteractionFlowUITests: XCTestCase {
         XCTAssertFalse(
             app.buttons["Style selection"].exists,
             "the selected photo's action strip unexpectedly included Style"
-        )
-        XCTAssertFalse(
-            app.buttons["Paste selection"].exists,
-            "the selected photo's action strip still included the removed Paste action"
         )
     }
 

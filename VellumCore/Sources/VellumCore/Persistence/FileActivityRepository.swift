@@ -7,17 +7,16 @@ public actor FileActivityRepository: ActivityRepository {
         self.rootDirectory = rootDirectory
     }
 
+    /// A note-scoped event lives in its package so it travels with the note, but some
+    /// events outlive the package they describe — `notePurged` is written right after
+    /// the package is removed. Those fall back to the workspace-root log, and `list`
+    /// reads both sides so nothing appended here becomes unreachable.
     public func append(_ event: ActivityEvent) async throws {
         let logURL: URL
-        if let noteID = event.noteID {
-            let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: noteID)
-            if FileManager.default.fileExists(atPath: package.path) {
-                logURL = package.appendingPathComponent("operations/activity.jsonl")
-            } else {
-                logURL = rootDirectory.appendingPathComponent("activity.jsonl")
-            }
+        if let noteID = event.noteID, packageExists(noteID: noteID) {
+            logURL = packageLogURL(noteID: noteID)
         } else {
-            logURL = rootDirectory.appendingPathComponent("activity.jsonl")
+            logURL = workspaceLogURL
         }
 
         do {
@@ -25,44 +24,75 @@ public actor FileActivityRepository: ActivityRepository {
                 at: logURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            var log = (try? Data(contentsOf: logURL)) ?? Data()
+            var log = try existingLog(at: logURL)
             if !log.isEmpty, log.last != 0x0A {
                 log.append(0x0A)
             }
             log.append(try FilePersistence.encoder(prettyPrinted: false).encode(event))
             log.append(0x0A)
             try log.write(to: logURL, options: .atomic)
+        } catch let error as VellumError {
+            throw error
         } catch {
             throw VellumError.persistenceFailure("Could not append activity: \(error.localizedDescription)")
         }
     }
 
+    /// The history this append has to preserve. An absent log is legitimately empty,
+    /// but a log that is present and unreadable is not: the append rewrites the whole
+    /// file, so treating a failed read as "empty" would replace the user's entire
+    /// activity history with this one event. Refuse the append instead — a lost event
+    /// is recoverable, a wiped log is not.
+    private func existingLog(at url: URL) throws -> Data {
+        guard FileManager.default.fileExists(atPath: url.path) else { return Data() }
+        do {
+            return try Data(contentsOf: url)
+        } catch {
+            throw VellumError.persistenceFailure(
+                "Could not read activity log \(url.path): \(error.localizedDescription)"
+            )
+        }
+    }
+
     public func list(noteID: UUID?) async throws -> [ActivityEvent] {
-        let logURLs: [URL]
+        var events: [ActivityEvent] = []
         if let noteID {
-            logURLs = [
-                FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: noteID)
-                    .appendingPathComponent("operations/activity.jsonl")
-            ]
+            events = try readEventsIfPresent(at: packageLogURL(noteID: noteID))
+            // `append` puts a note-scoped event in the workspace log whenever the
+            // package is missing, so the note's history is incomplete without the
+            // root log's share of it.
+            events += try readEventsIfPresent(at: workspaceLogURL)
+                .filter { $0.noteID == noteID }
         } else {
-            var allLogs = [rootDirectory.appendingPathComponent("activity.jsonl")]
-            let packages = try FilePersistence.packageDirectories(rootDirectory: rootDirectory)
-            allLogs.append(contentsOf: packages.map {
-                $0.appendingPathComponent("operations/activity.jsonl")
-            })
-            logURLs = allLogs
+            events = try readEventsIfPresent(at: workspaceLogURL)
+            for package in try FilePersistence.packageDirectories(rootDirectory: rootDirectory) {
+                events += try readEventsIfPresent(
+                    at: package.appendingPathComponent("operations/activity.jsonl")
+                )
+            }
         }
 
-        var events: [ActivityEvent] = []
-        for logURL in logURLs where FileManager.default.fileExists(atPath: logURL.path) {
-            events.append(contentsOf: try readEvents(from: logURL))
-        }
-        return events.sorted {
-            if $0.createdAt == $1.createdAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.createdAt < $1.createdAt
-        }
+        return events.sorted { StableOrder.ascending($0, $1, by: \.createdAt) }
+    }
+
+    private var workspaceLogURL: URL {
+        rootDirectory.appendingPathComponent("activity.jsonl")
+    }
+
+    private func packageLogURL(noteID: UUID) -> URL {
+        FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: noteID)
+            .appendingPathComponent("operations/activity.jsonl")
+    }
+
+    private func packageExists(noteID: UUID) -> Bool {
+        FileManager.default.fileExists(
+            atPath: FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: noteID).path
+        )
+    }
+
+    private func readEventsIfPresent(at url: URL) throws -> [ActivityEvent] {
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        return try readEvents(from: url)
     }
 
     private func readEvents(from url: URL) throws -> [ActivityEvent] {

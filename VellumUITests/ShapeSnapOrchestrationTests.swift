@@ -9,7 +9,7 @@ import XCTest
 final class ShapeSnapOrchestrationTests: XCTestCase {
     func testMidStrokeSnapStripsOnlyNewMatchingStrokeAndUndoRedoAreAtomic() async {
         let harness = makeHarness(policy: .snapMidStroke)
-        let unrelatedStroke = makeStroke(
+        let unrelatedStroke = CanvasFixtures.makeStroke(
             from: CGPoint(x: 40, y: 520),
             to: CGPoint(x: 160, y: 520)
         )
@@ -25,7 +25,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
 
         // Model the PencilKit race that can append a cancelled partial stroke
         // after drawingGestureRecognizer is disabled but before the deferred strip.
-        let matchingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        let matchingStroke = CanvasFixtures.makeStroke(from: points[0], to: points[points.count - 1])
         harness.canvasView.drawing = PKDrawing(
             strokes: [unrelatedStroke, matchingStroke]
         )
@@ -62,7 +62,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
 
     func testSnapOnLiftReplacesOnlyLastStrokeWhenCaptureBoundsMatch() async {
         let harness = makeHarness(policy: .snapOnLift)
-        let unrelatedStroke = makeStroke(
+        let unrelatedStroke = CanvasFixtures.makeStroke(
             from: CGPoint(x: 40, y: 520),
             to: CGPoint(x: 160, y: 520)
         )
@@ -79,7 +79,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         XCTAssertEqual(harness.canvasView.drawing.strokes.count, 1)
         XCTAssertTrue(harness.store.elements.isEmpty)
 
-        let matchingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        let matchingStroke = CanvasFixtures.makeStroke(from: points[0], to: points[points.count - 1])
         harness.canvasView.drawing = PKDrawing(
             strokes: [unrelatedStroke, matchingStroke]
         )
@@ -109,7 +109,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         )
         harness.controller.dwellFired()
 
-        let mismatchedStroke = makeStroke(
+        let mismatchedStroke = CanvasFixtures.makeStroke(
             from: CGPoint(x: 40, y: 520),
             to: CGPoint(x: 160, y: 520)
         )
@@ -139,7 +139,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         let points = recognizableLinePoints()
         // An older sketch sitting right where the shape is being drawn: its bounds are
         // inside the capture box, so only the stroke count can tell the two apart.
-        let existingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        let existingStroke = CanvasFixtures.makeStroke(from: points[0], to: points[points.count - 1])
         harness.canvasView.drawing = PKDrawing(strokes: [existingStroke])
 
         harness.controller.strokeBegan()
@@ -167,7 +167,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
     func testSnapOnLiftReplacesOnlyTheInkDrawnOverAnOlderSketch() async {
         let harness = makeHarness(policy: .snapOnLift)
         let points = recognizableLinePoints()
-        let existingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        let existingStroke = CanvasFixtures.makeStroke(from: points[0], to: points[points.count - 1])
         harness.canvasView.drawing = PKDrawing(strokes: [existingStroke])
 
         harness.controller.strokeBegan()
@@ -177,7 +177,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         harness.controller.dwellFired()
 
         // Same geometry as the older stroke: the two are only distinguishable by order.
-        let matchingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        let matchingStroke = CanvasFixtures.makeStroke(from: points[0], to: points[points.count - 1])
         harness.canvasView.drawing = PKDrawing(
             strokes: [existingStroke, matchingStroke]
         )
@@ -212,7 +212,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         )
         harness.controller.dwellFired()
 
-        let matchingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        let matchingStroke = CanvasFixtures.makeStroke(from: points[0], to: points[points.count - 1])
         harness.canvasView.drawing = PKDrawing(strokes: [matchingStroke])
         harness.controller.strokeEnded(cancelled: false)
 
@@ -249,7 +249,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         )
         harness.controller.dwellFired()
 
-        let matchingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        let matchingStroke = CanvasFixtures.makeStroke(from: points[0], to: points[points.count - 1])
         harness.canvasView.drawing = PKDrawing(strokes: [matchingStroke])
         harness.controller.strokeEnded(cancelled: false)
         harness.controller.strokeEnded(cancelled: true)
@@ -262,7 +262,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
 
     func testRecognizerNilLeavesDrawingElementsAndUndoStateUnchanged() {
         let harness = makeHarness(policy: .snapMidStroke)
-        let existingStroke = makeStroke(
+        let existingStroke = CanvasFixtures.makeStroke(
             from: CGPoint(x: 40, y: 520),
             to: CGPoint(x: 160, y: 520)
         )
@@ -387,7 +387,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
 
     func testLineSnapAdjustsFreeEndpointAndUndoesFinalGestureAtomically() async throws {
         let harness = makeHarness(policy: .snapMidStroke)
-        let unrelatedStroke = makeStroke(
+        let unrelatedStroke = CanvasFixtures.makeStroke(
             from: CGPoint(x: 40, y: 520),
             to: CGPoint(x: 160, y: 520)
         )
@@ -400,7 +400,7 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         )
         harness.controller.dwellFired()
 
-        let matchingStroke = makeStroke(from: points[0], to: points[points.count - 1])
+        let matchingStroke = CanvasFixtures.makeStroke(from: points[0], to: points[points.count - 1])
         harness.canvasView.drawing = PKDrawing(
             strokes: [unrelatedStroke, matchingStroke]
         )
@@ -880,32 +880,6 @@ final class ShapeSnapOrchestrationTests: XCTestCase {
         }
     }
 
-    private func makeStroke(from start: CGPoint, to end: CGPoint) -> PKStroke {
-        let points = [
-            PKStrokePoint(
-                location: start,
-                timeOffset: 0,
-                size: CGSize(width: 4, height: 4),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            ),
-            PKStrokePoint(
-                location: end,
-                timeOffset: 0.1,
-                size: CGSize(width: 4, height: 4),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            ),
-        ]
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
-    }
 
     private func makeExistingElement() -> CanvasElement {
         CanvasElement(

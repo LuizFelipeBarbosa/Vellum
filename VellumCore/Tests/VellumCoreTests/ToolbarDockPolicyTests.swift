@@ -230,6 +230,48 @@ struct ToolbarDockPolicyTests {
         #expect(insetCollapsed.fraction == 0.5)
     }
 
+    @Test("A non-finite release point still docks somewhere inside the container")
+    func nonFiniteReleasePointStillDocks() {
+        let placement = ToolbarDockPolicy.nearestPlacement(
+            releaseCenter: CGPoint(x: CGFloat.nan, y: CGFloat.infinity),
+            toolbarSize: toolbarSize,
+            container: container,
+            insets: insets,
+            edgeMargin: edgeMargin
+        )
+
+        #expect(placement.fraction >= 0)
+        #expect(placement.fraction <= 1)
+        let point = center(of: placement)
+        #expect(point.x.isFinite)
+        #expect(point.y.isFinite)
+    }
+
+    @Test("A non-finite or out-of-range fraction resolves to a point inside the container")
+    func nonFiniteFractionResolvesInsideContainer() {
+        for fraction in [CGFloat.nan, -CGFloat.infinity, -5, 12] {
+            let point = center(of: ToolbarDockPlacement(edge: .bottom, fraction: fraction))
+            #expect(point.x >= toolbarSize.width / 2)
+            #expect(point.x <= container.width - toolbarSize.width / 2)
+            #expect(point.y.isFinite)
+        }
+    }
+
+    @Test("Non-finite geometry is sanitized at the boundary, not per calculation")
+    func nonFiniteGeometryIsSanitizedAtTheBoundary() {
+        let placement = ToolbarDockPolicy.nearestPlacement(
+            releaseCenter: CGPoint(x: 300, y: 380),
+            toolbarSize: CGSize(width: CGFloat.nan, height: CGFloat.infinity),
+            container: CGSize(width: CGFloat.greatestFiniteMagnitude, height: 400),
+            insets: DockInsets(top: .nan, leading: -CGFloat.infinity, bottom: 8, trailing: 8),
+            edgeMargin: .nan
+        )
+
+        #expect(placement.fraction.isFinite)
+        #expect(placement.fraction >= 0)
+        #expect(placement.fraction <= 1)
+    }
+
     private func placement(for releaseCenter: CGPoint) -> ToolbarDockPlacement {
         ToolbarDockPolicy.nearestPlacement(
             releaseCenter: releaseCenter,

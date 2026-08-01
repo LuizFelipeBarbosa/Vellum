@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class PageOrientationFlipTests: XCTestCase {
     func testPortraitToLandscapePreservesDrawingAndElementCoordinates() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory)
         let drawing = makeDrawing(
@@ -29,7 +29,7 @@ final class PageOrientationFlipTests: XCTestCase {
     }
 
     func testOrientationRoundTripIsAnExactInvolutionForContent() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory)
         let drawing = makeDrawing(
@@ -52,7 +52,7 @@ final class PageOrientationFlipTests: XCTestCase {
     }
 
     func testLandscapeFlipAppendsPagesWithoutRekeyingTheDrawingAsset() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory)
         let drawing = makeDrawing(
@@ -71,7 +71,7 @@ final class PageOrientationFlipTests: XCTestCase {
     }
 
     func testFlipIsRejectedDuringZoomSnapAndHiddenStrokeSelection() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory)
         let originalNote = try encodedNote(model)
@@ -120,7 +120,7 @@ final class PageOrientationFlipTests: XCTestCase {
     }
 
     func testFlipIsRejectedForPDFBands() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory) { note in
             note.pages[0].background = .pdf
@@ -140,7 +140,7 @@ final class PageOrientationFlipTests: XCTestCase {
     }
 
     func testRejectedNoOpFlipDoesNotDirtyCleanNote() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory)
         let canvasView = attachCanvas(to: model)
@@ -154,7 +154,7 @@ final class PageOrientationFlipTests: XCTestCase {
     }
 
     func testContentWidthQueryUsesDrawingAndElementsWithoutMutatingModel() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
         let model = try await makeLoadedModel(rootDirectory: rootDirectory)
         let fittingDrawing = makeDrawing(
@@ -187,33 +187,15 @@ final class PageOrientationFlipTests: XCTestCase {
         withExtendedLifetime(canvasView) {}
     }
 
-    private func makeRootDirectory() throws -> URL {
-        let rootDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: rootDirectory,
-            withIntermediateDirectories: true
-        )
-        return rootDirectory
-    }
-
     private func makeLoadedModel(
         rootDirectory: URL,
         configureNote: ((inout Note) -> Void)? = nil
     ) async throws -> NoteScreenModel {
-        let container = AppContainer.live(rootDirectory: rootDirectory)
-        var note = try await container.notes.createNote(title: "Orientation")
-        if let configureNote {
-            configureNote(&note)
-            try await container.notes.saveNote(note)
-        }
-        let model = NoteScreenModel(
-            noteID: note.id,
-            container: container,
-            onNoteChanged: { _ in }
-        )
-        await model.load()
-        return model
+        try await NoteScreenModelFixture.make(
+            rootDirectory: rootDirectory,
+            title: "Orientation",
+            configureNote: configureNote
+        ).model
     }
 
     @discardableResult
@@ -247,16 +229,12 @@ final class PageOrientationFlipTests: XCTestCase {
         return try encoder.encode(note)
     }
 
+    /// Pinned above the ink explicitly: these tests assert the stored placement survives a
+    /// flip, so the element must not rely on the placement being resolved from its content.
     private func makeElement(frame: CanvasRect) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Coordinates stay fixed",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
+        CanvasFixtures.makeTextElement(
             frame: frame,
+            text: "Coordinates stay fixed",
             layerPlacement: .aboveInk
         )
     }

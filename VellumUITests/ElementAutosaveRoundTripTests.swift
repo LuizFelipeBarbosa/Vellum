@@ -273,7 +273,7 @@ final class ElementAutosaveRoundTripTests: XCTestCase {
 
         let proposals = FileProposalRepository(rootDirectory: rootDirectory)
         let activity = FailingActivityRepository(noteID: note.id)
-        let agent = MockVellumAgent()
+        let agent = HeuristicVellumAgent()
         let spaces = FileSpaceRepository(rootDirectory: rootDirectory)
         let entities = FileEntityRepository(rootDirectory: rootDirectory)
         let tasks = FileTaskRepository(rootDirectory: rootDirectory)
@@ -300,7 +300,7 @@ final class ElementAutosaveRoundTripTests: XCTestCase {
             graph: graph,
             askService: AskService(
                 notes: notes,
-                answerer: MockAskAnswerer(),
+                answerer: HeuristicAskAnswerer(),
                 activity: activity
             )
         )

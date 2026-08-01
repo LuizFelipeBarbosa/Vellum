@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class PDFLoadFailureTests: XCTestCase {
     func testMissingPDFAssetSurfacesFailureWithoutBlockingEditing() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
         let assetPath = "assets/missing.pdf"
@@ -24,7 +24,7 @@ final class PDFLoadFailureTests: XCTestCase {
     }
 
     func testUndecodablePDFAssetRecordsFailure() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
         let assetPath = "assets/undecodable.pdf"
@@ -39,7 +39,7 @@ final class PDFLoadFailureTests: XCTestCase {
     }
 
     func testRetryClearsFailureAndErrorAfterPDFBecomesAvailable() async throws {
-        let rootDirectory = try makeRootDirectory()
+        let rootDirectory = try TemporaryDirectory.make()
         defer { try? FileManager.default.removeItem(at: rootDirectory) }
 
         let assetPath = "assets/retry.pdf"
@@ -69,16 +69,6 @@ final class PDFLoadFailureTests: XCTestCase {
             context.cgContext.setFillColor(UIColor.white.cgColor)
             context.cgContext.fill(bounds)
         }
-    }
-
-    private func makeRootDirectory() throws -> URL {
-        let rootDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: rootDirectory,
-            withIntermediateDirectories: true
-        )
-        return rootDirectory
     }
 
     private func makeLoadedModel(

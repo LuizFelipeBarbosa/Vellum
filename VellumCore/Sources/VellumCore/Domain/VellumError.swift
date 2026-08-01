@@ -9,7 +9,6 @@ public enum VellumError: Error, Equatable, Sendable, LocalizedError {
     case invalidAssetPath(String)
     case staleProposal(UUID)
     case proposalNotFound(UUID)
-    case featureUnavailable(String)
     case persistenceFailure(String)
 
     public var errorDescription: String? {
@@ -30,8 +29,6 @@ public enum VellumError: Error, Equatable, Sendable, LocalizedError {
             "Proposal \(id.uuidString) is stale. Request a new analysis before accepting it."
         case .proposalNotFound(let id):
             "Proposal \(id.uuidString) was not found."
-        case .featureUnavailable(let feature):
-            "The \(feature) feature is unavailable."
         case .persistenceFailure(let message):
             "Persistence failed: \(message)"
         }

@@ -12,6 +12,39 @@ public enum PageBackgroundPattern {
         }
     }
 
+    /// What `style` puts on `pageRect`, clipped to `visibleRect`, in CONTENT coordinates.
+    /// Callers map to their own space and draw with their own API — that part legitimately
+    /// differs (SwiftUI GraphicsContext vs CGContext, viewport transform vs preview downscale).
+    public enum Marks: Equatable, Sendable {
+        case none
+        case dots(xs: AxisStride, ys: AxisStride)
+        /// `columns` is non-nil only for `.grid`.
+        case rules(rows: AxisStride, columns: AxisStride?)
+    }
+
+    public static func marks(
+        style: PageBackgroundStyle,
+        pageRect: CGRect,
+        clippedTo visibleRect: CGRect
+    ) -> Marks {
+        switch style.kind {
+        case .blank:
+            return .none
+        case .dots:
+            return .dots(
+                xs: dotXs(style: style, pageRect: pageRect, clippedTo: visibleRect),
+                ys: dotYs(style: style, pageRect: pageRect, clippedTo: visibleRect)
+            )
+        case .ruled, .grid:
+            return .rules(
+                rows: ruleYs(style: style, pageRect: pageRect, clippedTo: visibleRect),
+                columns: style.kind == .grid
+                    ? gridXs(style: style, pageRect: pageRect, clippedTo: visibleRect)
+                    : nil
+            )
+        }
+    }
+
     public static func ruleYs(
         style: PageBackgroundStyle,
         pageRect: CGRect,

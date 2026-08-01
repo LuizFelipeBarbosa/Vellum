@@ -222,6 +222,26 @@ func proposalCreatesMissingSpace() async throws {
     #expect(created.count == 1)
 }
 
+@Test("A space created by accepting a proposal is a valid root space")
+func proposalCreatedSpaceIsARootSpace() async throws {
+    let fixture = try SpaceFixture()
+    defer { fixture.cleanup() }
+    let note = try await fixture.service.createNote(title: "Trips")
+    let proposal = spaceProposal(note: note, operation: .fileToSpace(spaceName: "Travel", color: .orange))
+    try await fixture.proposals.save(proposal)
+
+    _ = try await fixture.service.acceptProposal(id: proposal.id)
+
+    let created = try #require(try await fixture.spaces.list().first)
+    #expect(created.name == "Travel")
+    #expect(created.color == .orange)
+    #expect(created.parentID == nil)
+    // Only a root space may be nested under; the agent path has to produce one the
+    // subspace validation accepts, which is what routing it through `createSpace` buys.
+    let child = try await fixture.service.createSpace(name: "Kyoto", color: .blue, parentID: created.id)
+    #expect(child.parentID == created.id)
+}
+
 @Test("Unknown activity kinds decode tolerantly and encode as unknown")
 func unknownActivityKindIsTolerated() throws {
     let decoded = try JSONDecoder().decode(ActivityKind.self, from: Data("\"futureKind\"".utf8))
@@ -253,7 +273,7 @@ private struct SpaceFixture {
             notes: notes,
             proposals: proposals,
             activity: FileActivityRepository(rootDirectory: root),
-            agent: MockVellumAgent(),
+            agent: HeuristicVellumAgent(),
             spaces: spaces,
             entities: FileEntityRepository(rootDirectory: root),
             tasks: FileTaskRepository(rootDirectory: root)

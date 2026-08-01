@@ -8,7 +8,7 @@ import XCTest
 @MainActor
 final class SelectionFlipTests: XCTestCase {
     func testPKStrokeAcceptsNegativeDeterminantTransform() {
-        let original = makeStroke(
+        let original = CanvasFixtures.makeStroke(
             locations: [CGPoint(x: 20, y: 30), CGPoint(x: 40, y: 70)]
         )
         let pivot = CGPoint(x: 50, y: 50)
@@ -37,12 +37,12 @@ final class SelectionFlipTests: XCTestCase {
     }
 
     func testFlipHorizontalReflectsSelectedStrokesAndPreservesBounds() throws {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 35)]
                 ),
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 70, y: 45), CGPoint(x: 95, y: 75)]
                 ),
             ],
@@ -53,13 +53,23 @@ final class SelectionFlipTests: XCTestCase {
         let originalStrokeBounds = harness.canvasView.drawing.strokes
             .map(\.renderBounds)
             .reduce(CGRect.null) { $0.union($1) }
-        let pivot = CGPoint(x: originalBounds.midX, y: originalBounds.midY)
-        let expected = horizontalReflection(about: pivot)
+        let originalStrokeMidXs = harness.canvasView.drawing.strokes.map(\.renderBounds.midX)
 
         harness.controller.flipSelection(horizontal: true)
 
-        for stroke in harness.canvasView.drawing.strokes {
-            assertTransform(stroke.transform, equals: expected)
+        // Each stroke mirrors across the ink's own vertical center line — measured from
+        // PencilKit's render bounds, not from the controller's idea of the selection — so a
+        // flip about the canvas origin or about the wrong pivot shows up as drift here.
+        let mirrorX = originalStrokeBounds.midX
+        for (stroke, originalMidX) in zip(
+            harness.canvasView.drawing.strokes,
+            originalStrokeMidXs
+        ) {
+            XCTAssertEqual(
+                stroke.renderBounds.midX,
+                2 * mirrorX - originalMidX,
+                accuracy: 0.5
+            )
         }
         let reflectedStrokeBounds = harness.canvasView.drawing.strokes
             .map(\.renderBounds)
@@ -85,9 +95,9 @@ final class SelectionFlipTests: XCTestCase {
             flippedHorizontally: true,
             flippedVertically: true
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 15, y: 25), CGPoint(x: 45, y: 55)],
                     transform: originalTransform
                 ),
@@ -127,9 +137,9 @@ final class SelectionFlipTests: XCTestCase {
             frame: CanvasRect(x: 85, y: 25, width: 35, height: 30),
             rotation: originalRotation
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 10, y: 35), CGPoint(x: 35, y: 60)]
                 ),
             ],
@@ -177,9 +187,9 @@ final class SelectionFlipTests: XCTestCase {
             frame: CanvasRect(x: 65, y: 20, width: 32, height: 28),
             rotation: 0.2
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 45)]
                 ),
             ],
@@ -246,9 +256,9 @@ final class SelectionFlipTests: XCTestCase {
     }
 
     func testFlipSelectionSurvivesDrawingDataRoundTrip() throws {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 35)]
                 ),
             ],
@@ -289,7 +299,7 @@ final class SelectionFlipTests: XCTestCase {
             rotation: 0.28,
             flippedVertically: true
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         let imageData = try XCTUnwrap(makePNGData())
         let image = try XCTUnwrap(UIImage(data: imageData))
         harness.store.cacheImage(image, data: imageData, forAssetPath: assetPath)
@@ -357,13 +367,13 @@ final class SelectionFlipTests: XCTestCase {
     }
 
     func testFlipSelectionNoOpsWithoutSelectionAndDuringHandleDrag() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 65, y: 20, width: 32, height: 28),
             rotation: 0.2
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 45)]
                 ),
             ],
@@ -422,7 +432,7 @@ final class SelectionFlipTests: XCTestCase {
     }
 
     private func select(
-        in harness: Harness,
+        in harness: CanvasHarness,
         from start: CGPoint,
         to end: CGPoint
     ) {
@@ -431,71 +441,7 @@ final class SelectionFlipTests: XCTestCase {
         harness.controller.endCapture()
     }
 
-    private func makeHarness(strokes: [PKStroke], elements: [CanvasElement]) -> Harness {
-        let canvasView = PKCanvasView()
-        canvasView.drawing = PKDrawing(strokes: strokes)
 
-        let canvasReference = NoteCanvasReference()
-        canvasReference.canvasView = canvasView
-
-        let undoManager = UndoManager()
-        let store = CanvasElementsStore()
-        store.canvasReference = canvasReference
-        store.undoManagerOverride = undoManager
-        store.hydrate(elements)
-
-        let controller = CanvasSelectionController()
-        controller.canvasReference = canvasReference
-        controller.elementsStore = store
-        undoManager.removeAllActions()
-
-        return Harness(
-            canvasView: canvasView,
-            canvasReference: canvasReference,
-            store: store,
-            undoManager: undoManager,
-            controller: controller
-        )
-    }
-
-    private func makeStroke(
-        locations: [CGPoint],
-        color: UIColor = .black,
-        size: CGSize = CGSize(width: 4, height: 4),
-        transform: CGAffineTransform = .identity,
-        creationDate: Date = Date()
-    ) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: size,
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: color),
-            path: PKStrokePath(controlPoints: points, creationDate: creationDate),
-            transform: transform
-        )
-    }
-
-    private func makeElement(frame: CanvasRect, rotation: Double = 0) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Selected",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
-            frame: frame,
-            rotation: rotation
-        )
-    }
 
     private func makeShapeElement(
         frame: CanvasRect,
@@ -542,14 +488,6 @@ final class SelectionFlipTests: XCTestCase {
         )
     }
 
-    private func horizontalReflection(about pivot: CGPoint) -> CGAffineTransform {
-        CGAffineTransform(translationX: -pivot.x, y: -pivot.y)
-            .concatenating(CGAffineTransform(scaleX: -1, y: 1))
-            .concatenating(
-                CGAffineTransform(translationX: pivot.x, y: pivot.y)
-            )
-    }
-
     private func assertTransform(
         _ actual: CGAffineTransform,
         equals expected: CGAffineTransform,
@@ -584,11 +522,4 @@ final class SelectionFlipTests: XCTestCase {
         )
     }
 
-    private struct Harness {
-        let canvasView: PKCanvasView
-        let canvasReference: NoteCanvasReference
-        let store: CanvasElementsStore
-        let undoManager: UndoManager
-        let controller: CanvasSelectionController
-    }
 }

@@ -128,15 +128,3 @@ public enum ActivityKind: String, Codable, Sendable {
         try container.encode(rawValue)
     }
 }
-
-public struct ImportedSource: Identifiable, Codable, Sendable {
-    public let id: UUID
-    public let originalURL: URL
-    public let importedAt: Date
-
-    public init(id: UUID, originalURL: URL, importedAt: Date) {
-        self.id = id
-        self.originalURL = originalURL
-        self.importedAt = importedAt
-    }
-}

@@ -89,7 +89,7 @@ func staleProposalCannotBeAccepted() async throws {
 
 @Test("A custom agent uses the same proposal acceptance seam")
 func scriptedAgentAcceptFlow() async throws {
-    let root = try makeWorkspaceTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let proposals = FileProposalRepository(rootDirectory: root)
@@ -117,14 +117,14 @@ func scriptedAgentAcceptFlow() async throws {
 
 @Test("Activity digest filters by date and totals agent action kinds")
 func workspaceActivityDigest() async throws {
-    let root = try makeWorkspaceTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let activity = FileActivityRepository(rootDirectory: root)
     let service = WorkspaceService(
         notes: FileNoteRepository(rootDirectory: root),
         proposals: FileProposalRepository(rootDirectory: root),
         activity: activity,
-        agent: MockVellumAgent(),
+        agent: HeuristicVellumAgent(),
         spaces: FileSpaceRepository(rootDirectory: root),
         entities: FileEntityRepository(rootDirectory: root),
         tasks: FileTaskRepository(rootDirectory: root)
@@ -151,7 +151,7 @@ func workspaceActivityDigest() async throws {
 
 @Test("Analysis context includes current space, spaces, and other notes")
 func requestAnalysisCarriesKnowledgeContext() async throws {
-    let root = try makeWorkspaceTemporaryDirectory()
+    let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let spaces = FileSpaceRepository(rootDirectory: root)
@@ -371,6 +371,40 @@ func trashLifecycleActivity() async throws {
     try await fixture.service.purgeNote(id: note.id)
     activity = try await fixture.service.activity(noteID: nil)
     #expect(activity.contains { $0.kind.rawValue == ActivityKind.notePurged.rawValue })
+    // The purge event is written after the package is gone, so it lands in the
+    // workspace log — the note-scoped list has to reach it there too.
+    activity = try await fixture.service.activity(noteID: note.id)
+    #expect(activity.map(\.kind.rawValue) == [ActivityKind.notePurged.rawValue])
+}
+
+@Test("Note-scoped listing reaches events appended without a package")
+func activityListedForNoteWithoutPackage() async throws {
+    let root = try TemporaryDirectory.make()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let activity = FileActivityRepository(rootDirectory: root)
+    let noteID = UUID()
+    let otherNoteID = UUID()
+    let events: [(UUID?, ActivityKind)] = [
+        (noteID, .notePurged),
+        (otherNoteID, .notePurged),
+        (nil, .workspaceSeeded),
+    ]
+    for (index, event) in events.enumerated() {
+        try await activity.append(
+            ActivityEvent(
+                id: UUID(),
+                noteID: event.0,
+                createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                kind: event.1,
+                message: "Test"
+            )
+        )
+    }
+
+    let listed = try await activity.list(noteID: noteID)
+
+    #expect(listed.map(\.noteID) == [noteID])
+    #expect(try await activity.list(noteID: nil).count == 3)
 }
 
 @Test("Note summaries expose preview, ink, links, space, and deterministic order")
@@ -451,8 +485,8 @@ private struct WorkspaceFixture {
     let tasks: FileTaskRepository
     let service: WorkspaceService
 
-    init(agent: any VellumAgent = MockVellumAgent()) throws {
-        let root = try makeWorkspaceTemporaryDirectory()
+    init(agent: any VellumAgent = HeuristicVellumAgent()) throws {
+        let root = try TemporaryDirectory.make()
         self.root = root
         notes = FileNoteRepository(rootDirectory: root)
         proposals = FileProposalRepository(rootDirectory: root)
@@ -473,11 +507,4 @@ private struct WorkspaceFixture {
     func cleanup() {
         try? FileManager.default.removeItem(at: root)
     }
-}
-
-private func makeWorkspaceTemporaryDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("VellumCoreWorkspaceTests-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
 }

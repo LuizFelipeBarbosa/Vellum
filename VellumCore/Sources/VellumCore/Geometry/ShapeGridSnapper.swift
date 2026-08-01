@@ -198,9 +198,10 @@ public enum ShapeGridSnapper {
 
         // Only an ellipse standing square to the page has a bounding box worth aligning; at a
         // quarter turn it still does, with its radii swapped.
-        let quarterTurns = (rotation / (.pi / 2)).rounded()
-        guard abs(rotation - quarterTurns * .pi / 2) <= axisEpsilon else { return unchanged }
-        let isQuarterTurned = Int(abs(quarterTurns)) % 2 == 1
+        guard let quarterTurn = QuarterTurn(nearest: rotation, tolerance: axisEpsilon) else {
+            return unchanged
+        }
+        let isQuarterTurned = quarterTurn.swapsAxes
         let halfWidth = isQuarterTurned ? radiusY : radiusX
         let halfHeight = isQuarterTurned ? radiusX : radiusY
 

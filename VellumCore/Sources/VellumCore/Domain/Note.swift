@@ -109,21 +109,6 @@ public struct Note: Identifiable, Codable, Sendable {
     }
 }
 
-extension Note {
-    /// nil when the page renders its own content (background == .pdf or .image); else the notebook style.
-    public func resolvedBackgroundStyle(forPageAt index: Int) -> PageBackgroundStyle? {
-        guard index >= 0 else { return nil }
-        guard pages.indices.contains(index) else { return backgroundStyle }
-
-        switch pages[index].background {
-        case .pdf, .image:
-            return nil
-        case .blank, .ruled, .grid:
-            return backgroundStyle
-        }
-    }
-}
-
 public struct PDFPageReference: Codable, Sendable, Equatable {
     public var assetPath: String
     public var pageIndex: Int
@@ -134,7 +119,7 @@ public struct PDFPageReference: Codable, Sendable, Equatable {
     }
 }
 
-public struct NotePage: Identifiable, Codable, Sendable {
+public struct NotePage: Identifiable, Codable, Equatable, Sendable {
     public let id: UUID
     public var order: Int
     public var plainText: String
@@ -178,6 +163,15 @@ public struct NotePage: Identifiable, Codable, Sendable {
         background = try container.decode(PageBackground.self, forKey: .background)
         pdfPage = try container.decodeIfPresent(PDFPageReference.self, forKey: .pdfPage)
         elements = try container.decodeIfPresent([CanvasElement].self, forKey: .elements) ?? []
+    }
+}
+
+extension NotePage {
+    /// Reading order of a note's pages. Two pages can carry the same `order` while a
+    /// reorder is being written, so every reader has to agree on the tiebreak or the
+    /// same note renders in a different sequence depending on who asked.
+    static func byOrder(_ lhs: NotePage, _ rhs: NotePage) -> Bool {
+        StableOrder.ascending(lhs, rhs, by: \.order)
     }
 }
 

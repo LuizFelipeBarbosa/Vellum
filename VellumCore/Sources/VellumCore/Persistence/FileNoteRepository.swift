@@ -4,40 +4,13 @@ enum FilePersistence {
     static let packageExtension = "native-note"
 
     static func encoder(prettyPrinted: Bool = true) -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .custom { date, encoder in
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            var container = encoder.singleValueContainer()
-            try container.encode(formatter.string(from: date))
-        }
-        encoder.outputFormatting = prettyPrinted ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
-        return encoder
+        VellumJSONCoding.encoder(
+            outputFormatting: prettyPrinted ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
+        )
     }
 
     static func decoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let value = try container.decode(String.self)
-
-            let fractionalFormatter = ISO8601DateFormatter()
-            fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = fractionalFormatter.date(from: value) {
-                return date
-            }
-
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime]
-            guard let date = formatter.date(from: value) else {
-                throw DecodingError.dataCorruptedError(
-                    in: container,
-                    debugDescription: "Expected an ISO 8601 date string."
-                )
-            }
-            return date
-        }
-        return decoder
+        VellumJSONCoding.decoder()
     }
 
     static func packageURL(rootDirectory: URL, noteID: UUID) -> URL {
@@ -165,12 +138,7 @@ public actor FileNoteRepository: NoteRepository {
             filteredNotes = notes
         }
 
-        return filteredNotes.sorted {
-            if $0.updatedAt == $1.updatedAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.updatedAt > $1.updatedAt
-        }
+        return filteredNotes.sorted { StableOrder.descending($0, $1, by: \.updatedAt) }
     }
 
     public func unsupportedNotes() async throws -> [UnsupportedNotePackage] {
@@ -224,14 +192,11 @@ public actor FileNoteRepository: NoteRepository {
     }
 
     public func insertNote(_ note: Note) async throws {
-        let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: note.id)
         do {
-            try createPackage(for: note, at: package)
+            try stageAndInstallPackage(for: note, assets: [])
         } catch let error as VellumError {
-            try? FileManager.default.removeItem(at: package)
             throw error
         } catch {
-            try? FileManager.default.removeItem(at: package)
             throw VellumError.persistenceFailure("Could not create note: \(error.localizedDescription)")
         }
     }
@@ -240,41 +205,21 @@ public actor FileNoteRepository: NoteRepository {
         _ note: Note,
         assets: [(relativePath: String, data: Data)]
     ) async throws {
-        let fileManager = FileManager.default
-        let finalPackage = FilePersistence.packageURL(
-            rootDirectory: rootDirectory,
-            noteID: note.id
-        )
-        let stagingPackage = rootDirectory.appendingPathComponent(
-            ".staging-\(UUID().uuidString)",
-            isDirectory: true
-        )
-
-        do {
-            try fileManager.createDirectory(
-                at: rootDirectory,
-                withIntermediateDirectories: true
-            )
-            try createPackage(for: note, at: stagingPackage)
-            for asset in assets {
-                let url = try FilePersistence.validatedAssetURL(
-                    package: stagingPackage,
-                    relativePath: asset.relativePath
-                )
-                try fileManager.createDirectory(
-                    at: url.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try asset.data.write(to: url, options: .atomic)
-            }
-            try fileManager.moveItem(at: stagingPackage, to: finalPackage)
-        } catch {
-            try? fileManager.removeItem(at: stagingPackage)
-            throw error
-        }
+        try stageAndInstallPackage(for: note, assets: assets)
     }
 
     public func loadNote(id: UUID) async throws -> Note {
+        try decodedManifest(id: id, requireSupportedSchema: true)
+    }
+
+    /// Reads and decodes a note's manifest, reporting every failure as a corrupt manifest.
+    ///
+    /// `requireSupportedSchema` is on for reads and off for `purgeNote`. Reads are
+    /// fail-closed so a note written by a newer build is never silently downgraded by
+    /// decoding it against today's model. Purge is not a read: it destroys the package
+    /// wholesale, and refusing it on schema grounds would leave a forward-schema note
+    /// permanently stuck in the workspace with no path that can remove it.
+    private func decodedManifest(id: UUID, requireSupportedSchema: Bool) throws -> Note {
         let package = try FilePersistence.requirePackage(rootDirectory: rootDirectory, noteID: id)
         let manifest = package.appendingPathComponent("manifest.json")
         let data: Data
@@ -284,18 +229,19 @@ public actor FileNoteRepository: NoteRepository {
             throw VellumError.corruptManifest(id)
         }
 
-        let probe: SchemaProbe
-        do {
-            probe = try FilePersistence.decoder().decode(SchemaProbe.self, from: data)
-        } catch {
-            throw VellumError.corruptManifest(id)
-        }
-
-        guard probe.schemaVersion <= Note.currentSchemaVersion else {
-            throw VellumError.unsupportedSchemaVersion(
-                found: probe.schemaVersion,
-                supported: Note.currentSchemaVersion
-            )
+        if requireSupportedSchema {
+            let probe: SchemaProbe
+            do {
+                probe = try FilePersistence.decoder().decode(SchemaProbe.self, from: data)
+            } catch {
+                throw VellumError.corruptManifest(id)
+            }
+            guard probe.schemaVersion <= Note.currentSchemaVersion else {
+                throw VellumError.unsupportedSchemaVersion(
+                    found: probe.schemaVersion,
+                    supported: Note.currentSchemaVersion
+                )
+            }
         }
 
         do {
@@ -331,23 +277,11 @@ public actor FileNoteRepository: NoteRepository {
 
     @discardableResult
     public func purgeNote(id: UUID) async throws -> Bool {
-        let package = try FilePersistence.requirePackage(rootDirectory: rootDirectory, noteID: id)
-        let manifest = package.appendingPathComponent("manifest.json")
-        let data: Data
-        do {
-            data = try Data(contentsOf: manifest)
-        } catch {
-            throw VellumError.corruptManifest(id)
-        }
-
-        let note: Note
-        do {
-            note = try FilePersistence.decoder().decode(Note.self, from: data)
-        } catch {
-            throw VellumError.corruptManifest(id)
-        }
-
+        // Schema-unchecked on purpose: purge must stay able to remove a note this build
+        // cannot load. See `decodedManifest`.
+        let note = try decodedManifest(id: id, requireSupportedSchema: false)
         guard note.deletedAt != nil else { return false }
+        let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: id)
         do {
             try FileManager.default.removeItem(at: package)
         } catch {
@@ -466,6 +400,9 @@ public actor FileNoteRepository: NoteRepository {
         }
 
         for pageDirectory in pageDirectories {
+            // The symlink check is not implied by `isDirectory`: a symlink pointing at a
+            // directory can report `isDirectory == true`, and following one would let the
+            // purge delete files outside the package.
             guard let pageValues = try? pageDirectory.resourceValues(
                 forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
             ),
@@ -505,21 +442,21 @@ public actor FileNoteRepository: NoteRepository {
                at: importedAssets,
                includingPropertiesForKeys: [
                    .isRegularFileKey,
-                   .isDirectoryKey,
                    .isSymbolicLinkKey,
                ],
                options: [.skipsHiddenFiles]
            ) {
             for asset in assets {
+                // `isRegularFile` is definitionally exclusive with `isDirectory`, so only
+                // the symlink check adds anything here — it stays because whether a link
+                // reports its own type or its target's depends on how the URL was made.
                 guard let assetValues = try? asset.resourceValues(
                     forKeys: [
                         .isRegularFileKey,
-                        .isDirectoryKey,
                         .isSymbolicLinkKey,
                     ]
                 ),
                 assetValues.isRegularFile == true,
-                assetValues.isDirectory != true,
                 assetValues.isSymbolicLink != true else {
                     continue
                 }
@@ -528,6 +465,49 @@ public actor FileNoteRepository: NoteRepository {
                 guard !referencedPaths.contains(relativePath) else { continue }
                 try? fileManager.removeItem(at: asset)
             }
+        }
+    }
+
+    /// Builds the whole package under a hidden staging name and moves it into place
+    /// in one step, so the workspace only ever sees a finished package. `listNotes`
+    /// is fail-closed — a single torn package makes the entire library unreadable —
+    /// and a write interrupted partway leaves nothing behind but staging, which the
+    /// scan skips as hidden.
+    private func stageAndInstallPackage(
+        for note: Note,
+        assets: [(relativePath: String, data: Data)]
+    ) throws {
+        let fileManager = FileManager.default
+        let finalPackage = FilePersistence.packageURL(
+            rootDirectory: rootDirectory,
+            noteID: note.id
+        )
+        let stagingPackage = rootDirectory.appendingPathComponent(
+            ".staging-\(UUID().uuidString)",
+            isDirectory: true
+        )
+
+        do {
+            try fileManager.createDirectory(
+                at: rootDirectory,
+                withIntermediateDirectories: true
+            )
+            try createPackage(for: note, at: stagingPackage)
+            for asset in assets {
+                let url = try FilePersistence.validatedAssetURL(
+                    package: stagingPackage,
+                    relativePath: asset.relativePath
+                )
+                try fileManager.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try asset.data.write(to: url, options: .atomic)
+            }
+            try fileManager.moveItem(at: stagingPackage, to: finalPackage)
+        } catch {
+            try? fileManager.removeItem(at: stagingPackage)
+            throw error
         }
     }
 

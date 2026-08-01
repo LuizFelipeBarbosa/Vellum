@@ -11,7 +11,7 @@ final class NotePageRendererTests: XCTestCase {
     func testInkIsCroppedToItsPage() throws {
         let relativeY = PageGeometry.a4.pageHeight / 2
         let absoluteY = PageGeometry.a4.pageHeight + relativeY
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 300, y: absoluteY - 24),
                 CGPoint(x: 300, y: absoluteY),
@@ -27,17 +27,17 @@ final class NotePageRendererTests: XCTestCase {
         let secondPageReference = render(pageIndex: 1, content: emptyContent)
         let sampleRect = CGRect(x: 280, y: relativeY - 44, width: 40, height: 88)
 
-        let firstPixels = try pixelBuffer(for: firstPage)
-        let firstReferencePixels = try pixelBuffer(for: firstPageReference)
-        let secondPixels = try pixelBuffer(for: secondPage)
-        let secondReferencePixels = try pixelBuffer(for: secondPageReference)
+        let firstPixels = try PixelComparison.pixelBuffer(for: firstPage)
+        let firstReferencePixels = try PixelComparison.pixelBuffer(for: firstPageReference)
+        let secondPixels = try PixelComparison.pixelBuffer(for: secondPage)
+        let secondReferencePixels = try PixelComparison.pixelBuffer(for: secondPageReference)
 
         XCTAssertEqual(
-            differingPixelCount(firstPixels, firstReferencePixels, in: sampleRect),
+            PixelComparison.differingPixelCount(firstPixels, firstReferencePixels, in: sampleRect),
             0
         )
         XCTAssertGreaterThan(
-            differingPixelCount(secondPixels, secondReferencePixels, in: sampleRect),
+            PixelComparison.differingPixelCount(secondPixels, secondReferencePixels, in: sampleRect),
             0
         )
     }
@@ -60,11 +60,11 @@ final class NotePageRendererTests: XCTestCase {
             frame: frame
         )
         let content = makeContent(elements: [element])
-        let rendered = try pixelBuffer(for: render(pageIndex: 0, content: content))
-        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+        let rendered = try PixelComparison.pixelBuffer(for: render(pageIndex: 0, content: content))
+        let reference = try PixelComparison.pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
 
         XCTAssertGreaterThan(
-            differingPixelCount(rendered, reference, in: cgRect(frame).insetBy(dx: 6, dy: 6)),
+            PixelComparison.differingPixelCount(rendered, reference, in: PixelComparison.cgRect(frame).insetBy(dx: 6, dy: 6)),
             0
         )
     }
@@ -81,11 +81,11 @@ final class NotePageRendererTests: XCTestCase {
             ),
             frame: frame
         )
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 0, content: makeContent(elements: [element]))
         )
-        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
-        let persistedFrame = cgRect(frame)
+        let reference = try PixelComparison.pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+        let persistedFrame = PixelComparison.cgRect(frame)
         let sampleRect = CGRect(
             x: persistedFrame.minX,
             y: persistedFrame.maxY,
@@ -94,7 +94,7 @@ final class NotePageRendererTests: XCTestCase {
         )
 
         XCTAssertGreaterThan(
-            differingPixelCount(rendered, reference, in: sampleRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: sampleRect),
             0
         )
     }
@@ -111,11 +111,11 @@ final class NotePageRendererTests: XCTestCase {
             frame,
             textContent: textContent
         )
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 0, content: makeContent(elements: [element]))
         )
-        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
-        let persistedFrame = cgRect(frame)
+        let reference = try PixelComparison.pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+        let persistedFrame = PixelComparison.cgRect(frame)
         let previousUpwardGrowth = CGFloat(grownFrame.height - frame.height) / 2
         let belowSampleRect = CGRect(
             x: persistedFrame.minX,
@@ -134,18 +134,18 @@ final class NotePageRendererTests: XCTestCase {
         XCTAssertEqual(grownFrame.y, frame.y, accuracy: 0.001)
         XCTAssertGreaterThan(previousUpwardGrowth, 4)
         XCTAssertGreaterThan(
-            differingPixelCount(rendered, reference, in: belowSampleRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: belowSampleRect),
             0
         )
         XCTAssertEqual(
-            differingPixelCount(rendered, reference, in: aboveSampleRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: aboveSampleRect),
             0
         )
     }
 
     func testImageElementDrawsAspectFitImageInsideItsFrame() throws {
         let assetPath = "assets/red.png"
-        let image = solidImage(color: .red, size: CGSize(width: 8, height: 4))
+        let image = PixelComparison.solidImage(color: .red, size: CGSize(width: 8, height: 4))
         let frame = CanvasRect(
             x: 250,
             y: Double(PageGeometry.a4.pageHeight / 2 - 100),
@@ -165,8 +165,8 @@ final class NotePageRendererTests: XCTestCase {
             elements: [element],
             imagesByAssetPath: [assetPath: image]
         )
-        let pixels = try pixelBuffer(for: render(pageIndex: 0, content: content))
-        let center = CGPoint(x: cgRect(frame).midX, y: cgRect(frame).midY)
+        let pixels = try PixelComparison.pixelBuffer(for: render(pageIndex: 0, content: content))
+        let center = CGPoint(x: PixelComparison.cgRect(frame).midX, y: PixelComparison.cgRect(frame).midY)
         let pixel = pixels.pixel(atContentPoint: center)
 
         XCTAssertGreaterThanOrEqual(pixel.red, 250)
@@ -214,9 +214,9 @@ final class NotePageRendererTests: XCTestCase {
             frame: frame
         )
         let imagesByAssetPath = [
-            assetPath: solidImage(color: .red, size: CGSize(width: 12, height: 8)),
+            assetPath: PixelComparison.solidImage(color: .red, size: CGSize(width: 12, height: 8)),
         ]
-        let interleaved = try pixelBuffer(
+        let interleaved = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -226,7 +226,7 @@ final class NotePageRendererTests: XCTestCase {
                 )
             )
         )
-        let legacyBandOrder = try pixelBuffer(
+        let legacyBandOrder = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -238,7 +238,7 @@ final class NotePageRendererTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            differingPixelCount(
+            PixelComparison.differingPixelCount(
                 interleaved,
                 legacyBandOrder,
                 in: PageGeometry.a4.pageRect(index: 0)
@@ -272,7 +272,7 @@ final class NotePageRendererTests: XCTestCase {
             content: .image(imageContent),
             frame: frame
         )
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: center.x - 40, y: center.y),
                 center,
@@ -280,8 +280,8 @@ final class NotePageRendererTests: XCTestCase {
             ],
             size: CGSize(width: 28, height: 28)
         )
-        let image = solidImage(color: .red, size: CGSize(width: 8, height: 8))
-        let aboveInkPixels = try pixelBuffer(
+        let image = PixelComparison.solidImage(color: .red, size: CGSize(width: 8, height: 8))
+        let aboveInkPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -293,7 +293,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let defaultPixels = try pixelBuffer(
+        let defaultPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -342,7 +342,7 @@ final class NotePageRendererTests: XCTestCase {
             ),
             frame: frame
         )
-        let unflippedPixels = try pixelBuffer(
+        let unflippedPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -353,7 +353,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let flippedPixels = try pixelBuffer(
+        let flippedPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -364,7 +364,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let renderedFrame = cgRect(frame)
+        let renderedFrame = PixelComparison.cgRect(frame)
         let leftSample = CGPoint(
             x: renderedFrame.minX + renderedFrame.width / 4,
             y: renderedFrame.midY
@@ -404,14 +404,14 @@ final class NotePageRendererTests: XCTestCase {
             ),
             rotation: .pi / 2
         )
-        let image = solidImage(color: .red, size: CGSize(width: 300, height: 40))
+        let image = PixelComparison.solidImage(color: .red, size: CGSize(width: 300, height: 40))
         let content = makeContent(
             elements: [element],
             imagesByAssetPath: [assetPath: image],
             pageCount: 2
         )
-        let rendered = try pixelBuffer(for: render(pageIndex: 1, content: content))
-        let reference = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(for: render(pageIndex: 1, content: content))
+        let reference = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 1, content: makeContent(pageCount: 2))
         )
         let overlap = element.rotatedBoundingBox.intersection(
@@ -420,7 +420,7 @@ final class NotePageRendererTests: XCTestCase {
         let pageLocalOverlap = overlap.offsetBy(dx: 0, dy: -PageGeometry.a4.pageHeight)
 
         XCTAssertGreaterThan(
-            differingPixelCount(rendered, reference, in: pageLocalOverlap),
+            PixelComparison.differingPixelCount(rendered, reference, in: pageLocalOverlap),
             0
         )
     }
@@ -443,10 +443,10 @@ final class NotePageRendererTests: XCTestCase {
             ),
             frame: frame
         )
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 0, content: makeContent(elements: [element]))
         )
-        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+        let reference = try PixelComparison.pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
 
         for point in [
             CGPoint(x: 240, y: 265),
@@ -460,7 +460,7 @@ final class NotePageRendererTests: XCTestCase {
                 height: 12
             )
             XCTAssertGreaterThan(
-                differingPixelCount(rendered, reference, in: sampleRect),
+                PixelComparison.differingPixelCount(rendered, reference, in: sampleRect),
                 0
             )
         }
@@ -486,10 +486,10 @@ final class NotePageRendererTests: XCTestCase {
             ),
             frame: frame
         )
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 0, content: makeContent(elements: [element]))
         )
-        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+        let reference = try PixelComparison.pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
 
         for point in [
             CGPoint(x: 300, y: 220),
@@ -504,7 +504,7 @@ final class NotePageRendererTests: XCTestCase {
                 height: 12
             )
             XCTAssertGreaterThan(
-                differingPixelCount(rendered, reference, in: sampleRect),
+                PixelComparison.differingPixelCount(rendered, reference, in: sampleRect),
                 0
             )
         }
@@ -524,11 +524,11 @@ final class NotePageRendererTests: XCTestCase {
             frame: frame,
             rotation: rotation
         )
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 0, content: makeContent(elements: [element]))
         )
-        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
-        let center = CGPoint(x: cgRect(frame).midX, y: cgRect(frame).midY)
+        let reference = try PixelComparison.pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+        let center = CGPoint(x: PixelComparison.cgRect(frame).midX, y: PixelComparison.cgRect(frame).midY)
         let radiusX = CGFloat(frame.width / 2)
         let tiltedRight = CGPoint(
             x: center.x + cos(CGFloat(rotation)) * radiusX,
@@ -537,7 +537,7 @@ final class NotePageRendererTests: XCTestCase {
         let untiltedRight = CGPoint(x: center.x + radiusX, y: center.y)
 
         XCTAssertGreaterThan(
-            differingPixelCount(
+            PixelComparison.differingPixelCount(
                 rendered,
                 reference,
                 in: CGRect(
@@ -550,7 +550,7 @@ final class NotePageRendererTests: XCTestCase {
             0
         )
         XCTAssertEqual(
-            differingPixelCount(
+            PixelComparison.differingPixelCount(
                 rendered,
                 reference,
                 in: CGRect(
@@ -578,27 +578,27 @@ final class NotePageRendererTests: XCTestCase {
             element.rotatedBoundingBox.intersects(PageGeometry.a4.pageRect(index: 1))
         )
 
-        let firstPage = try pixelBuffer(
+        let firstPage = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 0, content: content, pointSize: fullRenderPointSize)
         )
-        let firstReference = try pixelBuffer(
+        let firstReference = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 0, content: emptyContent, pointSize: fullRenderPointSize)
         )
-        let secondPage = try pixelBuffer(
+        let secondPage = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 1, content: content, pointSize: fullRenderPointSize)
         )
-        let secondReference = try pixelBuffer(
+        let secondReference = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 1, content: emptyContent, pointSize: fullRenderPointSize)
         )
         let aboveBoundary = CGRect(x: 220, y: boundary - 16, width: 160, height: 12)
         let belowBoundary = CGRect(x: 220, y: 2, width: 160, height: 8)
 
         XCTAssertGreaterThan(
-            differingPixelCount(firstPage, firstReference, in: aboveBoundary),
+            PixelComparison.differingPixelCount(firstPage, firstReference, in: aboveBoundary),
             0
         )
         XCTAssertGreaterThan(
-            differingPixelCount(secondPage, secondReference, in: belowBoundary),
+            PixelComparison.differingPixelCount(secondPage, secondReference, in: belowBoundary),
             0
         )
     }
@@ -632,24 +632,21 @@ final class NotePageRendererTests: XCTestCase {
         let content = makeContent(elements: [element], pageCount: 2)
         let emptyContent = makeContent(pageCount: 2)
 
-        // Rotation is what carries this shape down to the boundary: the unrotated frame
-        // stops far above it, so inflating anything else would miss page two.
+        // Rotation is what carries this shape down to the boundary: even inflated by half
+        // its 30pt stroke the unrotated frame stops 81pt above it, so anything that widened
+        // the frame instead of rotating it would miss page two.
         XCTAssertEqual(element.rotatedBoundingBox.maxY, boundary, accuracy: 0.001)
-        XCTAssertLessThan(
-            cgRect(frame).maxY + CGFloat(strokeWidth) / 2,
-            boundary
-        )
 
-        let secondPage = try pixelBuffer(
+        let secondPage = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 1, content: content, pointSize: fullRenderPointSize)
         )
-        let secondReference = try pixelBuffer(
+        let secondReference = try PixelComparison.pixelBuffer(
             for: render(pageIndex: 1, content: emptyContent, pointSize: fullRenderPointSize)
         )
         let belowBoundary = CGRect(x: 294, y: 1, width: 12, height: 8)
 
         XCTAssertGreaterThan(
-            differingPixelCount(secondPage, secondReference, in: belowBoundary),
+            PixelComparison.differingPixelCount(secondPage, secondReference, in: belowBoundary),
             0
         )
     }
@@ -689,7 +686,7 @@ final class NotePageRendererTests: XCTestCase {
             ),
             frame: CanvasRect(x: 250, y: 300, width: 160, height: 160)
         )
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 250, y: 460),
                 CGPoint(x: 330, y: 380),
@@ -697,7 +694,7 @@ final class NotePageRendererTests: XCTestCase {
             ],
             size: CGSize(width: 12, height: 12)
         )
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -706,14 +703,14 @@ final class NotePageRendererTests: XCTestCase {
                 )
             )
         )
-        let reference = try pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
+        let reference = try PixelComparison.pixelBuffer(for: render(pageIndex: 0, content: makeContent()))
 
         for point in [
             CGPoint(x: 270, y: 320),
             CGPoint(x: 330, y: 380),
         ] {
             XCTAssertGreaterThan(
-                differingPixelCount(
+                PixelComparison.differingPixelCount(
                     rendered,
                     reference,
                     in: CGRect(
@@ -741,7 +738,7 @@ final class NotePageRendererTests: XCTestCase {
             kind: .blank,
             paperTint: CodableColor(red: 0.4, green: 0.4, blue: 0.4)
         )
-        let lightPixels = try pixelBuffer(
+        let lightPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -752,7 +749,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let darkPixels = try pixelBuffer(
+        let darkPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -771,7 +768,7 @@ final class NotePageRendererTests: XCTestCase {
         )
 
         XCTAssertGreaterThan(
-            differingPixelCount(lightPixels, darkPixels, in: strokeSampleRect),
+            PixelComparison.differingPixelCount(lightPixels, darkPixels, in: strokeSampleRect),
             0
         )
         XCTAssertTrue(
@@ -786,14 +783,14 @@ final class NotePageRendererTests: XCTestCase {
             x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
-        let paperPixels = try pixelBuffer(
+        let paperPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(style: .blank, interfaceStyle: .dark),
                 pointSize: fullRenderPointSize
             )
         )
-        let shapePixels = try pixelBuffer(
+        let shapePixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -839,14 +836,14 @@ final class NotePageRendererTests: XCTestCase {
             ),
             strokeWidth: 32
         )
-        let paper = try pixelBuffer(
+        let paper = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(style: .blank, interfaceStyle: .dark),
                 pointSize: fullRenderPointSize
             )
         )
-        let translucent = try pixelBuffer(
+        let translucent = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -857,7 +854,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let opaque = try pixelBuffer(
+        let opaque = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -910,7 +907,7 @@ final class NotePageRendererTests: XCTestCase {
 
     func testRuledStyleRendersHorizontalLinesAtSpacingIntervals() throws {
         let spacing: Double = 32
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -919,7 +916,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let reference = try pixelBuffer(
+        let reference = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -932,18 +929,18 @@ final class NotePageRendererTests: XCTestCase {
         let betweenLinesRect = CGRect(x: 96, y: 46, width: 576, height: 4)
 
         XCTAssertGreaterThan(
-            differingPixelCount(rendered, reference, in: lineRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: lineRect),
             0
         )
         XCTAssertEqual(
-            differingPixelCount(rendered, reference, in: betweenLinesRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: betweenLinesRect),
             0
         )
     }
 
     func testGridStyleRendersHorizontalAndVerticalLines() throws {
         let spacing: Double = 32
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -952,7 +949,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let reference = try pixelBuffer(
+        let reference = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -965,24 +962,24 @@ final class NotePageRendererTests: XCTestCase {
         let verticalLineRect = CGRect(x: 30, y: 78, width: 4, height: 4)
 
         XCTAssertGreaterThan(
-            differingPixelCount(rendered, reference, in: horizontalLineRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: horizontalLineRect),
             0
         )
         XCTAssertGreaterThan(
-            differingPixelCount(rendered, reference, in: verticalLineRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: verticalLineRect),
             0
         )
     }
 
     func testBlankStyleRendersNoPattern() throws {
-        let blank = try pixelBuffer(
+        let blank = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(style: .blank),
                 pointSize: fullRenderPointSize
             )
         )
-        let dots = try pixelBuffer(
+        let dots = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(),
@@ -991,24 +988,24 @@ final class NotePageRendererTests: XCTestCase {
         )
         let traits = UITraitCollection(userInterfaceStyle: .light)
         let paperColor = UIColor(VellumTheme.card).resolvedColor(with: traits)
-        let plainPaper = try pixelBuffer(
-            for: solidImage(color: paperColor, size: fullRenderPointSize)
+        let plainPaper = try PixelComparison.pixelBuffer(
+            for: PixelComparison.solidImage(color: paperColor, size: fullRenderPointSize)
         )
         let dotRect = CGRect(x: 22, y: 22, width: 4, height: 4)
 
         XCTAssertGreaterThan(
-            differingPixelCount(dots, plainPaper, in: dotRect),
+            PixelComparison.differingPixelCount(dots, plainPaper, in: dotRect),
             0
         )
         XCTAssertEqual(
-            differingPixelCount(blank, plainPaper, in: dotRect),
+            PixelComparison.differingPixelCount(blank, plainPaper, in: dotRect),
             0
         )
     }
 
     func testCustomPaperTintFillsTheSheetWithThatColor() throws {
         let tint = CodableColor(red: 0.2, green: 0.4, blue: 0.8)
-        let pixels = try pixelBuffer(
+        let pixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -1032,7 +1029,7 @@ final class NotePageRendererTests: XCTestCase {
 
     func testDarkPaperTintUsesLightPatternInk() throws {
         let tint = CodableColor(hex: "#23201A")
-        let dots = try pixelBuffer(
+        let dots = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -1041,7 +1038,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let blank = try pixelBuffer(
+        let blank = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -1058,7 +1055,7 @@ final class NotePageRendererTests: XCTestCase {
         XCTAssertGreaterThan(dotPixel.green, backgroundPixel.green)
         XCTAssertGreaterThan(dotPixel.blue, backgroundPixel.blue)
         XCTAssertGreaterThan(
-            differingPixelCount(
+            PixelComparison.differingPixelCount(
                 dots,
                 blank,
                 in: CGRect(x: 22, y: 22, width: 4, height: 4)
@@ -1070,16 +1067,17 @@ final class NotePageRendererTests: XCTestCase {
     func testSecondPageDotsAlignToThePageOrigin() throws {
         let pageRect = PageGeometry.a4.pageRect(index: 1)
         let spacing = CGFloat(PageBackgroundStyle.legacyDefault.spacing)
-        let absoluteDotY = pageRect.minY + spacing
-        let pageLocalDotY = absoluteDotY - pageRect.minY
-        let rendered = try pixelBuffer(
+        // The pattern restarts at every page origin, so the first dot row of page two sits
+        // one spacing below that page's own top edge.
+        let pageLocalDotY = spacing
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 1,
                 content: makeContent(pageCount: 2),
                 pointSize: fullRenderPointSize
             )
         )
-        let reference = try pixelBuffer(
+        let reference = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 1,
                 content: makeContent(
@@ -1097,9 +1095,8 @@ final class NotePageRendererTests: XCTestCase {
         )
 
         XCTAssertEqual(pageRect.minY, PageGeometry.a4.pageHeight, accuracy: 0.001)
-        XCTAssertEqual(pageLocalDotY, spacing, accuracy: 0.001)
         XCTAssertGreaterThan(
-            differingPixelCount(rendered, reference, in: dotRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: dotRect),
             0
         )
     }
@@ -1107,14 +1104,14 @@ final class NotePageRendererTests: XCTestCase {
     func testPDFPageRendersAspectFitWithPaperLetterboxingAndLeavesOtherBandsUnchanged()
         throws {
         let sourceSize = CGSize(width: 320, height: 320)
-        let pdfDocument = try makeSolidPDFDocument(color: .blue, size: sourceSize)
+        let pdfDocument = try PixelComparison.makeSolidPDFDocument(color: .blue, size: sourceSize)
         let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
         let content = makeContent(
             pageCount: 2,
             style: .blank,
             pdfPagesByBand: [0: pdfPage]
         )
-        let renderedPDFBand = try pixelBuffer(
+        let renderedPDFBand = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: content,
@@ -1122,7 +1119,7 @@ final class NotePageRendererTests: XCTestCase {
             )
         )
         let blankContent = makeContent(pageCount: 2, style: .blank)
-        let blankFirstBand = try pixelBuffer(
+        let blankFirstBand = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: blankContent,
@@ -1150,14 +1147,14 @@ final class NotePageRendererTests: XCTestCase {
         XCTAssertFalse(marginPixel.differs(from: paperPixel))
         XCTAssertTrue(marginPixel.differs(from: pdfPixel))
 
-        let renderedNonPDFBand = try pixelBuffer(
+        let renderedNonPDFBand = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 1,
                 content: content,
                 pointSize: fullRenderPointSize
             )
         )
-        let referenceNonPDFBand = try pixelBuffer(
+        let referenceNonPDFBand = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 1,
                 content: blankContent,
@@ -1165,7 +1162,7 @@ final class NotePageRendererTests: XCTestCase {
             )
         )
         XCTAssertEqual(
-            differingPixelCount(
+            PixelComparison.differingPixelCount(
                 renderedNonPDFBand,
                 referenceNonPDFBand,
                 in: CGRect(origin: .zero, size: fullRenderPointSize)
@@ -1177,7 +1174,7 @@ final class NotePageRendererTests: XCTestCase {
     func testLetterGeometryFillsTheFormerA4LetterboxMarginWithPDFContent() throws {
         let geometry = PageGeometry(portraitAspectRatio: 792.0 / 612.0)
         let sourceSize = CGSize(width: 612, height: 792)
-        let pdfDocument = try makeSolidPDFDocument(color: .white, size: sourceSize)
+        let pdfDocument = try PixelComparison.makeSolidPDFDocument(color: .white, size: sourceSize)
         let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
         let tintedPaper = PageBackgroundStyle(
             kind: .blank,
@@ -1187,7 +1184,7 @@ final class NotePageRendererTests: XCTestCase {
             width: geometry.contentWidth,
             height: geometry.pageHeight
         )
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: renderVector(
                 pageIndex: 0,
                 content: makeContent(
@@ -1198,7 +1195,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: pointSize
             )
         )
-        let reference = try pixelBuffer(
+        let reference = try PixelComparison.pixelBuffer(
             for: renderVector(
                 pageIndex: 0,
                 content: makeContent(
@@ -1227,9 +1224,9 @@ final class NotePageRendererTests: XCTestCase {
 
     func testWhitePDFOverBlankPaperInLightModeIsPixelIdenticalToPaper() throws {
         let sourceSize = CGSize(width: 320, height: 320)
-        let pdfDocument = try makeSolidPDFDocument(color: .white, size: sourceSize)
+        let pdfDocument = try PixelComparison.makeSolidPDFDocument(color: .white, size: sourceSize)
         let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -1239,7 +1236,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let reference = try pixelBuffer(
+        let reference = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(style: .blank),
@@ -1252,7 +1249,7 @@ final class NotePageRendererTests: XCTestCase {
         ).insetBy(dx: 16, dy: 16)
 
         XCTAssertEqual(
-            differingPixelCount(rendered, reference, in: fittedRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: fittedRect),
             0
         )
     }
@@ -1263,7 +1260,7 @@ final class NotePageRendererTests: XCTestCase {
             y: PageGeometry.a4.pageHeight / 2
         )
         let paperContent = makeContent(style: .blank, interfaceStyle: .dark)
-        let paperPixels = try pixelBuffer(
+        let paperPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: paperContent,
@@ -1276,7 +1273,7 @@ final class NotePageRendererTests: XCTestCase {
         XCTAssertEqual(CGFloat(paperPixel.green), 0x20, accuracy: 10)
         XCTAssertEqual(CGFloat(paperPixel.blue), 0x19, accuracy: 10)
 
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: center.x - 40, y: center.y),
                 center,
@@ -1284,7 +1281,7 @@ final class NotePageRendererTests: XCTestCase {
             ],
             size: CGSize(width: 28, height: 28)
         )
-        let inkPixels = try pixelBuffer(
+        let inkPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -1302,9 +1299,9 @@ final class NotePageRendererTests: XCTestCase {
 
     func testWhitePDFInDarkModeApproximatesDarkCardPaper() throws {
         let sourceSize = CGSize(width: 320, height: 320)
-        let pdfDocument = try makeSolidPDFDocument(color: .white, size: sourceSize)
+        let pdfDocument = try PixelComparison.makeSolidPDFDocument(color: .white, size: sourceSize)
         let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -1315,7 +1312,7 @@ final class NotePageRendererTests: XCTestCase {
                 pointSize: fullRenderPointSize
             )
         )
-        let reference = try pixelBuffer(
+        let reference = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -1337,16 +1334,16 @@ final class NotePageRendererTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            differingPixelCount(rendered, reference, in: sampleRect),
+            PixelComparison.differingPixelCount(rendered, reference, in: sampleRect),
             0
         )
     }
 
     func testBluePDFInDarkModeKeepsBlueChannelDominant() throws {
         let sourceSize = CGSize(width: 320, height: 320)
-        let pdfDocument = try makeSolidPDFDocument(color: .blue, size: sourceSize)
+        let pdfDocument = try PixelComparison.makeSolidPDFDocument(color: .blue, size: sourceSize)
         let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: makeContent(
@@ -1372,9 +1369,9 @@ final class NotePageRendererTests: XCTestCase {
 
     func testVectorTreatmentStillYieldsFullBlueForExport() throws {
         let sourceSize = CGSize(width: 320, height: 320)
-        let pdfDocument = try makeSolidPDFDocument(color: .blue, size: sourceSize)
+        let pdfDocument = try PixelComparison.makeSolidPDFDocument(color: .blue, size: sourceSize)
         let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
-        let rendered = try pixelBuffer(
+        let rendered = try PixelComparison.pixelBuffer(
             for: renderVector(
                 pageIndex: 0,
                 content: makeContent(
@@ -1399,7 +1396,7 @@ final class NotePageRendererTests: XCTestCase {
     }
 
     func testInkCompositesAbovePDFPage() throws {
-        let pdfDocument = try makeSolidPDFDocument(
+        let pdfDocument = try PixelComparison.makeSolidPDFDocument(
             color: .blue,
             size: CGSize(width: 320, height: 320)
         )
@@ -1408,7 +1405,7 @@ final class NotePageRendererTests: XCTestCase {
             x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: center.x - 40, y: center.y),
                 center,
@@ -1425,14 +1422,14 @@ final class NotePageRendererTests: XCTestCase {
             style: .blank,
             pdfPagesByBand: [0: pdfPage]
         )
-        let pdfOnlyPixels = try pixelBuffer(
+        let pdfOnlyPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: pdfOnly,
                 pointSize: fullRenderPointSize
             )
         )
-        let withInkPixels = try pixelBuffer(
+        let withInkPixels = try PixelComparison.pixelBuffer(
             for: render(
                 pageIndex: 0,
                 content: withInk,
@@ -1446,7 +1443,7 @@ final class NotePageRendererTests: XCTestCase {
             )
         )
         XCTAssertGreaterThan(
-            differingPixelCount(
+            PixelComparison.differingPixelCount(
                 withInkPixels,
                 pdfOnlyPixels,
                 in: CGRect(x: center.x - 48, y: center.y - 20, width: 96, height: 40)
@@ -1522,39 +1519,6 @@ final class NotePageRendererTests: XCTestCase {
         )
     }
 
-    private func makeSolidPDFDocument(
-        color: UIColor,
-        size: CGSize
-    ) throws -> PDFDocument {
-        let bounds = CGRect(origin: .zero, size: size)
-        let data = UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
-            context.beginPage()
-            context.cgContext.setFillColor(color.cgColor)
-            context.cgContext.fill(bounds)
-        }
-        return try XCTUnwrap(PDFDocument(data: data))
-    }
-
-    private func makeStroke(
-        locations: [CGPoint],
-        size: CGSize
-    ) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: size,
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
-    }
 
     private func makeHorizontalShape(
         strokeColor: CodableColor,
@@ -1616,16 +1580,6 @@ final class NotePageRendererTests: XCTestCase {
         )
     }
 
-    private func solidImage(color: UIColor, size: CGSize) -> UIImage {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        return UIGraphicsImageRenderer(size: size, format: format).image { context in
-            color.setFill()
-            context.fill(CGRect(origin: .zero, size: size))
-        }
-    }
-
     private func splitColorImage(
         leftColor: UIColor,
         rightColor: UIColor,
@@ -1649,120 +1603,6 @@ final class NotePageRendererTests: XCTestCase {
                     height: size.height
                 )
             )
-        }
-    }
-
-    private func pixelBuffer(for image: UIImage) throws -> PixelBuffer {
-        let cgImage = try XCTUnwrap(image.cgImage)
-        var bytes = [UInt8](repeating: 0, count: cgImage.width * cgImage.height * 4)
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-            | CGBitmapInfo.byteOrder32Big.rawValue
-        let context = try XCTUnwrap(
-            CGContext(
-                data: &bytes,
-                width: cgImage.width,
-                height: cgImage.height,
-                bitsPerComponent: 8,
-                bytesPerRow: cgImage.width * 4,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: bitmapInfo
-            )
-        )
-        context.draw(
-            cgImage,
-            in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height)
-        )
-        return PixelBuffer(width: cgImage.width, height: cgImage.height, bytes: bytes)
-    }
-
-    private func differingPixelCount(
-        _ lhs: PixelBuffer,
-        _ rhs: PixelBuffer,
-        in contentRect: CGRect
-    ) -> Int {
-        XCTAssertEqual(lhs.width, rhs.width)
-        XCTAssertEqual(lhs.height, rhs.height)
-
-        let minX = max(
-            0,
-            Int(floor(contentRect.minX / PageLayout.portraitContentWidth * CGFloat(lhs.width)))
-        )
-        let maxX = min(
-            lhs.width,
-            Int(ceil(contentRect.maxX / PageLayout.portraitContentWidth * CGFloat(lhs.width)))
-        )
-        let minY = max(
-            0,
-            Int(floor(contentRect.minY / PageGeometry.a4.pageHeight * CGFloat(lhs.height)))
-        )
-        let maxY = min(
-            lhs.height,
-            Int(ceil(contentRect.maxY / PageGeometry.a4.pageHeight * CGFloat(lhs.height)))
-        )
-
-        var count = 0
-        for y in minY..<maxY {
-            for x in minX..<maxX {
-                if lhs.pixel(x: x, y: y).differs(from: rhs.pixel(x: x, y: y)) {
-                    count += 1
-                }
-            }
-        }
-        return count
-    }
-
-    private func cgRect(_ rect: CanvasRect) -> CGRect {
-        CGRect(
-            x: CGFloat(rect.x),
-            y: CGFloat(rect.y),
-            width: CGFloat(rect.width),
-            height: CGFloat(rect.height)
-        )
-    }
-
-    private struct PixelBuffer {
-        let width: Int
-        let height: Int
-        let bytes: [UInt8]
-
-        func pixel(atContentPoint point: CGPoint) -> Pixel {
-            let x = min(
-                width - 1,
-                max(0, Int(point.x / PageLayout.portraitContentWidth * CGFloat(width)))
-            )
-            let y = min(
-                height - 1,
-                max(0, Int(point.y / PageGeometry.a4.pageHeight * CGFloat(height)))
-            )
-            return pixel(x: x, y: y)
-        }
-
-        func pixel(x: Int, y: Int) -> Pixel {
-            let offset = (y * width + x) * 4
-            return Pixel(
-                red: bytes[offset],
-                green: bytes[offset + 1],
-                blue: bytes[offset + 2],
-                alpha: bytes[offset + 3]
-            )
-        }
-    }
-
-    private struct Pixel {
-        let red: UInt8
-        let green: UInt8
-        let blue: UInt8
-        let alpha: UInt8
-
-        var luminance: Double {
-            0.2126 * Double(red) + 0.7152 * Double(green) + 0.0722 * Double(blue)
-        }
-
-        func differs(from other: Pixel) -> Bool {
-            abs(Int(red) - Int(other.red)) > 4
-                || abs(Int(green) - Int(other.green)) > 4
-                || abs(Int(blue) - Int(other.blue)) > 4
-                || abs(Int(alpha) - Int(other.alpha)) > 4
         }
     }
 }

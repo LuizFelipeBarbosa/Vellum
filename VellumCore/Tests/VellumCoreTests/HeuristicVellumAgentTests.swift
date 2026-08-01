@@ -163,5 +163,5 @@ private func analyze(
         spaces: spaces,
         otherNotes: otherNotes
     )
-    return try await MockVellumAgent().analyze(event: event, context: context)
+    return try await HeuristicVellumAgent().analyze(event: event, context: context)
 }

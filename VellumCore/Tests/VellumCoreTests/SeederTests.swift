@@ -98,7 +98,7 @@ struct SeederTests {
         })
         let ask = AskService(
             notes: fixture.notes,
-            answerer: MockAskAnswerer(),
+            answerer: HeuristicAskAnswerer(),
             activity: nil
         )
         let answer = try await ask.ask("What did Marco quote for the steel beam?")
@@ -109,7 +109,7 @@ struct SeederTests {
             notes: fixture.notes,
             proposals: fixture.proposals,
             activity: fixture.activity,
-            agent: MockVellumAgent(),
+            agent: HeuristicVellumAgent(),
             spaces: fixture.spaces,
             entities: fixture.entities,
             tasks: fixture.tasks

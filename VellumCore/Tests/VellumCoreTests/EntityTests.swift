@@ -118,7 +118,7 @@ private struct EntityFixture {
             notes: FileNoteRepository(rootDirectory: root),
             proposals: proposals,
             activity: FileActivityRepository(rootDirectory: root),
-            agent: MockVellumAgent(),
+            agent: HeuristicVellumAgent(),
             spaces: FileSpaceRepository(rootDirectory: root),
             entities: entities,
             tasks: FileTaskRepository(rootDirectory: root)

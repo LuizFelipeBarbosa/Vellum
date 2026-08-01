@@ -1,24 +1,6 @@
 import Foundation
-import Observation
 import SwiftUI
 import VellumCore
-
-struct PaneHeaderFrames: Equatable, Sendable {
-    var leftClusterFrame: CGRect
-    var rightClusterFrame: CGRect
-    var topOverlayGlobalFrame: CGRect
-}
-
-struct PaneHeaderFramesKey: PreferenceKey {
-    static let defaultValue: [UUID: PaneHeaderFrames] = [:]
-
-    static func reduce(
-        value: inout [UUID: PaneHeaderFrames],
-        nextValue: () -> [UUID: PaneHeaderFrames]
-    ) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
 
 @MainActor
 struct NoteSplitContainerView: View {
@@ -28,12 +10,6 @@ struct NoteSplitContainerView: View {
     @State private var isShowingNoteSidebar = false
     @State private var dragSession = SplitDragSession()
     @State private var dragHaptics = ReorderHaptics()
-
-    private var noteSidebarWidth: CGFloat { 300 }
-    private var noteSidebarOuterPadding: CGFloat { 18 }
-    private var noteSidebarCancelZoneMaxX: CGFloat {
-        noteSidebarOuterPadding + noteSidebarWidth + noteSidebarOuterPadding
-    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -68,7 +44,7 @@ struct NoteSplitContainerView: View {
                     containerHeight: geometry.size.height
                 )
             }
-            let ghost = paneGhostConfiguration(
+            let ghost = SplitContainerLayout.paneGhostConfiguration(
                 lift: lift,
                 resolution: resolution,
                 refusedTarget: refusedTarget,
@@ -87,188 +63,43 @@ struct NoteSplitContainerView: View {
             let topLeftPaneHeaderFrames = columns.first?.panes.first.flatMap {
                 paneHeaderFrames[$0.id]
             }
-            let toggleCenter = sidebarToggleCenter(
+            let toggleCenter = SplitContainerLayout.sidebarToggleCenter(
                 for: topLeftPaneHeaderFrames,
-                containerGlobalOrigin: containerGlobalOrigin
+                containerGlobalOrigin: containerGlobalOrigin,
+                isSidebarShowing: isShowingNoteSidebar
             )
 
             ZStack(alignment: .topLeading) {
-                if panes.isEmpty {
-                    ProgressView("Loading note…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    HStack(spacing: 0) {
-                        ForEach(
-                            Array(columns.enumerated()),
-                            id: \.element.id
-                        ) { columnEntry in
-                            let columnIndex = columnEntry.offset
-                            let column = columnEntry.element
+                paneGrid(
+                    columns: columns,
+                    panes: panes,
+                    previewTarget: previewTarget,
+                    committedGrid: committedGrid,
+                    previewGrid: previewGrid,
+                    columnWidths: committedColumnWidths,
+                    rowHeights: committedRowHeights,
+                    containerSize: geometry.size
+                )
 
-                            VStack(spacing: 0) {
-                                ForEach(
-                                    Array(column.panes.enumerated()),
-                                    id: \.element.id
-                                ) { paneEntry in
-                                    let rowIndex = paneEntry.offset
-                                    let pane = paneEntry.element
-                                    let paneID = pane.id
-                                    let paneIndex = PaneIndex(
-                                        column: columnIndex,
-                                        row: rowIndex
-                                    )
-                                    let transform = panePreviewTransform(
-                                        at: paneIndex,
-                                        target: previewTarget,
-                                        committedGrid: committedGrid,
-                                        previewGrid: previewGrid,
-                                        containerSize: geometry.size
-                                    )
+                columnDividers(
+                    previewGrid: previewGrid,
+                    columnWidths: previewColumnWidths,
+                    containerSize: geometry.size
+                )
 
-                                    NoteScreenView(
-                                        model: pane.noteModel,
-                                        app: app,
-                                        paneContext: PaneContext(
-                                            pane: pane,
-                                            isFocused: app.split.focusedPaneID == paneID,
-                                            paneSize: CGSize(
-                                                width: committedColumnWidths[columnIndex],
-                                                height: committedRowHeights[columnIndex][rowIndex]
-                                            ),
-                                            paneCount: panes.count,
-                                            canvasGeneration: pane.canvasGeneration
-                                        )
-                                    )
-                                    .frame(
-                                        width: committedColumnWidths[columnIndex],
-                                        height: committedRowHeights[columnIndex][rowIndex]
-                                    )
-                                    .clipped()
-                                    .geometryGroup()
-                                    .scaleEffect(
-                                        x: transform.scale.width,
-                                        y: transform.scale.height,
-                                        anchor: .topLeading
-                                    )
-                                    .offset(transform.offset)
-                                }
-                            }
-                            .frame(
-                                width: committedColumnWidths[columnIndex],
-                                height: geometry.size.height,
-                                alignment: .top
-                            )
-                        }
-                    }
-                    .frame(
-                        width: geometry.size.width,
-                        height: geometry.size.height,
-                        alignment: .leading
-                    )
-                }
+                rowDividers(
+                    previewGrid: previewGrid,
+                    columnWidths: previewColumnWidths,
+                    rowHeights: previewRowHeights,
+                    containerSize: geometry.size
+                )
 
-                if previewGrid.columns.count > 1 {
-                    ForEach(
-                        0..<(previewGrid.columns.count - 1),
-                        id: \.self
-                    ) { dividerIndex in
-                        ColumnDividerView(
-                            app: app,
-                            dividerIndex: dividerIndex,
-                            containerWidth: geometry.size.width
-                        )
-                        .frame(height: geometry.size.height)
-                        .position(
-                            x: previewColumnWidths
-                                .prefix(dividerIndex + 1)
-                                .reduce(0, +),
-                            y: geometry.size.height / 2
-                        )
-                    }
-                }
-
-                ForEach(
-                    Array(previewGrid.columns.enumerated()),
-                    id: \.offset
-                ) { columnEntry in
-                    let columnIndex = columnEntry.offset
-                    let column = columnEntry.element
-
-                    if column.rowFractions.count > 1 {
-                        ForEach(
-                            0..<(column.rowFractions.count - 1),
-                            id: \.self
-                        ) { dividerIndex in
-                            RowDividerView(
-                                app: app,
-                                columnIndex: columnIndex,
-                                dividerIndex: dividerIndex,
-                                containerHeight: geometry.size.height
-                            )
-                            .frame(width: previewColumnWidths[columnIndex])
-                            .position(
-                                x: previewColumnWidths.prefix(columnIndex).reduce(0, +)
-                                    + previewColumnWidths[columnIndex] / 2,
-                                y: previewRowHeights[columnIndex]
-                                    .prefix(dividerIndex + 1)
-                                    .reduce(0, +)
-                            )
-                        }
-                    }
-                }
-
-                DockableToolbarContainer(
-                    store: app.toolPreferences,
+                dockedToolbar(
+                    focusedPane: focusedPane,
+                    headerFrames: firstPaneHeaderFrames,
                     containerSize: geometry.size,
-                    topObstructions: topDockObstructions(
-                        for: firstPaneHeaderFrames,
-                        containerGlobalOrigin: geometry.frame(in: .global).origin
-                    )
-                ) { dockEdge, availableAxisLength in
-                    NoteToolbarView(
-                        store: app.toolPreferences,
-                        selectedTool: Binding(
-                            get: { app.split.selectedTool },
-                            set: { app.split.selectedTool = $0 }
-                        ),
-                        activeOptionsTool: Binding(
-                            get: { app.split.activeOptionsTool },
-                            set: { app.split.activeOptionsTool = $0 }
-                        ),
-                        isShowingPaperOptions: Binding(
-                            get: { app.split.isShowingPaperOptions },
-                            set: { app.split.isShowingPaperOptions = $0 }
-                        ),
-                        canvasReference: focusedPane?.canvasReference
-                            ?? fallbackCanvasReference,
-                        backgroundStyle: focusedPane.map { pane in
-                            Binding(
-                                get: { pane.noteModel.backgroundStyle },
-                                set: { pane.noteModel.backgroundStyle = $0 }
-                            )
-                        },
-                        pageOrientation: app.split.focusedPane?
-                            .noteModel.note?.pageOrientation ?? .portrait,
-                        isPageOrientationAvailable: app.split.focusedPane?
-                            .noteModel.pdfBands.isEmpty ?? false,
-                        onSetPageOrientation: { orientation in
-                            _ = app.split.focusedPane?
-                                .noteModel.setPageOrientation(orientation)
-                        },
-                        orientationWouldPushContentOffPage: { orientation in
-                            app.split.focusedPane?.noteModel
-                                .orientationWouldPushContentOffPage(to: orientation) ?? false
-                        },
-                        onInsertPhoto: {
-                            app.split.focusedPane?.noteModel.isShowingPhotosPicker = true
-                        },
-                        onInsertFile: {
-                            app.split.focusedPane?.noteModel.isShowingFileImporter = true
-                        },
-                        dockEdge: dockEdge,
-                        availableAxisLength: availableAxisLength
-                    )
-                }
+                    containerGlobalOrigin: containerGlobalOrigin
+                )
                 .zIndex(4)
 
                 EdgeSwipeDetector(isEnabled: !isShowingNoteSidebar) {
@@ -319,20 +150,16 @@ struct NoteSplitContainerView: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityIdentifier("vellum-split-state")
                     .accessibilityValue(
-                        // Short, high-signal fields first. The accessibility value is
-                        // length-limited, and the two grid strings are long enough that
-                        // trailing fields were being truncated away entirely -- which
-                        // read as "the drag never resolved a target" rather than as a
-                        // readout problem.
-                        "panes:\(panes.count);"
-                            + "columns:\(columns.count);"
-                            + "focused:\(formattedPaneIndex(focusedPaneIndex));"
-                            + "orientation:\(app.split.focusedPane?.noteModel.note?.pageOrientation.rawValue ?? "none");"
-                            + "dragging:\(lift == nil ? 0 : 1);"
-                            + "target:\(formattedDragTarget(resolution));"
-                            + "size:\(Int(geometry.size.width.rounded()))x\(Int(geometry.size.height.rounded()));"
-                            + "grid:\(formattedGrid(committedGrid));"
-                            + "preview:\(formattedGrid(previewGrid))"
+                        splitStateAccessibilityValue(
+                            paneCount: panes.count,
+                            columnCount: columns.count,
+                            focusedPaneIndex: focusedPaneIndex,
+                            isDragging: lift != nil,
+                            resolution: resolution,
+                            committedGrid: committedGrid,
+                            previewGrid: previewGrid,
+                            containerSize: geometry.size
+                        )
                     )
             }
             .coordinateSpace(name: "splitContainer")
@@ -353,6 +180,263 @@ struct NoteSplitContainerView: View {
             app.toolPreferences.update { preferences in
                 preferences.lastSelectedTool = newTool
             }
+        }
+    }
+
+    /// Every open note, laid out at its committed size. During a drag each pane
+    /// is scaled and offset toward the slot the preview grid gives it, so the
+    /// panes animate into the split before the drop commits.
+    @ViewBuilder
+    private func paneGrid(
+        columns: [SplitColumn],
+        panes: [NotePane],
+        previewTarget: SplitGridDropTarget?,
+        committedGrid: SplitGridSnapshot,
+        previewGrid: SplitGridSnapshot,
+        columnWidths: [CGFloat],
+        rowHeights: [[CGFloat]],
+        containerSize: CGSize
+    ) -> some View {
+        if panes.isEmpty {
+            ProgressView("Loading note…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HStack(spacing: 0) {
+                ForEach(
+                    Array(columns.enumerated()),
+                    id: \.element.id
+                ) { columnEntry in
+                    let columnIndex = columnEntry.offset
+                    let column = columnEntry.element
+
+                    VStack(spacing: 0) {
+                        ForEach(
+                            Array(column.panes.enumerated()),
+                            id: \.element.id
+                        ) { paneEntry in
+                            let rowIndex = paneEntry.offset
+                            let pane = paneEntry.element
+
+                            paneCell(
+                                pane: pane,
+                                paneCount: panes.count,
+                                paneSize: CGSize(
+                                    width: columnWidths[columnIndex],
+                                    height: rowHeights[columnIndex][rowIndex]
+                                ),
+                                transform: SplitContainerLayout.panePreviewTransform(
+                                    at: PaneIndex(column: columnIndex, row: rowIndex),
+                                    target: previewTarget,
+                                    committedGrid: committedGrid,
+                                    previewGrid: previewGrid,
+                                    containerSize: containerSize
+                                )
+                            )
+                        }
+                    }
+                    .frame(
+                        width: columnWidths[columnIndex],
+                        height: containerSize.height,
+                        alignment: .top
+                    )
+                }
+            }
+            .frame(
+                width: containerSize.width,
+                height: containerSize.height,
+                alignment: .leading
+            )
+        }
+    }
+
+    /// Drag handles on the seams between columns. They sit on the *preview*
+    /// grid so they travel with the panes while a drop is being previewed.
+    @ViewBuilder
+    private func columnDividers(
+        previewGrid: SplitGridSnapshot,
+        columnWidths: [CGFloat],
+        containerSize: CGSize
+    ) -> some View {
+        if previewGrid.columns.count > 1 {
+            ForEach(
+                0..<(previewGrid.columns.count - 1),
+                id: \.self
+            ) { dividerIndex in
+                ColumnDividerView(
+                    app: app,
+                    dividerIndex: dividerIndex,
+                    containerWidth: containerSize.width
+                )
+                .frame(height: containerSize.height)
+                .position(
+                    x: SplitContainerLayout.columnDividerX(
+                        columnWidths: columnWidths,
+                        dividerIndex: dividerIndex
+                    ),
+                    y: containerSize.height / 2
+                )
+            }
+        }
+    }
+
+    /// Drag handles on the seams between the rows of each column.
+    @ViewBuilder
+    private func rowDividers(
+        previewGrid: SplitGridSnapshot,
+        columnWidths: [CGFloat],
+        rowHeights: [[CGFloat]],
+        containerSize: CGSize
+    ) -> some View {
+        ForEach(
+            Array(previewGrid.columns.enumerated()),
+            id: \.offset
+        ) { columnEntry in
+            let columnIndex = columnEntry.offset
+            let column = columnEntry.element
+
+            if column.rowFractions.count > 1 {
+                ForEach(
+                    0..<(column.rowFractions.count - 1),
+                    id: \.self
+                ) { dividerIndex in
+                    RowDividerView(
+                        app: app,
+                        columnIndex: columnIndex,
+                        dividerIndex: dividerIndex,
+                        containerHeight: containerSize.height
+                    )
+                    .frame(width: columnWidths[columnIndex])
+                    .position(
+                        SplitContainerLayout.rowDividerCenter(
+                            columnWidths: columnWidths,
+                            rowHeights: rowHeights,
+                            columnIndex: columnIndex,
+                            dividerIndex: dividerIndex
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /// One pane at its committed size, carrying the scale and offset that walk
+    /// it toward its previewed slot while a drop is in flight.
+    private func paneCell(
+        pane: NotePane,
+        paneCount: Int,
+        paneSize: CGSize,
+        transform: PanePreviewTransform
+    ) -> some View {
+        NoteScreenView(
+            model: pane.noteModel,
+            app: app,
+            paneContext: PaneContext(
+                pane: pane,
+                isFocused: app.split.focusedPaneID == pane.id,
+                paneSize: paneSize,
+                paneCount: paneCount,
+                canvasGeneration: pane.canvasGeneration
+            )
+        )
+        .frame(width: paneSize.width, height: paneSize.height)
+        .clipped()
+        .geometryGroup()
+        .scaleEffect(
+            x: transform.scale.width,
+            y: transform.scale.height,
+            anchor: .topLeading
+        )
+        .offset(transform.offset)
+    }
+
+    /// The `vellum-split-state` readout the flow tests parse.
+    ///
+    /// Short, high-signal fields first. The accessibility value is
+    /// length-limited, and the two grid strings are long enough that trailing
+    /// fields were being truncated away entirely -- which read as "the drag
+    /// never resolved a target" rather than as a readout problem. Appending a
+    /// field, or reordering these, silently truncates `grid:` and `preview:`.
+    private func splitStateAccessibilityValue(
+        paneCount: Int,
+        columnCount: Int,
+        focusedPaneIndex: PaneIndex?,
+        isDragging: Bool,
+        resolution: SidebarDropResolution?,
+        committedGrid: SplitGridSnapshot,
+        previewGrid: SplitGridSnapshot,
+        containerSize: CGSize
+    ) -> String {
+        "panes:\(paneCount);"
+            + "columns:\(columnCount);"
+            + "focused:\(SplitStateReadout.paneIndex(focusedPaneIndex));"
+            + "orientation:\(app.split.focusedPane?.noteModel.note?.pageOrientation.rawValue ?? "none");"
+            + "dragging:\(isDragging ? 1 : 0);"
+            + "target:\(SplitStateReadout.dragTarget(resolution));"
+            + "size:\(Int(containerSize.width.rounded()))x\(Int(containerSize.height.rounded()));"
+            + "grid:\(SplitStateReadout.grid(committedGrid));"
+            + "preview:\(SplitStateReadout.grid(previewGrid))"
+    }
+
+    /// The floating tool palette. It edits the focused pane through bindings
+    /// rather than owning any state, so that redocking it never disturbs which
+    /// note is being drawn on.
+    private func dockedToolbar(
+        focusedPane: NotePane?,
+        headerFrames: PaneHeaderFrames?,
+        containerSize: CGSize,
+        containerGlobalOrigin: CGPoint
+    ) -> some View {
+        DockableToolbarContainer(
+            store: app.toolPreferences,
+            containerSize: containerSize,
+            topObstructions: SplitContainerLayout.topDockObstructions(
+                for: headerFrames,
+                containerGlobalOrigin: containerGlobalOrigin
+            )
+        ) { dockEdge, availableAxisLength in
+            NoteToolbarView(
+                store: app.toolPreferences,
+                selectedTool: Binding(
+                    get: { app.split.selectedTool },
+                    set: { app.split.selectedTool = $0 }
+                ),
+                activeOptionsTool: Binding(
+                    get: { app.split.activeOptionsTool },
+                    set: { app.split.activeOptionsTool = $0 }
+                ),
+                isShowingPaperOptions: Binding(
+                    get: { app.split.isShowingPaperOptions },
+                    set: { app.split.isShowingPaperOptions = $0 }
+                ),
+                canvasReference: focusedPane?.canvasReference
+                    ?? fallbackCanvasReference,
+                backgroundStyle: focusedPane.map { pane in
+                    Binding(
+                        get: { pane.noteModel.backgroundStyle },
+                        set: { pane.noteModel.backgroundStyle = $0 }
+                    )
+                },
+                pageOrientation: app.split.focusedPane?
+                    .noteModel.note?.pageOrientation ?? .portrait,
+                isPageOrientationAvailable: app.split.focusedPane?
+                    .noteModel.pdfBands.isEmpty ?? false,
+                onSetPageOrientation: { orientation in
+                    _ = app.split.focusedPane?
+                        .noteModel.setPageOrientation(orientation)
+                },
+                orientationWouldPushContentOffPage: { orientation in
+                    app.split.focusedPane?.noteModel
+                        .orientationWouldPushContentOffPage(to: orientation) ?? false
+                },
+                onInsertPhoto: {
+                    app.split.focusedPane?.noteModel.isShowingPhotosPicker = true
+                },
+                onInsertFile: {
+                    app.split.focusedPane?.noteModel.isShowingFileImporter = true
+                },
+                dockEdge: dockEdge,
+                availableAxisLength: availableAxisLength
+            )
         }
     }
 
@@ -419,11 +503,22 @@ struct NoteSplitContainerView: View {
                 },
                 onDragCancelled: cancelSidebarDrag
             )
-            .frame(width: noteSidebarWidth)
-            .padding(noteSidebarOuterPadding)
+            .frame(width: SplitContainerLayout.sidebarWidth)
+            .padding(SplitContainerLayout.sidebarOuterPadding)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    // MARK: - Sidebar drag state machine
+    //
+    // Begin, move, end, commit, return-to-origin and reset are one machine.
+    // They share the dragID re-entrancy guard and the withAnimation completion
+    // handlers that decide when a session is really over, and they are the only
+    // writers of dragSession, dragHaptics and isShowingNoteSidebar -- all of
+    // which are private to this view. Splitting them across files would widen
+    // that state to internal and make the reader change files mid-transition,
+    // and it would buy nothing: this is plain imperative Swift with no
+    // type-checker cost.
 
     private func beginSidebarDrag(
         noteID: UUID,
@@ -544,7 +639,7 @@ struct NoteSplitContainerView: View {
         containerSize: CGSize,
         holding heldTarget: SplitGridDropTarget?
     ) -> (resolution: SidebarDropResolution, refusedTarget: SplitGridDropTarget?) {
-        guard location.x > noteSidebarCancelZoneMaxX else {
+        guard location.x > SplitContainerLayout.sidebarCancelZoneMaxX else {
             return (.cancelZone, nil)
         }
 
@@ -650,360 +745,5 @@ struct NoteSplitContainerView: View {
         dragSession.isCommitting = false
         dragSession.refusedTarget = nil
         dragSession.originLocation = .zero
-    }
-
-    private func panePreviewTransform(
-        at index: PaneIndex,
-        target: SplitGridDropTarget?,
-        committedGrid: SplitGridSnapshot,
-        previewGrid: SplitGridSnapshot,
-        containerSize: CGSize
-    ) -> PanePreviewTransform {
-        guard let target,
-              let committedFrame = SplitGridPolicy.paneFrame(
-                at: index,
-                grid: committedGrid,
-                containerSize: containerSize
-              ),
-              let previewFrame = SplitGridPolicy.paneFrame(
-                at: SplitGridPolicy.paneIndexAfterInserting(target, index),
-                grid: previewGrid,
-                containerSize: containerSize
-              ),
-              committedFrame.width > 0,
-              committedFrame.height > 0 else {
-            return .identity
-        }
-
-        return PanePreviewTransform(
-            scale: CGSize(
-                width: previewFrame.width / committedFrame.width,
-                height: previewFrame.height / committedFrame.height
-            ),
-            offset: CGSize(
-                width: previewFrame.minX - committedFrame.minX,
-                height: previewFrame.minY - committedFrame.minY
-            )
-        )
-    }
-
-    private func paneGhostConfiguration(
-        lift: SplitDragLift?,
-        resolution: SidebarDropResolution?,
-        refusedTarget: SplitGridDropTarget?,
-        committedGrid: SplitGridSnapshot,
-        previewGrid: SplitGridSnapshot,
-        containerSize: CGSize
-    ) -> PaneGhostConfiguration? {
-        guard let lift else { return nil }
-
-        let frame: CGRect
-        let intent: PaneGhostIntent
-        switch resolution {
-        case .target(.existingPane(let index)):
-            guard let existingFrame = SplitGridPolicy.paneFrame(
-                at: index,
-                grid: committedGrid,
-                containerSize: containerSize
-            ) else {
-                return nil
-            }
-            frame = existingFrame
-            intent = .alreadyOpen
-
-        case .target(let target):
-            guard let insertedIndex = SplitGridPolicy.insertedPaneIndex(for: target),
-                  let insertedFrame = SplitGridPolicy.paneFrame(
-                    at: insertedIndex,
-                    grid: previewGrid,
-                    containerSize: containerSize
-                  ) else {
-                return nil
-            }
-            frame = insertedFrame
-            intent = .split
-
-        case .capacityFull:
-            // A refusal leaves the panes untransformed, so the ghost has to be
-            // framed on the committed grid: the refused insertion's own index
-            // belongs to a hypothetical grid this layout never adopts.
-            guard let refusedTarget,
-                  let refusedIndex = SplitGridPolicy.clampedPaneIndex(
-                    for: refusedTarget,
-                    in: committedGrid
-                  ),
-                  let refusedFrame = SplitGridPolicy.paneFrame(
-                    at: refusedIndex,
-                    grid: committedGrid,
-                    containerSize: containerSize
-                  ) else {
-                return nil
-            }
-            frame = refusedFrame
-            intent = .refused
-
-        case .cancelZone, nil:
-            return nil
-        }
-
-        return PaneGhostConfiguration(
-            title: lift.title,
-            spaceColor: lift.spaceColor,
-            intent: intent,
-            frame: frame
-        )
-    }
-
-    private func sidebarToggleCenter(
-        for frames: PaneHeaderFrames?,
-        containerGlobalOrigin: CGPoint
-    ) -> CGPoint {
-        let buttonRadius: CGFloat = 22
-        let gap: CGFloat = 12
-        let fallbackFrame = CGRect(x: 20, y: 10, width: 0, height: 44)
-        let leftClusterFrame = if let frames,
-                                  frames.leftClusterFrame != .zero {
-            frames.leftClusterFrame.offsetBy(
-                dx: -containerGlobalOrigin.x,
-                dy: -containerGlobalOrigin.y
-            )
-        } else {
-            fallbackFrame
-        }
-        let topOverlayFrame = if let frames,
-                                 frames.topOverlayGlobalFrame != .zero {
-            frames.topOverlayGlobalFrame.offsetBy(
-                dx: -containerGlobalOrigin.x,
-                dy: -containerGlobalOrigin.y
-            )
-        } else {
-            fallbackFrame
-        }
-        let centerX = isShowingNoteSidebar
-            ? noteSidebarCancelZoneMaxX + buttonRadius
-            : leftClusterFrame.minX + buttonRadius
-
-        return CGPoint(
-            x: centerX,
-            y: topOverlayFrame.maxY + gap + buttonRadius
-        )
-    }
-
-    private func topDockObstructions(
-        for frames: PaneHeaderFrames?,
-        containerGlobalOrigin: CGPoint
-    ) -> TopDockObstructions? {
-        guard let frames,
-              frames.leftClusterFrame != .zero,
-              frames.rightClusterFrame != .zero else {
-            return nil
-        }
-        return TopDockObstructions(
-            navbarTop: frames.leftClusterFrame.minY - containerGlobalOrigin.y,
-            overlayBottom: frames.topOverlayGlobalFrame.maxY - containerGlobalOrigin.y,
-            gapMinX: frames.leftClusterFrame.maxX - containerGlobalOrigin.x,
-            gapMaxX: frames.rightClusterFrame.minX - containerGlobalOrigin.x
-        )
-    }
-
-    private func formattedGrid(_ grid: SplitGridSnapshot) -> String {
-        let encoded = grid.columns.map { column in
-            let width = formattedFraction(column.widthFraction)
-            let rows = column.rowFractions
-                .map { formattedFraction($0) }
-                .joined(separator: ",")
-            return "\(width)[\(rows)]"
-        }
-        .joined(separator: "|")
-        return encoded.isEmpty ? "none" : encoded
-    }
-
-    private func formattedPaneIndex(_ index: PaneIndex?) -> String {
-        guard let index else { return "-1" }
-        return "\(index.column).\(index.row)"
-    }
-
-    private func formattedDragTarget(
-        _ resolution: SidebarDropResolution?
-    ) -> String {
-        switch resolution {
-        case .cancelZone:
-            "none"
-        case .capacityFull:
-            "none-capacity"
-        case .target(.insertColumn(let index)):
-            "col-\(index)"
-        case .target(.insertRow(let column, let row)):
-            "row-\(column).\(row)"
-        case .target(.existingPane(let paneIndex)):
-            "focus-\(paneIndex.column).\(paneIndex.row)"
-        case nil:
-            "none"
-        }
-    }
-
-    private func formattedFraction(_ fraction: CGFloat) -> String {
-        String(
-            format: "%.2f",
-            locale: Locale(identifier: "en_US_POSIX"),
-            Double(fraction)
-        )
-    }
-}
-
-private struct PanePreviewTransform {
-    let scale: CGSize
-    let offset: CGSize
-
-    static let identity = PanePreviewTransform(
-        scale: CGSize(width: 1, height: 1),
-        offset: .zero
-    )
-}
-
-private struct PaneGhostConfiguration {
-    let title: String
-    let spaceColor: Color?
-    let intent: PaneGhostIntent
-    let frame: CGRect
-}
-
-/// This leaf is the only drag view that observes location. Keeping that read
-/// here prevents the expensive pane container from being invalidated at 120 Hz.
-@MainActor
-private struct FloatingDragCardView: View {
-    let session: SplitDragSession
-    let commitFrame: CGRect?
-
-    var body: some View {
-        if let lift = session.lift {
-            let isCommitting = session.isCommitting
-            let location = session.location
-            let targetPosition = if isCommitting, let commitFrame {
-                CGPoint(x: commitFrame.midX, y: commitFrame.midY)
-            } else {
-                CGPoint(
-                    x: location.x - lift.grabOffset.width,
-                    y: location.y - lift.grabOffset.height
-                )
-            }
-
-            NoteDragPreviewCard(
-                title: lift.title,
-                spaceColor: lift.spaceColor,
-                expandedSize: isCommitting ? commitFrame?.size : nil
-            )
-            .position(targetPosition)
-            .opacity(session.resolution?.target == nil ? 1 : 0.6)
-            .scaleEffect(session.isLifted ? 1 : 0.98)
-            .allowsHitTesting(false)
-        }
-    }
-}
-
-private extension SidebarDropResolution {
-    var target: SplitGridDropTarget? {
-        if case .target(let target) = self {
-            return target
-        }
-        return nil
-    }
-}
-
-@MainActor
-struct ColumnDividerView: View {
-    let app: VellumAppModel
-    let dividerIndex: Int
-    let containerWidth: CGFloat
-
-    @State private var gridAtDragStart: SplitGridSnapshot?
-    @State private var isDragging = false
-
-    var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(VellumTheme.ink(0.09))
-                .frame(width: 1)
-
-            RoundedRectangle(cornerRadius: 2)
-                .fill(isDragging ? VellumTheme.accent : VellumTheme.ink(0.18))
-                .frame(width: 4, height: 36)
-        }
-        .frame(width: SplitGridPolicy.dividerHitThickness)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(
-                minimumDistance: 0,
-                coordinateSpace: .named("splitContainer")
-            )
-            .onChanged { value in
-                let startGrid = gridAtDragStart ?? app.split.gridSnapshot
-                if gridAtDragStart == nil {
-                    gridAtDragStart = startGrid
-                    isDragging = true
-                }
-                let grid = SplitGridPolicy.resizingColumnDivider(
-                    startGrid,
-                    dividerIndex: dividerIndex,
-                    byTranslation: value.translation.width,
-                    containerWidth: containerWidth
-                )
-                app.split.applyGrid(grid)
-            }
-            .onEnded { _ in
-                gridAtDragStart = nil
-                isDragging = false
-            }
-        )
-    }
-}
-
-@MainActor
-struct RowDividerView: View {
-    let app: VellumAppModel
-    let columnIndex: Int
-    let dividerIndex: Int
-    let containerHeight: CGFloat
-
-    @State private var gridAtDragStart: SplitGridSnapshot?
-    @State private var isDragging = false
-
-    var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(VellumTheme.ink(0.09))
-                .frame(height: 1)
-
-            RoundedRectangle(cornerRadius: 2)
-                .fill(isDragging ? VellumTheme.accent : VellumTheme.ink(0.18))
-                .frame(width: 36, height: 4)
-        }
-        .frame(height: SplitGridPolicy.dividerHitThickness)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(
-                minimumDistance: 0,
-                coordinateSpace: .named("splitContainer")
-            )
-            .onChanged { value in
-                let startGrid = gridAtDragStart ?? app.split.gridSnapshot
-                if gridAtDragStart == nil {
-                    gridAtDragStart = startGrid
-                    isDragging = true
-                }
-                let grid = SplitGridPolicy.resizingRowDivider(
-                    startGrid,
-                    column: columnIndex,
-                    dividerIndex: dividerIndex,
-                    byTranslation: value.translation.height,
-                    containerHeight: containerHeight
-                )
-                app.split.applyGrid(grid)
-            }
-            .onEnded { _ in
-                gridAtDragStart = nil
-                isDragging = false
-            }
-        )
     }
 }

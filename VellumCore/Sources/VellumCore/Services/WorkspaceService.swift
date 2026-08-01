@@ -153,11 +153,10 @@ public actor WorkspaceService {
     }
 
     public func listTrashedNotes() async throws -> [Note] {
+        // Everything in this scope has a `deletedAt`; the fallback only keeps the key
+        // comparable.
         try await notes.listNotes(scope: .trashed).sorted {
-            if $0.deletedAt == $1.deletedAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast)
+            StableOrder.descending($0, $1, by: { $0.deletedAt ?? .distantPast })
         }
     }
 
@@ -247,66 +246,13 @@ public actor WorkspaceService {
         }
     }
 
-    @discardableResult
-    public func addLink(
-        fromNoteID: UUID,
-        to targetNoteID: UUID,
-        kind: LinkKind
-    ) async throws -> Note {
-        _ = try await notes.loadNote(id: targetNoteID)
-        var note = try await notes.loadNote(id: fromNoteID)
-        guard !note.links.contains(where: {
-            $0.targetNoteID == targetNoteID && $0.kind == kind
-        }) else {
-            return note
-        }
-        note.links.append(
-            NoteLink(id: UUID(), targetNoteID: targetNoteID, kind: kind, createdAt: Date())
-        )
-        let saved = try await saveNote(note)
-        try await log(
-            noteID: fromNoteID,
-            kind: .notesLinked,
-            message: "Linked note \(fromNoteID.uuidString) to \(targetNoteID.uuidString)."
-        )
-        return saved
-    }
-
-    @discardableResult
-    public func removeLink(fromNoteID: UUID, linkID: UUID) async throws -> Note {
-        var note = try await notes.loadNote(id: fromNoteID)
-        note.links.removeAll { $0.id == linkID }
-        return try await saveNote(note)
-    }
-
     public func listTasks() async throws -> [TaskItem] {
         try await tasks.list().sorted {
             if $0.isDone != $1.isDone {
                 return !$0.isDone
             }
-            if $0.createdAt == $1.createdAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.createdAt < $1.createdAt
+            return StableOrder.ascending($0, $1, by: \.createdAt)
         }
-    }
-
-    @discardableResult
-    public func setTaskDone(id: UUID, done: Bool) async throws -> TaskItem {
-        guard var task = try await tasks.list().first(where: { $0.id == id }) else {
-            throw VellumError.persistenceFailure("Task \(id.uuidString) was not found.")
-        }
-        task.isDone = done
-        task.completedAt = done ? Date() : nil
-        try await tasks.save(task)
-        if done {
-            try await log(
-                noteID: task.noteID,
-                kind: .taskCompleted,
-                message: "Completed task \(task.id.uuidString)."
-            )
-        }
-        return task
     }
 
     public func activityDigest(since: Date) async throws -> ActivityDigest {
@@ -339,7 +285,7 @@ public actor WorkspaceService {
     public func listNoteSummaries() async throws -> [NoteSummary] {
         var summaries: [NoteSummary] = []
         for note in try await notes.listNotes() {
-            let orderedPages = note.pages.sorted(by: Self.sortPages)
+            let orderedPages = note.pages.sorted(by: NotePage.byOrder)
             let preview = orderedPages
                 .map(\.plainText)
                 .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?
@@ -367,18 +313,13 @@ public actor WorkspaceService {
                 )
             )
         }
-        return summaries.sorted {
-            if $0.updatedAt == $1.updatedAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.updatedAt > $1.updatedAt
-        }
+        return summaries.sorted { StableOrder.descending($0, $1, by: \.updatedAt) }
     }
 
     public func requestAnalysis(noteID: UUID) async throws -> [AgentProposal] {
         let note = try await notes.loadNote(id: noteID)
         let canonicalText = note.pages
-            .sorted(by: Self.sortPages)
+            .sorted(by: NotePage.byOrder)
             .map(\.plainText)
             .joined(separator: "\n\n")
         let now = Date()
@@ -491,20 +432,9 @@ public actor WorkspaceService {
             if let existing {
                 spaceID = existing.id
             } else {
-                let space = Space(
-                    id: UUID(),
-                    name: spaceName,
-                    color: color,
-                    createdAt: Date(),
-                    parentID: nil
-                )
-                try await spaces.save(space)
-                try await log(
-                    noteID: nil,
-                    kind: .spaceCreated,
-                    message: "Created space '\(spaceName)'."
-                )
-                spaceID = space.id
+                // Agent-accepted filing creates spaces through the same entry point a
+                // person does, so whatever `createSpace` enforces holds for both.
+                spaceID = try await createSpace(name: spaceName, color: color).id
             }
             note.spaceID = spaceID
             note = try await saveNote(note)
@@ -634,10 +564,4 @@ public actor WorkspaceService {
         )
     }
 
-    private static func sortPages(_ lhs: NotePage, _ rhs: NotePage) -> Bool {
-        if lhs.order == rhs.order {
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
-        return lhs.order < rhs.order
-    }
 }

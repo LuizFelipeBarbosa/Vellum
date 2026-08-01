@@ -8,13 +8,6 @@ import VellumCore
 @MainActor
 @Observable
 final class NoteScreenModel {
-    enum EditorMode: String, CaseIterable, Identifiable {
-        case ink = "Ink"
-        case text = "Text"
-
-        var id: Self { self }
-    }
-
     enum SaveState: Equatable {
         case saved
         case saving
@@ -62,7 +55,6 @@ final class NoteScreenModel {
     }
     var drawingData: Data?
     var proposals: [AgentProposal] = []
-    var editorMode: EditorMode = .ink
     var saveState: SaveState = .saved
     var isLoading = false
     var isAnalyzing = false
@@ -724,8 +716,7 @@ final class NoteScreenModel {
     }
 
     private func pagesRestored(_ pages: [NotePage]) {
-        guard var currentNote = note,
-              !Self.pagesEqual(currentNote.pages, pages) else {
+        guard var currentNote = note, currentNote.pages != pages else {
             return
         }
         currentNote.pages = pages
@@ -754,19 +745,6 @@ final class NoteScreenModel {
             drawingAssetPath: "pages/\(pageID.uuidString)/drawing.data",
             background: .blank
         )
-    }
-
-    private static func pagesEqual(_ lhs: [NotePage], _ rhs: [NotePage]) -> Bool {
-        guard lhs.count == rhs.count else { return false }
-        return zip(lhs, rhs).allSatisfy { lhsPage, rhsPage in
-            lhsPage.id == rhsPage.id
-                && lhsPage.order == rhsPage.order
-                && lhsPage.plainText == rhsPage.plainText
-                && lhsPage.drawingAssetPath == rhsPage.drawingAssetPath
-                && lhsPage.background == rhsPage.background
-                && lhsPage.pdfPage == rhsPage.pdfPage
-                && lhsPage.elements == rhsPage.elements
-        }
     }
 
     private func scheduleDebouncedSave() {

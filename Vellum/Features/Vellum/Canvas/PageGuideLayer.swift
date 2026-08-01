@@ -93,20 +93,15 @@ struct PageGuideLayer: View {
                 var pageContext = context
                 pageContext.clip(to: Path(viewPageRect))
                 if !pdfBands.contains(index) {
-                    switch style.kind {
-                    case .blank:
+                    let marks = PageBackgroundPattern.marks(
+                        style: style,
+                        pageRect: contentPageRect,
+                        clippedTo: visiblePageRect
+                    )
+                    switch marks {
+                    case .none:
                         break
-                    case .dots:
-                        let xs = PageBackgroundPattern.dotXs(
-                            style: style,
-                            pageRect: contentPageRect,
-                            clippedTo: visiblePageRect
-                        )
-                        let ys = PageBackgroundPattern.dotYs(
-                            style: style,
-                            pageRect: contentPageRect,
-                            clippedTo: visiblePageRect
-                        )
+                    case .dots(let xs, let ys):
                         let dotRadius = max(0.5, min(2, viewport.zoomScale))
                         var dots = Path()
 
@@ -127,12 +122,7 @@ struct PageGuideLayer: View {
                         }
 
                         pageContext.fill(dots, with: .color(patternColor))
-                    case .ruled, .grid:
-                        let ys = PageBackgroundPattern.ruleYs(
-                            style: style,
-                            pageRect: contentPageRect,
-                            clippedTo: visiblePageRect
-                        )
+                    case .rules(let ys, let columns):
                         var lines = Path()
 
                         for y in ys.values {
@@ -148,12 +138,7 @@ struct PageGuideLayer: View {
                             lines.addLine(to: CGPoint(x: end.x, y: snappedY))
                         }
 
-                        if style.kind == .grid {
-                            let xs = PageBackgroundPattern.gridXs(
-                                style: style,
-                                pageRect: contentPageRect,
-                                clippedTo: visiblePageRect
-                            )
+                        if let xs = columns {
                             for x in xs.values {
                                 let start = viewport.viewPoint(
                                     fromContent: CGPoint(x: x, y: contentPageRect.minY)

@@ -1,5 +1,4 @@
 import Foundation
-import Observation
 import SwiftUI
 import VellumCore
 
@@ -122,7 +121,7 @@ struct NoteSplitSidebarView: View {
             }
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: SplitSidebarDragMath.rowHeight)
+            .frame(height: SplitSidebarLayout.rowHeight)
             .background(
                 openPane == nil ? .clear : VellumTheme.accent(0.1),
                 in: RoundedRectangle(cornerRadius: 8)
