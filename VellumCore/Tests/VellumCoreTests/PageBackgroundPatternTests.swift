@@ -145,3 +145,91 @@ func axisStrideValuesAdvanceByStep() {
 
     #expect(stride.values == [10, 12.5, 15, 17.5])
 }
+
+@Test("Blank paper emits no marks")
+func blankPaperEmitsNoMarks() {
+    let pageRect = PageGeometry.a4.pageRect(index: 0)
+
+    #expect(
+        PageBackgroundPattern.marks(
+            style: PageBackgroundStyle(kind: .blank),
+            pageRect: pageRect,
+            clippedTo: pageRect
+        ) == .none
+    )
+}
+
+@Test("Ruled paper emits rows without columns")
+func ruledPaperEmitsRowsOnly() {
+    let pageRect = PageGeometry.a4.pageRect(index: 0)
+    let style = PageBackgroundStyle(kind: .ruled)
+
+    #expect(
+        PageBackgroundPattern.marks(
+            style: style,
+            pageRect: pageRect,
+            clippedTo: pageRect
+        )
+            == .rules(
+                rows: PageBackgroundPattern.ruleYs(
+                    style: style,
+                    pageRect: pageRect,
+                    clippedTo: pageRect
+                ),
+                columns: nil
+            )
+    )
+}
+
+@Test("Grid paper emits rows and columns")
+func gridPaperEmitsRowsAndColumns() {
+    let pageRect = PageGeometry.a4.pageRect(index: 0)
+    let style = PageBackgroundStyle(kind: .grid)
+
+    #expect(
+        PageBackgroundPattern.marks(
+            style: style,
+            pageRect: pageRect,
+            clippedTo: pageRect
+        )
+            == .rules(
+                rows: PageBackgroundPattern.ruleYs(
+                    style: style,
+                    pageRect: pageRect,
+                    clippedTo: pageRect
+                ),
+                columns: PageBackgroundPattern.gridXs(
+                    style: style,
+                    pageRect: pageRect,
+                    clippedTo: pageRect
+                )
+            )
+    )
+}
+
+@Test("Dotted paper emits both dot axes")
+func dottedPaperEmitsBothDotAxes() {
+    let pageRect = PageGeometry.a4.pageRect(index: 2)
+    let style = PageBackgroundStyle(kind: .dots)
+    let visibleRect = pageRect.insetBy(dx: 0, dy: pageRect.height / 4)
+
+    #expect(
+        PageBackgroundPattern.marks(
+            style: style,
+            pageRect: pageRect,
+            clippedTo: visibleRect
+        )
+            == .dots(
+                xs: PageBackgroundPattern.dotXs(
+                    style: style,
+                    pageRect: pageRect,
+                    clippedTo: visibleRect
+                ),
+                ys: PageBackgroundPattern.dotYs(
+                    style: style,
+                    pageRect: pageRect,
+                    clippedTo: visibleRect
+                )
+            )
+    )
+}
