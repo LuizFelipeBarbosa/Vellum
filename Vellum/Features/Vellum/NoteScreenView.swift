@@ -989,54 +989,6 @@ struct NoteScreenView: View {
     }
 }
 
-private struct ContentViewportFrameModifier: ViewModifier {
-    let contentWidth: CGFloat
-    let contentHeight: CGFloat
-    let zoom: CGFloat
-    let contentOffset: CGPoint
-    let viewportSize: CGSize
-
-    func body(content: Content) -> some View {
-        content
-            .frame(
-                width: contentWidth,
-                height: contentHeight,
-                alignment: .topLeading
-            )
-            .scaleEffect(zoom, anchor: .topLeading)
-            .offset(
-                x: -contentOffset.x,
-                y: -contentOffset.y
-            )
-            .frame(
-                width: viewportSize.width,
-                height: viewportSize.height,
-                alignment: .topLeading
-            )
-            .clipped()
-    }
-}
-
-private extension View {
-    func contentViewportFrame(
-        contentWidth: CGFloat,
-        contentHeight: CGFloat,
-        zoom: CGFloat,
-        contentOffset: CGPoint,
-        viewportSize: CGSize
-    ) -> some View {
-        modifier(
-            ContentViewportFrameModifier(
-                contentWidth: contentWidth,
-                contentHeight: contentHeight,
-                zoom: zoom,
-                contentOffset: contentOffset,
-                viewportSize: viewportSize
-            )
-        )
-    }
-}
-
 private struct NoteScreenLifecycleModifiers: ViewModifier {
     let model: NoteScreenModel
     let app: VellumAppModel
