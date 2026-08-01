@@ -261,280 +261,23 @@ struct NoteScreenView: View {
             let canvasGlobalOrigin = geometry.frame(in: .global).origin
             let pageGeometry = model.note?.pageGeometry ?? .a4
 
+            // Reads top to bottom as the canvas z-order. Only adjacent children
+            // sharing a zIndex are grouped, so the grouping cannot reorder anything.
             ZStack(alignment: .topLeading) {
-                PageGuideLayer(
-                    viewport: canvasViewport,
-                    viewportSize: canvasSize,
-                    pageCount: pageState.pageCount,
-                    geometry: pageGeometry,
-                    style: model.note?.backgroundStyle ?? .legacyDefault,
-                    pdfBands: model.pdfBands
+                pageBackdrop(size: geometry.size, pageGeometry: pageGeometry)
+                pencilCanvas(
+                    size: geometry.size,
+                    pageGeometry: pageGeometry,
+                    canvasGlobalOrigin: canvasGlobalOrigin
                 )
-                .frame(width: geometry.size.width, height: geometry.size.height)
-
-                PdfPagesLayer(
-                    cache: model.pdfCache,
-                    pdfBands: model.pdfBands,
-                    viewport: canvasViewport,
-                    pageCount: pageState.pageCount,
-                    geometry: pageGeometry
-                )
-                .frame(
-                    width: pageGeometry.contentWidth,
-                    height: pageState.contentHeight,
-                    alignment: .topLeading
-                )
-                .scaleEffect(canvasViewport.zoomScale, anchor: .topLeading)
-                .offset(
-                    x: -canvasViewport.contentOffset.x,
-                    y: -canvasViewport.contentOffset.y
-                )
-                .frame(
-                    width: geometry.size.width,
-                    height: geometry.size.height,
-                    alignment: .topLeading
-                )
-                .clipped()
-
-                PageGuideLayer(
-                    viewport: canvasViewport,
-                    viewportSize: canvasSize,
-                    pageCount: pageState.pageCount,
-                    geometry: pageGeometry,
-                    style: model.note?.backgroundStyle ?? .legacyDefault,
-                    pdfBands: model.pdfBands,
-                    mode: .pdfAdornments
-                )
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .allowsHitTesting(false)
-
-                CanvasElementsBandLayer(
-                    store: model.canvasElements,
-                    selectionController: selectionController,
-                    placement: .belowInk
-                )
-                .contentViewportFrame(
-                    contentWidth: pageGeometry.contentWidth,
-                    contentHeight: pageState.contentHeight,
-                    zoom: canvasViewport.zoomScale,
-                    contentOffset: canvasViewport.contentOffset,
-                    viewportSize: geometry.size
-                )
-
-                PencilCanvasView(
-                    drawingData: model.drawingData,
-                    onDrawingChanged: { data in
-                        model.drawingChanged(data)
-                        refreshPageCount()
-                    },
-                    isTransparent: true,
-                    tool: activeTool,
-                    showsSystemToolPicker: false,
-                    onCanvasReady: { canvasView in
-                        activeCanvasReference.canvasView = canvasView
-                        Task { @MainActor in
-                            paneContext.pane.canvasDidBecomeReady()
-                        }
-                    },
-                    paneUndoManager: paneContext.pane.undoManager,
-                    isDrawingEnabled: selectedTool.usesDrawingGesture,
-                    contentWidth: pageGeometry.contentWidth,
-                    contentHeight: pageState.contentHeight,
-                    topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + 16,
-                    onViewportChanged: { canvasViewport = $0 },
-                    onExternalDrawingChange: {
-                        selectionController.externalDrawingDidChange()
-                        refreshPageCount()
-                    },
-                    onPencilSqueeze: { phase in
-                        switch phase {
-                        case .began:
-                            if let tool = app.split.squeezeEraser.begin(
-                                current: selectedTool
-                            ) {
-                                selectedTool = tool
-                            }
-                        case .ended:
-                            if let tool = app.split.squeezeEraser.end(
-                                current: selectedTool
-                            ) {
-                                selectedTool = tool
-                            }
-                        }
-                    },
-                    onTwoFingerTap: {
-                        if activeCanvasReference.canvasView?.undoManager?.canUndo == true {
-                            activeCanvasReference.canvasView?.undoManager?.undo()
-                        }
-                    },
-                    onThreeFingerTap: {
-                        if activeCanvasReference.canvasView?.undoManager?.canRedo == true {
-                            activeCanvasReference.canvasView?.undoManager?.redo()
-                        }
-                    }
-                )
-                .frame(width: geometry.size.width, height: geometry.size.height)
-
-                ShapeSnapSurface(
-                    controller: shapeSnapController,
-                    isEnabled: selectedTool.isInkTool,
-                    inkConfig: selectedTool.inkConfigKeyPath.map {
-                        app.toolPreferences.preferences[keyPath: $0]
-                    },
-                    isDrawingEnabled: selectedTool.usesDrawingGesture
-                )
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .allowsHitTesting(false)
-
-                ShapeEraserSurface(
-                    canvasReference: activeCanvasReference,
-                    elementsStore: model.canvasElements,
-                    eraserConfig: app.toolPreferences.preferences.eraser,
-                    isEnabled: selectedTool == .eraser
-                )
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .allowsHitTesting(false)
-
-                ElementTapSelectionSurface(
-                    canvasReference: activeCanvasReference,
-                    elementsStore: model.canvasElements,
-                    selectionController: selectionController,
-                    // Only the ink tools borrow a tap for element selection. Shapes and photos
-                    // then use the same Select-tool edit flow. While Select is already active its
-                    // capture surface owns taps, including tapping away to deselect, and two tap
-                    // handlers on one canvas would race; the eraser and Text answer their own taps.
-                    isEnabled: selectedTool.isInkTool,
-                    onElementSelected: borrowSelectTool
-                )
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .allowsHitTesting(false)
-
-                CanvasElementsBandLayer(
-                    store: model.canvasElements,
-                    selectionController: selectionController,
-                    placement: .aboveInk,
-                    textDefaults: app.toolPreferences.preferences.text,
-                    isTextToolActive: selectedTool == .text
-                )
-                .contentViewportFrame(
-                    contentWidth: pageGeometry.contentWidth,
-                    contentHeight: pageState.contentHeight,
-                    zoom: canvasViewport.zoomScale,
-                    contentOffset: canvasViewport.contentOffset,
-                    viewportSize: geometry.size
-                )
-
-                SelectionOverlayView(
-                    controller: selectionController,
-                    selectionMode: app.toolPreferences.preferences.selection.mode,
-                    isActive: selectionController.selection != nil
-                        || selectedTool == .select,
-                    isSelectToolActive: selectedTool == .select
-                )
-                .contentViewportFrame(
-                    contentWidth: pageGeometry.contentWidth,
-                    contentHeight: pageState.contentHeight,
-                    zoom: canvasViewport.zoomScale,
-                    contentOffset: canvasViewport.contentOffset,
-                    viewportSize: geometry.size
-                )
-
-                // Not gated on the Select tool: tapping a shape selects it while an ink tool is
-                // active, and that is exactly when the actions need to be reachable.
-                if selectionController.selection != nil,
-                   selectionController.strokesSnapshot == nil,
-                   selectionController.dragTranslation == .zero,
-                   let avoidanceRect = selectionController.stripAvoidanceBounds {
-                    let stripSize = SelectionActionStripView.stripSize(
-                        includesStyle: selectionController.selectionSupportsStyling
-                    )
-                    SelectionActionStripView(controller: selectionController)
-                        .position(SelectionActionStripView.position(
-                            avoiding: canvasViewport.viewRect(fromContent: avoidanceRect),
-                            stripSize: stripSize,
-                            in: canvasSize,
-                            topInset: topOverlayHeight + 12
-                        ))
-                        .zIndex(4.5)
-                }
-
-                if selectionController.selection == nil,
-                   let target = selectionController.pendingPasteTarget {
-                    let tapViewPoint = canvasViewport.viewPoint(fromContent: target)
-                    if CGRect(origin: .zero, size: canvasSize)
-                        .insetBy(dx: -20, dy: -20)
-                        .contains(tapViewPoint) {
-                        SelectionPasteBubbleView {
-                            Task {
-                                await selectionController.pasteFromPasteboard(at: target)
-                            }
-                        }
-                        .position(SelectionPasteBubbleView.position(
-                            forTapAt: tapViewPoint,
-                            in: canvasSize
-                        ))
-                        .zIndex(4.5)
-                    }
-                }
-
-                if showsBacklinksRail {
-                    NoteBacklinksRail(
-                        backlinks: model.backlinks,
-                        onOpen: { noteID in Task { await app.openNote(noteID) } }
-                    )
-                    .frame(width: 184)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.top, topOverlayHeight + 12)
-                        .zIndex(2)
-                }
-
-                if let entity = model.selectedEntity {
-                    EntityPopoverView(entity: entity, model: model, app: app)
-                        .frame(width: 270)
-                        .padding(.leading, 80)
-                        .padding(.top, topOverlayHeight + 12)
-                        .transition(.offset(y: 6).combined(with: .opacity))
-                        .zIndex(5)
-                }
-
-                if !model.pendingProposals.isEmpty {
-                    NoteAgentLine(model: model)
-                        .frame(
-                            width: geometry.size.width,
-                            height: geometry.size.height,
-                            alignment: .bottomLeading
-                        )
-                        .padding(.leading, 80)
-                        .padding(.bottom, 92)
-                        .zIndex(3)
-                }
-
-                HStack(spacing: 8) {
-                    PageTrackerBadge(
-                        currentPage: pageState.currentPageIndex + 1,
-                        pageCount: pageState.pageCount
-                    ) {
-                        isShowingThumbnails.toggle()
-                    }
-
-                    if !isZoomAtFit {
-                        ZoomResetPill(
-                            zoomPercentOfFit: Int((canvasViewport.zoomScale
-                                / fitZoomScale * 100).rounded()),
-                            onTap: resetZoomToFit
-                        )
-                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                    }
-                }
-                .frame(
-                    width: geometry.size.width,
-                    height: geometry.size.height,
-                    alignment: .bottomLeading
-                )
-                .padding(.leading, 20)
-                .padding(.bottom, 20)
-                .zIndex(4)
-                .animation(.easeOut(duration: 0.18), value: isZoomAtFit)
+                canvasInputSurfaces(size: geometry.size)
+                elementsAndSelectionOverlay(size: geometry.size, pageGeometry: pageGeometry)
+                selectionActionStrip
+                selectionPasteBubble
+                backlinksRailOverlay
+                entityPopoverOverlay
+                agentLineOverlay(size: geometry.size)
+                pageStatusCluster(size: geometry.size)
             }
             .clipped()
             .onAppear {
@@ -544,6 +287,321 @@ struct NoteScreenView: View {
                 canvasSize = newSize
             }
         }
+    }
+
+    /// Everything painted beneath the ink: page guides, PDF pages and their
+    /// adornments, and the elements that sit below the drawing.
+    @ViewBuilder
+    private func pageBackdrop(size: CGSize, pageGeometry: PageGeometry) -> some View {
+        PageGuideLayer(
+            viewport: canvasViewport,
+            viewportSize: canvasSize,
+            pageCount: pageState.pageCount,
+            geometry: pageGeometry,
+            style: model.note?.backgroundStyle ?? .legacyDefault,
+            pdfBands: model.pdfBands
+        )
+        .frame(width: size.width, height: size.height)
+
+        PdfPagesLayer(
+            cache: model.pdfCache,
+            pdfBands: model.pdfBands,
+            viewport: canvasViewport,
+            pageCount: pageState.pageCount,
+            geometry: pageGeometry
+        )
+        .contentViewportFrame(
+            contentWidth: pageGeometry.contentWidth,
+            contentHeight: pageState.contentHeight,
+            zoom: canvasViewport.zoomScale,
+            contentOffset: canvasViewport.contentOffset,
+            viewportSize: size
+        )
+
+        PageGuideLayer(
+            viewport: canvasViewport,
+            viewportSize: canvasSize,
+            pageCount: pageState.pageCount,
+            geometry: pageGeometry,
+            style: model.note?.backgroundStyle ?? .legacyDefault,
+            pdfBands: model.pdfBands,
+            mode: .pdfAdornments
+        )
+        .frame(width: size.width, height: size.height)
+        .allowsHitTesting(false)
+
+        CanvasElementsBandLayer(
+            store: model.canvasElements,
+            selectionController: selectionController,
+            placement: .belowInk
+        )
+        .contentViewportFrame(
+            contentWidth: pageGeometry.contentWidth,
+            contentHeight: pageState.contentHeight,
+            zoom: canvasViewport.zoomScale,
+            contentOffset: canvasViewport.contentOffset,
+            viewportSize: size
+        )
+    }
+
+    /// The PencilKit canvas itself.
+    ///
+    /// Must stay an unconditional direct child of the canvas ZStack. Putting it
+    /// behind an `if`, or inside a view that is conditionally instantiated,
+    /// re-creates the representable: that resets the PKCanvasView, drops
+    /// `canvasReference.canvasView`, bumps `pane.canvasGeneration`, and loses the
+    /// undo stack, the zoom and the content offset.
+    private func pencilCanvas(
+        size: CGSize,
+        pageGeometry: PageGeometry,
+        canvasGlobalOrigin: CGPoint
+    ) -> some View {
+        PencilCanvasView(
+            drawingData: model.drawingData,
+            onDrawingChanged: { data in
+                model.drawingChanged(data)
+                refreshPageCount()
+            },
+            isTransparent: true,
+            tool: activeTool,
+            showsSystemToolPicker: false,
+            onCanvasReady: { canvasView in
+                activeCanvasReference.canvasView = canvasView
+                Task { @MainActor in
+                    paneContext.pane.canvasDidBecomeReady()
+                }
+            },
+            paneUndoManager: paneContext.pane.undoManager,
+            isDrawingEnabled: selectedTool.usesDrawingGesture,
+            contentWidth: pageGeometry.contentWidth,
+            contentHeight: pageState.contentHeight,
+            topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + 16,
+            onViewportChanged: { canvasViewport = $0 },
+            onExternalDrawingChange: {
+                selectionController.externalDrawingDidChange()
+                refreshPageCount()
+            },
+            onPencilSqueeze: { phase in
+                switch phase {
+                case .began:
+                    if let tool = app.split.squeezeEraser.begin(
+                        current: selectedTool
+                    ) {
+                        selectedTool = tool
+                    }
+                case .ended:
+                    if let tool = app.split.squeezeEraser.end(
+                        current: selectedTool
+                    ) {
+                        selectedTool = tool
+                    }
+                }
+            },
+            onTwoFingerTap: {
+                if activeCanvasReference.canvasView?.undoManager?.canUndo == true {
+                    activeCanvasReference.canvasView?.undoManager?.undo()
+                }
+            },
+            onThreeFingerTap: {
+                if activeCanvasReference.canvasView?.undoManager?.canRedo == true {
+                    activeCanvasReference.canvasView?.undoManager?.redo()
+                }
+            }
+        )
+        .frame(width: size.width, height: size.height)
+    }
+
+    /// The invisible gesture surfaces over the ink.
+    ///
+    /// Declaration order is recognizer precedence — snap, then erase, then tap
+    /// selection. Reordering these reopens a tap race that was fixed once already.
+    @ViewBuilder
+    private func canvasInputSurfaces(size: CGSize) -> some View {
+        ShapeSnapSurface(
+            controller: shapeSnapController,
+            isEnabled: selectedTool.isInkTool,
+            inkConfig: selectedTool.inkConfigKeyPath.map {
+                app.toolPreferences.preferences[keyPath: $0]
+            },
+            isDrawingEnabled: selectedTool.usesDrawingGesture
+        )
+        .frame(width: size.width, height: size.height)
+        .allowsHitTesting(false)
+
+        ShapeEraserSurface(
+            canvasReference: activeCanvasReference,
+            elementsStore: model.canvasElements,
+            eraserConfig: app.toolPreferences.preferences.eraser,
+            isEnabled: selectedTool == .eraser
+        )
+        .frame(width: size.width, height: size.height)
+        .allowsHitTesting(false)
+
+        ElementTapSelectionSurface(
+            canvasReference: activeCanvasReference,
+            elementsStore: model.canvasElements,
+            selectionController: selectionController,
+            // Only the ink tools borrow a tap for element selection. Shapes and photos
+            // then use the same Select-tool edit flow. While Select is already active its
+            // capture surface owns taps, including tapping away to deselect, and two tap
+            // handlers on one canvas would race; the eraser and Text answer their own taps.
+            isEnabled: selectedTool.isInkTool,
+            onElementSelected: borrowSelectTool
+        )
+        .frame(width: size.width, height: size.height)
+        .allowsHitTesting(false)
+    }
+
+    /// The elements drawn above the ink, and the handles that manipulate them.
+    @ViewBuilder
+    private func elementsAndSelectionOverlay(
+        size: CGSize,
+        pageGeometry: PageGeometry
+    ) -> some View {
+        CanvasElementsBandLayer(
+            store: model.canvasElements,
+            selectionController: selectionController,
+            placement: .aboveInk,
+            textDefaults: app.toolPreferences.preferences.text,
+            isTextToolActive: selectedTool == .text
+        )
+        .contentViewportFrame(
+            contentWidth: pageGeometry.contentWidth,
+            contentHeight: pageState.contentHeight,
+            zoom: canvasViewport.zoomScale,
+            contentOffset: canvasViewport.contentOffset,
+            viewportSize: size
+        )
+
+        SelectionOverlayView(
+            controller: selectionController,
+            selectionMode: app.toolPreferences.preferences.selection.mode,
+            isActive: selectionController.selection != nil
+                || selectedTool == .select,
+            isSelectToolActive: selectedTool == .select
+        )
+        .contentViewportFrame(
+            contentWidth: pageGeometry.contentWidth,
+            contentHeight: pageState.contentHeight,
+            zoom: canvasViewport.zoomScale,
+            contentOffset: canvasViewport.contentOffset,
+            viewportSize: size
+        )
+    }
+
+    @ViewBuilder
+    private var selectionActionStrip: some View {
+        // Not gated on the Select tool: tapping a shape selects it while an ink tool is
+        // active, and that is exactly when the actions need to be reachable.
+        if selectionController.selection != nil,
+           selectionController.strokesSnapshot == nil,
+           selectionController.dragTranslation == .zero,
+           let avoidanceRect = selectionController.stripAvoidanceBounds {
+            let stripSize = SelectionActionStripView.stripSize(
+                includesStyle: selectionController.selectionSupportsStyling
+            )
+            SelectionActionStripView(controller: selectionController)
+                .position(SelectionActionStripView.position(
+                    avoiding: canvasViewport.viewRect(fromContent: avoidanceRect),
+                    stripSize: stripSize,
+                    in: canvasSize,
+                    topInset: topOverlayHeight + 12
+                ))
+                .zIndex(4.5)
+        }
+    }
+
+    @ViewBuilder
+    private var selectionPasteBubble: some View {
+        if selectionController.selection == nil,
+           let target = selectionController.pendingPasteTarget {
+            let tapViewPoint = canvasViewport.viewPoint(fromContent: target)
+            if CGRect(origin: .zero, size: canvasSize)
+                .insetBy(dx: -20, dy: -20)
+                .contains(tapViewPoint) {
+                SelectionPasteBubbleView {
+                    Task {
+                        await selectionController.pasteFromPasteboard(at: target)
+                    }
+                }
+                .position(SelectionPasteBubbleView.position(
+                    forTapAt: tapViewPoint,
+                    in: canvasSize
+                ))
+                .zIndex(4.5)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var backlinksRailOverlay: some View {
+        if showsBacklinksRail {
+            NoteBacklinksRail(
+                backlinks: model.backlinks,
+                onOpen: { noteID in Task { await app.openNote(noteID) } }
+            )
+            .frame(width: 184)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.top, topOverlayHeight + 12)
+            .zIndex(2)
+        }
+    }
+
+    @ViewBuilder
+    private var entityPopoverOverlay: some View {
+        if let entity = model.selectedEntity {
+            EntityPopoverView(entity: entity, model: model, app: app)
+                .frame(width: 270)
+                .padding(.leading, 80)
+                .padding(.top, topOverlayHeight + 12)
+                .transition(.offset(y: 6).combined(with: .opacity))
+                .zIndex(5)
+        }
+    }
+
+    @ViewBuilder
+    private func agentLineOverlay(size: CGSize) -> some View {
+        if !model.pendingProposals.isEmpty {
+            NoteAgentLine(model: model)
+                .frame(
+                    width: size.width,
+                    height: size.height,
+                    alignment: .bottomLeading
+                )
+                .padding(.leading, 80)
+                .padding(.bottom, 92)
+                .zIndex(3)
+        }
+    }
+
+    /// The page tracker and the zoom-reset pill, pinned to the bottom leading corner.
+    private func pageStatusCluster(size: CGSize) -> some View {
+        HStack(spacing: 8) {
+            PageTrackerBadge(
+                currentPage: pageState.currentPageIndex + 1,
+                pageCount: pageState.pageCount
+            ) {
+                isShowingThumbnails.toggle()
+            }
+
+            if !isZoomAtFit {
+                ZoomResetPill(
+                    zoomPercentOfFit: Int((canvasViewport.zoomScale
+                        / fitZoomScale * 100).rounded()),
+                    onTap: resetZoomToFit
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+        }
+        .frame(
+            width: size.width,
+            height: size.height,
+            alignment: .bottomLeading
+        )
+        .padding(.leading, 20)
+        .padding(.bottom, 20)
+        .zIndex(4)
+        .animation(.easeOut(duration: 0.18), value: isZoomAtFit)
     }
 
     @ViewBuilder
