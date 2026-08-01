@@ -70,79 +70,16 @@ struct NoteSplitContainerView: View {
             )
 
             ZStack(alignment: .topLeading) {
-                if panes.isEmpty {
-                    ProgressView("Loading note…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    HStack(spacing: 0) {
-                        ForEach(
-                            Array(columns.enumerated()),
-                            id: \.element.id
-                        ) { columnEntry in
-                            let columnIndex = columnEntry.offset
-                            let column = columnEntry.element
-
-                            VStack(spacing: 0) {
-                                ForEach(
-                                    Array(column.panes.enumerated()),
-                                    id: \.element.id
-                                ) { paneEntry in
-                                    let rowIndex = paneEntry.offset
-                                    let pane = paneEntry.element
-                                    let paneID = pane.id
-                                    let paneIndex = PaneIndex(
-                                        column: columnIndex,
-                                        row: rowIndex
-                                    )
-                                    let transform = SplitContainerLayout.panePreviewTransform(
-                                        at: paneIndex,
-                                        target: previewTarget,
-                                        committedGrid: committedGrid,
-                                        previewGrid: previewGrid,
-                                        containerSize: geometry.size
-                                    )
-
-                                    NoteScreenView(
-                                        model: pane.noteModel,
-                                        app: app,
-                                        paneContext: PaneContext(
-                                            pane: pane,
-                                            isFocused: app.split.focusedPaneID == paneID,
-                                            paneSize: CGSize(
-                                                width: committedColumnWidths[columnIndex],
-                                                height: committedRowHeights[columnIndex][rowIndex]
-                                            ),
-                                            paneCount: panes.count,
-                                            canvasGeneration: pane.canvasGeneration
-                                        )
-                                    )
-                                    .frame(
-                                        width: committedColumnWidths[columnIndex],
-                                        height: committedRowHeights[columnIndex][rowIndex]
-                                    )
-                                    .clipped()
-                                    .geometryGroup()
-                                    .scaleEffect(
-                                        x: transform.scale.width,
-                                        y: transform.scale.height,
-                                        anchor: .topLeading
-                                    )
-                                    .offset(transform.offset)
-                                }
-                            }
-                            .frame(
-                                width: committedColumnWidths[columnIndex],
-                                height: geometry.size.height,
-                                alignment: .top
-                            )
-                        }
-                    }
-                    .frame(
-                        width: geometry.size.width,
-                        height: geometry.size.height,
-                        alignment: .leading
-                    )
-                }
+                paneGrid(
+                    columns: columns,
+                    panes: panes,
+                    previewTarget: previewTarget,
+                    committedGrid: committedGrid,
+                    previewGrid: previewGrid,
+                    columnWidths: committedColumnWidths,
+                    rowHeights: committedRowHeights,
+                    containerSize: geometry.size
+                )
 
                 if previewGrid.columns.count > 1 {
                     ForEach(
@@ -330,6 +267,95 @@ struct NoteSplitContainerView: View {
             app.toolPreferences.update { preferences in
                 preferences.lastSelectedTool = newTool
             }
+        }
+    }
+
+    /// Every open note, laid out at its committed size. During a drag each pane
+    /// is scaled and offset toward the slot the preview grid gives it, so the
+    /// panes animate into the split before the drop commits.
+    @ViewBuilder
+    private func paneGrid(
+        columns: [SplitColumn],
+        panes: [NotePane],
+        previewTarget: SplitGridDropTarget?,
+        committedGrid: SplitGridSnapshot,
+        previewGrid: SplitGridSnapshot,
+        columnWidths: [CGFloat],
+        rowHeights: [[CGFloat]],
+        containerSize: CGSize
+    ) -> some View {
+        if panes.isEmpty {
+            ProgressView("Loading note…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HStack(spacing: 0) {
+                ForEach(
+                    Array(columns.enumerated()),
+                    id: \.element.id
+                ) { columnEntry in
+                    let columnIndex = columnEntry.offset
+                    let column = columnEntry.element
+
+                    VStack(spacing: 0) {
+                        ForEach(
+                            Array(column.panes.enumerated()),
+                            id: \.element.id
+                        ) { paneEntry in
+                            let rowIndex = paneEntry.offset
+                            let pane = paneEntry.element
+                            let paneID = pane.id
+                            let paneIndex = PaneIndex(
+                                column: columnIndex,
+                                row: rowIndex
+                            )
+                            let transform = SplitContainerLayout.panePreviewTransform(
+                                at: paneIndex,
+                                target: previewTarget,
+                                committedGrid: committedGrid,
+                                previewGrid: previewGrid,
+                                containerSize: containerSize
+                            )
+
+                            NoteScreenView(
+                                model: pane.noteModel,
+                                app: app,
+                                paneContext: PaneContext(
+                                    pane: pane,
+                                    isFocused: app.split.focusedPaneID == paneID,
+                                    paneSize: CGSize(
+                                        width: columnWidths[columnIndex],
+                                        height: rowHeights[columnIndex][rowIndex]
+                                    ),
+                                    paneCount: panes.count,
+                                    canvasGeneration: pane.canvasGeneration
+                                )
+                            )
+                            .frame(
+                                width: columnWidths[columnIndex],
+                                height: rowHeights[columnIndex][rowIndex]
+                            )
+                            .clipped()
+                            .geometryGroup()
+                            .scaleEffect(
+                                x: transform.scale.width,
+                                y: transform.scale.height,
+                                anchor: .topLeading
+                            )
+                            .offset(transform.offset)
+                        }
+                    }
+                    .frame(
+                        width: columnWidths[columnIndex],
+                        height: containerSize.height,
+                        alignment: .top
+                    )
+                }
+            }
+            .frame(
+                width: containerSize.width,
+                height: containerSize.height,
+                alignment: .leading
+            )
         }
     }
 
