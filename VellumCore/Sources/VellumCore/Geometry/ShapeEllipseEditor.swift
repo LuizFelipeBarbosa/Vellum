@@ -32,7 +32,9 @@ public enum ShapeEllipseEditor {
         let angle = CGFloat(rotation)
         let cosine = cos(angle)
         let sine = sin(angle)
-        return handles.map { rotated($0, around: center, cosine: cosine, sine: sine) }
+        return handles.map {
+            ShapeGeometry.rotated($0, around: center, cosine: cosine, sine: sine)
+        }
     }
 
     /// Pull one axis of the ellipse to `worldPoint`. The opposite point on the curve and the
@@ -61,7 +63,12 @@ public enum ShapeEllipseEditor {
             x: CGFloat(frame.x + frame.width / 2),
             y: CGFloat(frame.y + frame.height / 2)
         )
-        let local = inverseRotated(worldPoint, around: oldCenter, cosine: cosine, sine: sine)
+        let local = ShapeGeometry.inverseRotated(
+            worldPoint,
+            around: oldCenter,
+            cosine: cosine,
+            sine: sine
+        )
 
         let minimumExtent = CGFloat(ShapeElementBuilder.minimumFrameExtent)
         var minimumX = CGFloat(frame.x)
@@ -84,50 +91,20 @@ public enum ShapeEllipseEditor {
         let height = maximumY - minimumY
         guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
 
-        // Same compensation ShapeVertexEditor uses: moving one edge moves the center the shape
-        // rotates about, which would swing the opposite edge unless the origin absorbs it.
         let newCenter = CGPoint(x: minimumX + width / 2, y: minimumY + height / 2)
-        let centerDelta = CGPoint(
-            x: newCenter.x - oldCenter.x,
-            y: newCenter.y - oldCenter.y
-        )
-        let rotatedDelta = CGPoint(
-            x: centerDelta.x * cosine - centerDelta.y * sine,
-            y: centerDelta.x * sine + centerDelta.y * cosine
+        let compensation = ShapeGeometry.rotationCompensation(
+            forCenterDelta: CGPoint(
+                x: newCenter.x - oldCenter.x,
+                y: newCenter.y - oldCenter.y
+            ),
+            cosine: cosine,
+            sine: sine
         )
         return CanvasRect(
-            x: Double(minimumX + rotatedDelta.x - centerDelta.x),
-            y: Double(minimumY + rotatedDelta.y - centerDelta.y),
+            x: Double(minimumX + compensation.x),
+            y: Double(minimumY + compensation.y),
             width: Double(width),
             height: Double(height)
-        )
-    }
-
-    private static func rotated(
-        _ point: CGPoint,
-        around center: CGPoint,
-        cosine: CGFloat,
-        sine: CGFloat
-    ) -> CGPoint {
-        let x = point.x - center.x
-        let y = point.y - center.y
-        return CGPoint(
-            x: center.x + x * cosine - y * sine,
-            y: center.y + x * sine + y * cosine
-        )
-    }
-
-    private static func inverseRotated(
-        _ point: CGPoint,
-        around center: CGPoint,
-        cosine: CGFloat,
-        sine: CGFloat
-    ) -> CGPoint {
-        let x = point.x - center.x
-        let y = point.y - center.y
-        return CGPoint(
-            x: center.x + x * cosine + y * sine,
-            y: center.y - x * sine + y * cosine
         )
     }
 }

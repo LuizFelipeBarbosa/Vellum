@@ -26,7 +26,7 @@ public enum ShapeVertexEditor {
             y: CGFloat(frame.y + frame.height / 2)
         )
         return vertices.map {
-            rotated($0, around: center, cosine: cosine, sine: sine)
+            ShapeGeometry.rotated($0, around: center, cosine: cosine, sine: sine)
         }
     }
 
@@ -60,7 +60,7 @@ public enum ShapeVertexEditor {
             x: CGFloat(frame.x + frame.width / 2),
             y: CGFloat(frame.y + frame.height / 2)
         )
-        unrotatedVertices[index] = inverseRotated(
+        unrotatedVertices[index] = ShapeGeometry.inverseRotated(
             worldPoint,
             around: oldCenter,
             cosine: cosine,
@@ -90,13 +90,10 @@ public enum ShapeVertexEditor {
             x: newTightCenter.x - oldCenter.x,
             y: newTightCenter.y - oldCenter.y
         )
-        let rotatedDelta = CGPoint(
-            x: centerDelta.x * cosine - centerDelta.y * sine,
-            y: centerDelta.x * sine + centerDelta.y * cosine
-        )
-        let compensation = CGPoint(
-            x: rotatedDelta.x - centerDelta.x,
-            y: rotatedDelta.y - centerDelta.y
+        let compensation = ShapeGeometry.rotationCompensation(
+            forCenterDelta: centerDelta,
+            cosine: cosine,
+            sine: sine
         )
         let compensatedOrigin = CGPoint(
             x: tightOrigin.x + compensation.x,
@@ -136,34 +133,6 @@ public enum ShapeVertexEditor {
             strokeWidth: content.strokeWidth
         )
         return (content: updatedContent, frame: newFrame)
-    }
-
-    private static func rotated(
-        _ point: CGPoint,
-        around center: CGPoint,
-        cosine: CGFloat,
-        sine: CGFloat
-    ) -> CGPoint {
-        let x = point.x - center.x
-        let y = point.y - center.y
-        return CGPoint(
-            x: center.x + x * cosine - y * sine,
-            y: center.y + x * sine + y * cosine
-        )
-    }
-
-    private static func inverseRotated(
-        _ point: CGPoint,
-        around center: CGPoint,
-        cosine: CGFloat,
-        sine: CGFloat
-    ) -> CGPoint {
-        let x = point.x - center.x
-        let y = point.y - center.y
-        return CGPoint(
-            x: center.x + x * cosine + y * sine,
-            y: center.y - x * sine + y * cosine
-        )
     }
 
     private static func bounds(of points: [CGPoint]) -> PointBounds? {

@@ -50,6 +50,57 @@ public enum ShapeGeometry {
             )
         }
     }
+
+    /// Rotate `point` about `center`. Callers pass precomputed trig because they typically rotate
+    /// several points by one angle.
+    static func rotated(
+        _ point: CGPoint,
+        around center: CGPoint,
+        cosine: CGFloat,
+        sine: CGFloat
+    ) -> CGPoint {
+        let x = point.x - center.x
+        let y = point.y - center.y
+        return CGPoint(
+            x: center.x + x * cosine - y * sine,
+            y: center.y + x * sine + y * cosine
+        )
+    }
+
+    /// Inverse of `rotated(_:around:cosine:sine:)` for the same angle.
+    static func inverseRotated(
+        _ point: CGPoint,
+        around center: CGPoint,
+        cosine: CGFloat,
+        sine: CGFloat
+    ) -> CGPoint {
+        let x = point.x - center.x
+        let y = point.y - center.y
+        return CGPoint(
+            x: center.x + x * cosine + y * sine,
+            y: center.y - x * sine + y * cosine
+        )
+    }
+
+    /// Origin offset that keeps a rotated shape's untouched edges still when its center moves.
+    ///
+    /// Editing one edge or vertex shifts the center the shape rotates about, which would swing the
+    /// edges the user did not touch. Rotating the center delta as a vector and subtracting the raw
+    /// delta yields the origin correction that absorbs that swing.
+    static func rotationCompensation(
+        forCenterDelta centerDelta: CGPoint,
+        cosine: CGFloat,
+        sine: CGFloat
+    ) -> CGPoint {
+        let rotatedDelta = CGPoint(
+            x: centerDelta.x * cosine - centerDelta.y * sine,
+            y: centerDelta.x * sine + centerDelta.y * cosine
+        )
+        return CGPoint(
+            x: rotatedDelta.x - centerDelta.x,
+            y: rotatedDelta.y - centerDelta.y
+        )
+    }
 }
 
 private extension CanvasRect {
