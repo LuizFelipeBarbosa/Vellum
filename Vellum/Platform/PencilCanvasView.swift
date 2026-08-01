@@ -298,6 +298,7 @@ struct PencilCanvasView: UIViewRepresentable {
     var onCanvasReady: ((PKCanvasView) -> Void)? = nil
     var paneUndoManager: UndoManager? = nil
     var isDrawingEnabled: Bool = true
+    var inkDisplayStyle: UIUserInterfaceStyle = .light
     // Placeholders overridden by NoteScreenView from NotePageState.
     var contentWidth: CGFloat = PageGeometry.a4.contentWidth
     var contentHeight: CGFloat = PageGeometry.a4.pageHeight
@@ -328,6 +329,7 @@ struct PencilCanvasView: UIViewRepresentable {
             canvasView.contentHeightInContentSpace = contentHeight
             canvasView.topContentInset = topContentInset
             canvasView.delegate = context.coordinator
+            canvasView.overrideUserInterfaceStyle = inkDisplayStyle
             canvasView.paneUndoManager = paneUndoManager
 #if targetEnvironment(simulator)
             #if DEBUG
@@ -428,6 +430,11 @@ struct PencilCanvasView: UIViewRepresentable {
                 beganObservingToolPicker = false
             } else {
                 beganObservingToolPicker = false
+            }
+
+            // PencilKit adapts stored ink colors from the canvas trait at render time.
+            if canvasView.overrideUserInterfaceStyle != inkDisplayStyle {
+                canvasView.overrideUserInterfaceStyle = inkDisplayStyle
             }
 
             guard !context.coordinator.hasTransientDrawingOverride,

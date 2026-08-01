@@ -9,7 +9,7 @@ struct CanvasElementsBandLayer: View {
     var textDefaults: TextConfig? = nil
     var isTextToolActive = false
 
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.inkDisplayStyle) private var inkDisplayStyle
     @FocusState private var focusedElementID: UUID?
 
     private var shapeCount: Int {
@@ -95,9 +95,9 @@ struct CanvasElementsBandLayer: View {
                         )
                         .stroke(
                             Color(
-                                ShapeInkAppearance.displayColor(
+                                InkAppearance.displayColor(
                                     for: content.strokeColor,
-                                    style: colorScheme == .dark ? .dark : .light
+                                    style: inkDisplayStyle
                                 )
                             ),
                             style: StrokeStyle(
@@ -149,6 +149,7 @@ private struct TextBoxElementView: View {
     let isActive: Bool
     var focusedID: FocusState<UUID?>.Binding
 
+    @Environment(\.inkDisplayStyle) private var inkDisplayStyle
     @State private var text: String
     @State private var dragOffset: CGSize = .zero
     @State private var renderedHeight: CGFloat
@@ -178,7 +179,14 @@ private struct TextBoxElementView: View {
         if case .text(let content) = element.content {
             TextField("", text: $text, axis: .vertical)
                 .font(.vellumNewsreader(CGFloat(content.fontSize)))
-                .foregroundStyle(content.color.swiftUIColor)
+                .foregroundStyle(
+                    Color(
+                        InkAppearance.displayColor(
+                            for: content.color,
+                            style: inkDisplayStyle
+                        )
+                    )
+                )
                 .focused(focusedID, equals: element.id)
                 .padding(6)
                 .frame(width: CGFloat(element.frame.width), alignment: .topLeading)

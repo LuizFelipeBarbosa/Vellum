@@ -11,6 +11,8 @@ struct NoteSplitContainerView: View {
     @State private var dragSession = SplitDragSession()
     @State private var dragHaptics = ReorderHaptics()
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         GeometryReader { geometry in
             let columns = app.split.columns
@@ -438,6 +440,13 @@ struct NoteSplitContainerView: View {
                 availableAxisLength: availableAxisLength
             )
         }
+        .environment(
+            \.inkDisplayStyle,
+            InkAppearance.style(
+                colorScheme: colorScheme,
+                paperTint: focusedPane?.noteModel.backgroundStyle.paperTint
+            )
+        )
     }
 
     private var noteSidebarToggle: some View {

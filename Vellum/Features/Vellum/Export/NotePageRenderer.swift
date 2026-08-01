@@ -395,6 +395,7 @@ enum NotePageRenderer {
                 for: element,
                 pageRect: pageRect,
                 pageBounds: pageBounds,
+                interfaceStyle: interfaceStyle,
                 in: ctx
             )
         case .unknown:
@@ -471,7 +472,7 @@ enum NotePageRenderer {
         ctx.translateBy(x: 0, y: -pageRect.minY)
         ctx.addPath(path)
         ctx.setStrokeColor(
-            ShapeInkAppearance.displayColor(
+            InkAppearance.displayColor(
                 for: shapeContent.strokeColor,
                 style: interfaceStyle
             ).cgColor
@@ -488,16 +489,15 @@ enum NotePageRenderer {
         for element: CanvasElement,
         pageRect: CGRect,
         pageBounds: CGRect,
+        interfaceStyle: UIUserInterfaceStyle,
         in ctx: CGContext
     ) {
         guard element.drawnBoundingBox.intersects(pageRect) else { return }
 
         let grownFrame = growTextFrame(element.frame, textContent: textContent)
-        let color = UIColor(
-            red: CGFloat(textContent.color.red),
-            green: CGFloat(textContent.color.green),
-            blue: CGFloat(textContent.color.blue),
-            alpha: CGFloat(textContent.color.alpha)
+        let color = InkAppearance.displayColor(
+            for: textContent.color,
+            style: interfaceStyle
         )
         let attributedString = NSAttributedString(
             string: textContent.text,
