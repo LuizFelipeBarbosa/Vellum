@@ -441,20 +441,9 @@ public actor WorkspaceService {
             if let existing {
                 spaceID = existing.id
             } else {
-                let space = Space(
-                    id: UUID(),
-                    name: spaceName,
-                    color: color,
-                    createdAt: Date(),
-                    parentID: nil
-                )
-                try await spaces.save(space)
-                try await log(
-                    noteID: nil,
-                    kind: .spaceCreated,
-                    message: "Created space '\(spaceName)'."
-                )
-                spaceID = space.id
+                // Agent-accepted filing creates spaces through the same entry point a
+                // person does, so whatever `createSpace` enforces holds for both.
+                spaceID = try await createSpace(name: spaceName, color: color).id
             }
             note.spaceID = spaceID
             note = try await saveNote(note)
