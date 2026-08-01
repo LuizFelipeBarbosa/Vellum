@@ -70,10 +70,7 @@ public struct MockVellumAgent: VellumAgent, Sendable {
 
         var proposedTargetIDs: Set<UUID> = []
         let otherNotes = context.otherNotes.sorted {
-            if $0.title == $1.title {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.title < $1.title
+            StableOrder.ascending($0, $1, by: \.title, tiebreak: \.id)
         }
         for candidate in otherNotes
         where proposedTargetIDs.count < 3

@@ -153,11 +153,10 @@ public actor WorkspaceService {
     }
 
     public func listTrashedNotes() async throws -> [Note] {
+        // Everything in this scope has a `deletedAt`; the fallback only keeps the key
+        // comparable.
         try await notes.listNotes(scope: .trashed).sorted {
-            if $0.deletedAt == $1.deletedAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return ($0.deletedAt ?? .distantPast) > ($1.deletedAt ?? .distantPast)
+            StableOrder.descending($0, $1, by: { $0.deletedAt ?? .distantPast })
         }
     }
 
@@ -252,10 +251,7 @@ public actor WorkspaceService {
             if $0.isDone != $1.isDone {
                 return !$0.isDone
             }
-            if $0.createdAt == $1.createdAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.createdAt < $1.createdAt
+            return StableOrder.ascending($0, $1, by: \.createdAt)
         }
     }
 
@@ -317,12 +313,7 @@ public actor WorkspaceService {
                 )
             )
         }
-        return summaries.sorted {
-            if $0.updatedAt == $1.updatedAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.updatedAt > $1.updatedAt
-        }
+        return summaries.sorted { StableOrder.descending($0, $1, by: \.updatedAt) }
     }
 
     public func requestAnalysis(noteID: UUID) async throws -> [AgentProposal] {
@@ -574,9 +565,6 @@ public actor WorkspaceService {
     }
 
     private static func sortPages(_ lhs: NotePage, _ rhs: NotePage) -> Bool {
-        if lhs.order == rhs.order {
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
-        return lhs.order < rhs.order
+        StableOrder.ascending(lhs, rhs, by: \.order)
     }
 }

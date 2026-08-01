@@ -20,9 +20,6 @@ public actor FileTaskRepository: TaskRepository {
     }
 
     private static func sort(_ lhs: TaskItem, _ rhs: TaskItem) -> Bool {
-        if lhs.createdAt == rhs.createdAt {
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
-        return lhs.createdAt < rhs.createdAt
+        StableOrder.ascending(lhs, rhs, by: \.createdAt)
     }
 }

@@ -54,21 +54,13 @@ public actor AskService {
                     !$0.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 }
             }
-            .sorted {
-                if $0.updatedAt == $1.updatedAt {
-                    return $0.id.uuidString < $1.id.uuidString
-                }
-                return $0.updatedAt > $1.updatedAt
-            }
+            .sorted { StableOrder.descending($0, $1, by: \.updatedAt) }
         return qualifyingNotes.prefix(3).map {
             "What do my notes say about \($0.title)?"
         }
     }
 
     private static func sortPages(_ lhs: NotePage, _ rhs: NotePage) -> Bool {
-        if lhs.order == rhs.order {
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
-        return lhs.order < rhs.order
+        StableOrder.ascending(lhs, rhs, by: \.order)
     }
 }

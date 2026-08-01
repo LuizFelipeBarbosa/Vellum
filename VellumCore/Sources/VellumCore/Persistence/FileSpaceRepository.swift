@@ -20,9 +20,6 @@ public actor FileSpaceRepository: SpaceRepository {
     }
 
     private static func sort(_ lhs: Space, _ rhs: Space) -> Bool {
-        if lhs.createdAt == rhs.createdAt {
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
-        return lhs.createdAt < rhs.createdAt
+        StableOrder.ascending(lhs, rhs, by: \.createdAt)
     }
 }

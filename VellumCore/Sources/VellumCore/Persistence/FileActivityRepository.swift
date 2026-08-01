@@ -72,12 +72,7 @@ public actor FileActivityRepository: ActivityRepository {
             }
         }
 
-        return events.sorted {
-            if $0.createdAt == $1.createdAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.createdAt < $1.createdAt
-        }
+        return events.sorted { StableOrder.ascending($0, $1, by: \.createdAt) }
     }
 
     private var workspaceLogURL: URL {

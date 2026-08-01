@@ -126,10 +126,7 @@ public actor KnowledgeGraphService {
             }
         }
         return backlinks.sorted {
-            if $0.sourceTitle == $1.sourceTitle {
-                return $0.sourceNoteID.uuidString < $1.sourceNoteID.uuidString
-            }
-            return $0.sourceTitle < $1.sourceTitle
+            StableOrder.ascending($0, $1, by: \.sourceTitle, tiebreak: \.sourceNoteID)
         }
     }
 
@@ -138,12 +135,7 @@ public actor KnowledgeGraphService {
             .filter { entity in
                 entity.sources.contains { $0.noteID == noteID }
             }
-            .sorted {
-                if $0.name == $1.name {
-                    return $0.id.uuidString < $1.id.uuidString
-                }
-                return $0.name < $1.name
-            }
+            .sorted { StableOrder.ascending($0, $1, by: \.name) }
     }
 
     private static func sortNodes(_ lhs: GraphNode, _ rhs: GraphNode) -> Bool {

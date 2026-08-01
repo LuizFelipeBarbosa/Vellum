@@ -138,12 +138,7 @@ public actor FileNoteRepository: NoteRepository {
             filteredNotes = notes
         }
 
-        return filteredNotes.sorted {
-            if $0.updatedAt == $1.updatedAt {
-                return $0.id.uuidString < $1.id.uuidString
-            }
-            return $0.updatedAt > $1.updatedAt
-        }
+        return filteredNotes.sorted { StableOrder.descending($0, $1, by: \.updatedAt) }
     }
 
     public func unsupportedNotes() async throws -> [UnsupportedNotePackage] {

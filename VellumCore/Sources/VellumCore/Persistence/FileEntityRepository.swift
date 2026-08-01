@@ -20,9 +20,6 @@ public actor FileEntityRepository: EntityRepository {
     }
 
     private static func sort(_ lhs: Entity, _ rhs: Entity) -> Bool {
-        if lhs.createdAt == rhs.createdAt {
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
-        return lhs.createdAt < rhs.createdAt
+        StableOrder.ascending(lhs, rhs, by: \.createdAt)
     }
 }
