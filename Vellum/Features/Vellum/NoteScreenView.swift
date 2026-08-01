@@ -201,7 +201,10 @@ struct NoteScreenView: View {
                 )
 
                 if !model.noteEntities.isEmpty && showsEntityChips {
-                    entityChips
+                    NoteEntityChipsRow(
+                        entities: model.noteEntities,
+                        onSelect: { model.selectedEntity = $0 }
+                    )
                 }
             }
             .padding(.horizontal, 20)
@@ -235,38 +238,6 @@ struct NoteScreenView: View {
                 paneCloseButton(paneContext)
             }
         }
-    }
-
-    private var entityChips: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(model.noteEntities) { entity in
-                    Button {
-                        model.selectedEntity = entity
-                    } label: {
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(entityColor(for: entity.kind))
-                                .frame(width: 6, height: 6)
-                            Text(entity.name)
-                                .lineLimit(1)
-                        }
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(VellumTheme.bodyMuted)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(VellumTheme.popover, in: Capsule())
-                        .overlay {
-                            Capsule().stroke(VellumTheme.ink(0.13), lineWidth: 1)
-                        }
-                        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.bottom, 9)
-        }
-        .scrollIndicators(.hidden)
     }
 
     private func paneCloseButton(_ paneContext: PaneContext) -> some View {
@@ -524,10 +495,13 @@ struct NoteScreenView: View {
                 }
 
                 if showsBacklinksRail {
-                    backlinksRail
-                        .frame(width: 184)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.top, topOverlayHeight + 12)
+                    NoteBacklinksRail(
+                        backlinks: model.backlinks,
+                        onOpen: { noteID in Task { await app.openNote(noteID) } }
+                    )
+                    .frame(width: 184)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.top, topOverlayHeight + 12)
                         .zIndex(2)
                 }
 
@@ -586,52 +560,6 @@ struct NoteScreenView: View {
             .onChange(of: geometry.size) { _, newSize in
                 canvasSize = newSize
             }
-        }
-    }
-
-    private var backlinksRail: some View {
-        VStack(alignment: .trailing, spacing: 10) {
-            ForEach(model.backlinks, id: \.sourceNoteID) { backlink in
-                Button {
-                    Task {
-                        await app.openNote(backlink.sourceNoteID)
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(backlink.sourceTitle)
-                            .foregroundStyle(VellumTheme.bodyMuted)
-                            .lineLimit(1)
-                        Text("· \(backlink.kind.rawValue)")
-                            .foregroundStyle(VellumTheme.mutedCount)
-                    }
-                    .font(.system(size: 12.5))
-                    .padding(.leading, 16)
-                    .padding(.trailing, 14)
-                    .padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        VellumTheme.card,
-                        in: UnevenRoundedRectangle(
-                            topLeadingRadius: 10,
-                            bottomLeadingRadius: 10
-                        )
-                    )
-                    .overlay {
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: 10,
-                            bottomLeadingRadius: 10
-                        )
-                        .stroke(VellumTheme.ink(0.14), lineWidth: 1)
-                    }
-                    .shadow(color: VellumTheme.ink(0.06), radius: 3, x: -2, y: 2)
-                }
-                .buttonStyle(.plain)
-            }
-
-            Text("\(model.backlinks.count) \(model.backlinks.count == 1 ? "backlink" : "backlinks")")
-                .font(.vellumMono(10.5))
-                .foregroundStyle(VellumTheme.mutedCount)
-                .padding(.trailing, 14)
         }
     }
 
@@ -712,14 +640,6 @@ struct NoteScreenView: View {
     private func selectImportedElement(id: UUID) {
         selectionController.selectElement(id: id, survivesNextToolChange: true)
         borrowSelectTool()
-    }
-
-    private func entityColor(for kind: EntityKind) -> Color {
-        switch kind {
-        case .person: VellumTheme.accent
-        case .topic: VellumTheme.spaceGreen
-        case .document: VellumTheme.spaceBlue
-        }
     }
 
     private func deleteNote() {
