@@ -541,7 +541,7 @@ struct NoteScreenView: View {
                 }
 
                 if !model.pendingProposals.isEmpty {
-                    agentLine
+                    NoteAgentLine(model: model)
                         .frame(
                             width: geometry.size.width,
                             height: geometry.size.height,
@@ -635,41 +635,6 @@ struct NoteScreenView: View {
         }
     }
 
-    private var agentLine: some View {
-        Button {
-            model.isShowingSuggestions = true
-        } label: {
-            HStack(spacing: 3) {
-                Text("\(model.pendingProposals.count) suggestions —")
-                Text("review")
-                    .foregroundStyle(VellumTheme.accentDark)
-                    .overlay(alignment: .bottom) {
-                        VellumDottedLine(color: VellumTheme.accent)
-                            .frame(height: 1)
-                            .offset(y: 1)
-                    }
-            }
-            .font(.vellumNewsreader(13.5, italic: true))
-            .foregroundStyle(VellumTheme.muted)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var suggestionsOverlay: some View {
-        ZStack(alignment: .trailing) {
-            Color.black.opacity(0.001)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    model.isShowingSuggestions = false
-                }
-
-            suggestionsPanel
-                .frame(width: 370)
-                .padding(18)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
     @ViewBuilder
     private var modalOverlays: some View {
         if isShowingThumbnails && showsSuggestionsAndThumbnails {
@@ -679,7 +644,7 @@ struct NoteScreenView: View {
         }
 
         if model.isShowingSuggestions && showsSuggestionsAndThumbnails {
-            suggestionsOverlay
+            NoteSuggestionsOverlay(model: model)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
                 .zIndex(10)
         }
@@ -750,92 +715,6 @@ struct NoteScreenView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var suggestionsPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Suggestions")
-                        .font(.vellumNewsreader(22, weight: .semibold))
-                    Text("\(model.pendingProposals.count) ready to review")
-                        .font(.vellumMono(10.5))
-                        .foregroundStyle(VellumTheme.mutedCount)
-                }
-                Spacer()
-                Button("×") {
-                    model.isShowingSuggestions = false
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 18))
-                .foregroundStyle(VellumTheme.mutedCount)
-                .accessibilityLabel("Close suggestions")
-            }
-
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(model.pendingProposals) { proposal in
-                        suggestionCard(proposal)
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-        }
-        .padding(18)
-        .background(VellumTheme.popover, in: RoundedRectangle(cornerRadius: 16))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(VellumTheme.ink(0.14), lineWidth: 1)
-        }
-        .shadow(color: VellumTheme.ink(0.18), radius: 18, x: -4, y: 12)
-    }
-
-    private func suggestionCard(_ proposal: AgentProposal) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(proposal.title)
-                    .font(.vellumNewsreader(16, weight: .semibold))
-                    .foregroundStyle(VellumTheme.ink)
-                Spacer()
-                Text("\(Int((proposal.confidence * 100).rounded()))%")
-                    .font(.vellumMono(10.5, weight: .medium))
-                    .foregroundStyle(VellumTheme.accentDark)
-            }
-
-            Text(operationDescription(proposal.operation))
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(VellumTheme.bodyMuted)
-
-            Text(proposal.explanation)
-                .font(.system(size: 12.5))
-                .foregroundStyle(VellumTheme.mutedDark)
-                .lineSpacing(4)
-
-            HStack(spacing: 10) {
-                Button("Accept") {
-                    Task { await model.accept(proposal) }
-                }
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(VellumTheme.paper)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 6)
-                .background(VellumTheme.ink, in: Capsule())
-
-                Button("Reject") {
-                    Task { await model.reject(proposal) }
-                }
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(VellumTheme.mutedDark)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VellumTheme.card, in: RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(VellumTheme.ink(0.1), lineWidth: 1)
-        }
-    }
-
     private var activeTool: (any PKTool)? {
         NoteToolFactory.tool(
             for: selectedTool,
@@ -884,25 +763,6 @@ struct NoteScreenView: View {
         case .person: VellumTheme.accent
         case .topic: VellumTheme.spaceGreen
         case .document: VellumTheme.spaceBlue
-        }
-    }
-
-    private func operationDescription(_ operation: AgentOperation) -> String {
-        switch operation {
-        case .addTag(let tag):
-            "Add tag “\(tag)”"
-        case .suggestTitle(let title):
-            "Rename note to “\(title)”"
-        case .createSummary(let summary):
-            "Create summary: \(summary)"
-        case .fileToSpace(let spaceName, let color):
-            "File in \(spaceName) · \(color.rawValue)"
-        case .linkNotes(let targetNoteID, let kind):
-            "Link to \(model.noteTitles[targetNoteID] ?? targetNoteID.uuidString) · \(kind.rawValue)"
-        case .extractTask(let text, _):
-            "Extract task: \(text)"
-        case .extractEntity(let name, let kind, _, _):
-            "Extract \(kind.rawValue): \(name)"
         }
     }
 
