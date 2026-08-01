@@ -22,13 +22,13 @@ struct QuarterTurn {
     init?(nearest angle: CGFloat, tolerance: CGFloat) {
         let quarterTurn = CGFloat.pi / 2
         let turns = (angle / quarterTurn).rounded()
-        let safeTolerance = tolerance.isFinite ? max(0, tolerance) : 0
-        guard abs(angle - turns * quarterTurn) <= safeTolerance else { return nil }
+        guard abs(angle - turns * quarterTurn) <= tolerance.nonnegativeFinite else {
+            return nil
+        }
         self.turns = turns
     }
 
     init?(nearest angle: CGFloat, toleranceDegrees: CGFloat) {
-        let degrees = toleranceDegrees.isFinite ? max(0, toleranceDegrees) : 0
-        self.init(nearest: angle, tolerance: degrees * .pi / 180)
+        self.init(nearest: angle, tolerance: toleranceDegrees.nonnegativeFinite * .pi / 180)
     }
 }

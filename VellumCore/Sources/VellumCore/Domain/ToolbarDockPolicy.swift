@@ -318,19 +318,15 @@ public enum ToolbarDockPolicy {
             insets: DockInsets,
             edgeMargin: CGFloat
         ) {
-            toolbarWidth = Self.nonnegativeFinite(toolbarSize.width)
-            toolbarHeight = Self.nonnegativeFinite(toolbarSize.height)
-            width = Self.nonnegativeFinite(container.width)
-            height = Self.nonnegativeFinite(container.height)
-            top = Self.nonnegativeFinite(insets.top)
-            leading = Self.nonnegativeFinite(insets.leading)
-            bottom = Self.nonnegativeFinite(insets.bottom)
-            trailing = Self.nonnegativeFinite(insets.trailing)
-            margin = Self.nonnegativeFinite(edgeMargin)
-        }
-
-        private static func nonnegativeFinite(_ value: CGFloat) -> CGFloat {
-            value.isFinite ? max(0, value) : 0
+            toolbarWidth = toolbarSize.width.nonnegativeFinite
+            toolbarHeight = toolbarSize.height.nonnegativeFinite
+            width = container.width.nonnegativeFinite
+            height = container.height.nonnegativeFinite
+            top = insets.top.nonnegativeFinite
+            leading = insets.leading.nonnegativeFinite
+            bottom = insets.bottom.nonnegativeFinite
+            trailing = insets.trailing.nonnegativeFinite
+            margin = edgeMargin.nonnegativeFinite
         }
     }
 }

@@ -6,9 +6,7 @@ public enum SplitLayoutPolicy {
     public static func normalized(_ fractions: [CGFloat]) -> [CGFloat] {
         guard !fractions.isEmpty else { return [] }
 
-        let nonnegativeFractions = fractions.map { fraction in
-            fraction.isFinite ? max(0, fraction) : 0
-        }
+        let nonnegativeFractions = fractions.map(\.nonnegativeFinite)
         guard let largestFraction = nonnegativeFractions.max(),
               largestFraction > 0 else {
             return equalFractions(count: fractions.count)
