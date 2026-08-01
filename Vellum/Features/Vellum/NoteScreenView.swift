@@ -1385,30 +1385,17 @@ private struct NoteScreenFileImportAndAlertModifiers: ViewModifier {
                 isPresented: $isShowingFileImporter,
                 allowedContentTypes: [.image]
             ) { result in
-                switch result {
-                case .success(let url):
-                    let isAccessing = url.startAccessingSecurityScopedResource()
-                    defer {
-                        if isAccessing {
-                            url.stopAccessingSecurityScopedResource()
-                        }
-                    }
+                guard let file = SecurityScopedFile.read(result, onFailure: {
+                    model.errorMessage = $0
+                }) else { return }
 
-                    do {
-                        let data = try Data(contentsOf: url)
-                        Task {
-                            if let id = await model.importImage(
-                                data,
-                                visibleContentRect: currentVisibleContentRect()
-                            ) {
-                                onImageImported(id)
-                            }
-                        }
-                    } catch {
-                        model.errorMessage = error.localizedDescription
+                Task {
+                    if let id = await model.importImage(
+                        file.data,
+                        visibleContentRect: currentVisibleContentRect()
+                    ) {
+                        onImageImported(id)
                     }
-                case .failure(let error):
-                    model.errorMessage = error.localizedDescription
                 }
             }
             .alert(
