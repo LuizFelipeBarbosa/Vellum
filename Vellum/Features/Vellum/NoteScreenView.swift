@@ -1432,9 +1432,3 @@ private struct NoteScreenAnimationModifiers: ViewModifier {
             .animation(.easeOut(duration: 0.2), value: model.isShowingBackgroundChooser)
     }
 }
-
-extension ToolID {
-    var usesDrawingGesture: Bool {
-        self != .text && self != .select
-    }
-}
