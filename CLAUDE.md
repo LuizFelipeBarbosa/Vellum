@@ -165,8 +165,18 @@ UDID rather than `name:` — the device set changes.
 `ShapeRecognitionFlowUITests.testDraggingASelectedShapeSettlesItOnThePageLattice`
 fails deterministically on `main` with `XCTAssertTrue failed - the line was not
 selected` (`ShapeRecognitionFlowUITests.swift:290`). A full run ending with **exactly
-that one failure** is green. A second failure is a regression. Two split-pane tests
-report as skipped via fixture-shape `XCTSkip` guards.
+that one failure** is green. One split-pane test reports as skipped via a
+fixture-shape `XCTSkip` guard (it needs ~24 sidebar rows; the seed provides 8).
+
+**The pasteboard-dependent flow tests are flaky — re-run before believing a
+failure.** `PasteAffordanceFlowUITests` and `PhotoInteractionFlowUITests` fail
+intermittently with `Paste here did not appear`, a different test each time, and
+pass on re-run. The cause is the iOS paste-permission alert: re-asked per
+pasteboard write, *deny* is the default, and the app's main thread blocks while it
+is up. A failing case aborts around 17s where a passing one takes ~87s — that
+timing gap is the tell that it died at setup rather than at its assertion. There
+is an `allowPastePermission` helper; the flake lives in the races it does not
+cover. **A single red flow run is not evidence of a regression here.**
 
 ## The built-in agent implementations are shipping code
 

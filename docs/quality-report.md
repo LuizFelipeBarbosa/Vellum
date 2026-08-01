@@ -344,7 +344,32 @@ library grid and break `ShapeFlowTestHelpers.openSiteNotes`, used by ~30 other
 tests. The same lift-vs-scroll arbitration is covered by `PagesPanelDragUITests`,
 which builds its own fixture.
 
-### Flake — OPEN
+### Flake — OPEN, and worse than the audit found
+
+**The pasteboard-dependent flow tests are genuinely flaky**, which none of the
+three audit agents caught because it is only visible across repeated full runs.
+Observed across four runs of the flow suite: `PasteAffordanceFlowUITests` and
+`PhotoInteractionFlowUITests` each failed in some runs and passed in others, with
+a *different* test failing each time and every one passing on re-run.
+
+Every failure carried the same message — **"Paste here did not appear"** — and
+the failing case aborted at ~17s against a normal ~87s, i.e. it died during
+pasteboard setup rather than at its assertion. Per-test timings are otherwise
+identical to the pre-cleanup baseline, so nothing here got slower.
+
+Root cause is the iOS paste-permission alert: it is re-asked per pasteboard
+write, *deny* is the default, and the app's main thread blocks while it is up.
+The suite already has an `allowPastePermission` helper; the flake is in the races
+it does not cover. One baseline log contains 438 paste-permission handling
+references, which is a fair measure of how much of this suite depends on it.
+
+Practical consequence: **a single red run of the flow suite is not evidence of a
+regression.** Re-run the failing class before believing it. That is a bad
+property for a suite with no CI, and it is the strongest argument for adding one
+— repeated runs would establish the real flake rate instead of leaving each
+developer to rediscover it.
+
+### Other flake — OPEN
 
 `NoteSplitStateTests` sleeps 400ms and 300ms against a **250ms** production
 debounce, in a file that already defines a correct `waitUntil` helper used
