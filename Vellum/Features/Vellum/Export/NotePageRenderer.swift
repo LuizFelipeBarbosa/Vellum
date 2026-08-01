@@ -172,20 +172,15 @@ enum NotePageRenderer {
 
         guard drawsPattern else { return }
 
-        switch style.kind {
-        case .blank:
+        let marks = PageBackgroundPattern.marks(
+            style: style,
+            pageRect: pageRect,
+            clippedTo: pageRect
+        )
+        switch marks {
+        case .none:
             break
-        case .dots:
-            let xs = PageBackgroundPattern.dotXs(
-                style: style,
-                pageRect: pageRect,
-                clippedTo: pageRect
-            )
-            let ys = PageBackgroundPattern.dotYs(
-                style: style,
-                pageRect: pageRect,
-                clippedTo: pageRect
-            )
+        case .dots(let xs, let ys):
             let radius: CGFloat = 1
             let path = CGMutablePath()
 
@@ -205,12 +200,7 @@ enum NotePageRenderer {
             ctx.setFillColor(patternColor.cgColor)
             ctx.addPath(path)
             ctx.fillPath()
-        case .ruled, .grid:
-            let ys = PageBackgroundPattern.ruleYs(
-                style: style,
-                pageRect: pageRect,
-                clippedTo: pageRect
-            )
+        case .rules(let ys, let columns):
             let path = CGMutablePath()
 
             for y in ys.values {
@@ -219,12 +209,7 @@ enum NotePageRenderer {
                 path.addLine(to: CGPoint(x: pageBounds.width, y: localY))
             }
 
-            if style.kind == .grid {
-                let xs = PageBackgroundPattern.gridXs(
-                    style: style,
-                    pageRect: pageRect,
-                    clippedTo: pageRect
-                )
+            if let xs = columns {
                 for x in xs.values {
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: pageBounds.height))

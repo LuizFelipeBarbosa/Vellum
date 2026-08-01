@@ -40,20 +40,15 @@ struct PagePatternPreview: View {
                 patternColor = VellumTheme.ink(0.14)
             }
 
-            switch kind {
-            case .blank:
+            let marks = PageBackgroundPattern.marks(
+                style: style,
+                pageRect: pageRect,
+                clippedTo: pageRect
+            )
+            switch marks {
+            case .none:
                 break
-            case .dots:
-                let xs = PageBackgroundPattern.dotXs(
-                    style: style,
-                    pageRect: pageRect,
-                    clippedTo: pageRect
-                )
-                let ys = PageBackgroundPattern.dotYs(
-                    style: style,
-                    pageRect: pageRect,
-                    clippedTo: pageRect
-                )
+            case .dots(let xs, let ys):
                 var dots = Path()
 
                 for x in xs.values {
@@ -70,12 +65,7 @@ struct PagePatternPreview: View {
                 }
 
                 context.fill(dots, with: .color(patternColor))
-            case .ruled, .grid:
-                let ys = PageBackgroundPattern.ruleYs(
-                    style: style,
-                    pageRect: pageRect,
-                    clippedTo: pageRect
-                )
+            case .rules(let ys, let columns):
                 var lines = Path()
 
                 for y in ys.values {
@@ -84,12 +74,7 @@ struct PagePatternPreview: View {
                     lines.addLine(to: CGPoint(x: size.width, y: previewY))
                 }
 
-                if kind == .grid {
-                    let xs = PageBackgroundPattern.gridXs(
-                        style: style,
-                        pageRect: pageRect,
-                        clippedTo: pageRect
-                    )
+                if let xs = columns {
                     for x in xs.values {
                         let previewX = x / previewScale
                         lines.move(to: CGPoint(x: previewX, y: 0))
