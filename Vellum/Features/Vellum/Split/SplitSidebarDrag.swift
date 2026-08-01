@@ -14,6 +14,13 @@ enum SidebarDropResolution: Equatable {
     case cancelZone
     case capacityFull
     case target(SplitGridDropTarget)
+
+    var target: SplitGridDropTarget? {
+        if case .target(let target) = self {
+            return target
+        }
+        return nil
+    }
 }
 
 @MainActor

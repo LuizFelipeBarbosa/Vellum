@@ -849,12 +849,3 @@ private struct PaneGhostConfiguration {
     let intent: PaneGhostIntent
     let frame: CGRect
 }
-
-private extension SidebarDropResolution {
-    var target: SplitGridDropTarget? {
-        if case .target(let target) = self {
-            return target
-        }
-        return nil
-    }
-}
