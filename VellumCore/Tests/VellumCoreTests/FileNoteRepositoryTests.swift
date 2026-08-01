@@ -260,6 +260,29 @@ func loadUnsupportedSchemaVersion() async throws {
     }
 }
 
+@Test("Purging removes a trashed note whose schema this build cannot load")
+func purgeIgnoresFutureSchemaVersion() async throws {
+    let root = try TemporaryDirectory.make()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    var note = try await repository.createNote(title: "Future")
+    note.schemaVersion = Note.currentSchemaVersion + 1
+    note.deletedAt = Date()
+    let package = FilePersistence.packageURL(rootDirectory: root, noteID: note.id)
+    try FilePersistence.write(note, to: package.appendingPathComponent("manifest.json"))
+
+    await #expect(
+        throws: VellumError.unsupportedSchemaVersion(
+            found: Note.currentSchemaVersion + 1,
+            supported: Note.currentSchemaVersion
+        )
+    ) {
+        try await repository.loadNote(id: note.id)
+    }
+    #expect(try await repository.purgeNote(id: note.id))
+    #expect(!FileManager.default.fileExists(atPath: package.path))
+}
+
 @Test("Listing excludes future schemas while unsupported notes reports them")
 func listNotesSkipsFutureSchemaVersion() async throws {
     let root = try TemporaryDirectory.make()

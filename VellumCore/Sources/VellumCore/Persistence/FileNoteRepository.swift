@@ -214,6 +214,17 @@ public actor FileNoteRepository: NoteRepository {
     }
 
     public func loadNote(id: UUID) async throws -> Note {
+        try decodedManifest(id: id, requireSupportedSchema: true)
+    }
+
+    /// Reads and decodes a note's manifest, reporting every failure as a corrupt manifest.
+    ///
+    /// `requireSupportedSchema` is on for reads and off for `purgeNote`. Reads are
+    /// fail-closed so a note written by a newer build is never silently downgraded by
+    /// decoding it against today's model. Purge is not a read: it destroys the package
+    /// wholesale, and refusing it on schema grounds would leave a forward-schema note
+    /// permanently stuck in the workspace with no path that can remove it.
+    private func decodedManifest(id: UUID, requireSupportedSchema: Bool) throws -> Note {
         let package = try FilePersistence.requirePackage(rootDirectory: rootDirectory, noteID: id)
         let manifest = package.appendingPathComponent("manifest.json")
         let data: Data
@@ -223,18 +234,19 @@ public actor FileNoteRepository: NoteRepository {
             throw VellumError.corruptManifest(id)
         }
 
-        let probe: SchemaProbe
-        do {
-            probe = try FilePersistence.decoder().decode(SchemaProbe.self, from: data)
-        } catch {
-            throw VellumError.corruptManifest(id)
-        }
-
-        guard probe.schemaVersion <= Note.currentSchemaVersion else {
-            throw VellumError.unsupportedSchemaVersion(
-                found: probe.schemaVersion,
-                supported: Note.currentSchemaVersion
-            )
+        if requireSupportedSchema {
+            let probe: SchemaProbe
+            do {
+                probe = try FilePersistence.decoder().decode(SchemaProbe.self, from: data)
+            } catch {
+                throw VellumError.corruptManifest(id)
+            }
+            guard probe.schemaVersion <= Note.currentSchemaVersion else {
+                throw VellumError.unsupportedSchemaVersion(
+                    found: probe.schemaVersion,
+                    supported: Note.currentSchemaVersion
+                )
+            }
         }
 
         do {
@@ -270,23 +282,11 @@ public actor FileNoteRepository: NoteRepository {
 
     @discardableResult
     public func purgeNote(id: UUID) async throws -> Bool {
-        let package = try FilePersistence.requirePackage(rootDirectory: rootDirectory, noteID: id)
-        let manifest = package.appendingPathComponent("manifest.json")
-        let data: Data
-        do {
-            data = try Data(contentsOf: manifest)
-        } catch {
-            throw VellumError.corruptManifest(id)
-        }
-
-        let note: Note
-        do {
-            note = try FilePersistence.decoder().decode(Note.self, from: data)
-        } catch {
-            throw VellumError.corruptManifest(id)
-        }
-
+        // Schema-unchecked on purpose: purge must stay able to remove a note this build
+        // cannot load. See `decodedManifest`.
+        let note = try decodedManifest(id: id, requireSupportedSchema: false)
         guard note.deletedAt != nil else { return false }
+        let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: id)
         do {
             try FileManager.default.removeItem(at: package)
         } catch {
