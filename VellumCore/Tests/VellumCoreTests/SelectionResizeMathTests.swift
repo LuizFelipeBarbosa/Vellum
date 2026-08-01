@@ -69,35 +69,57 @@ struct SelectionResizeMathTests {
         }
     }
 
-    @Test("Center uniform transform matches the existing center composite")
-    func centerUniformTransformMatchesExistingComposite() {
+    /// A uniform center scale is a similarity about the selection center: distances from the
+    /// center scale by the factor, bearings advance by the rotation delta, and — because a
+    /// uniform scale commutes with rotation — the committed rotation cancels out entirely.
+    @Test("A uniform center scale is a similarity about the center")
+    func centerUniformScaleIsASimilarityAboutTheCenter() {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         let scale = CGSize(width: 1.4, height: 1.4)
         let rotationDelta = 0.27
-        let actual = SelectionResizeMath.transform(
-            bounds: bounds,
-            anchorUnit: SelectionResizeMath.centerUnit,
-            scale: scale,
-            rotationDelta: rotationDelta,
-            committedRotation: 0.4
-        )
-        let expected = CGAffineTransform(
-            translationX: -center.x,
-            y: -center.y
-        )
-        .concatenating(
-            CGAffineTransform(scaleX: scale.width, y: scale.height)
-        )
-        .concatenating(
-            CGAffineTransform(rotationAngle: CGFloat(rotationDelta))
-        )
-        .concatenating(
-            CGAffineTransform(translationX: center.x, y: center.y)
-        )
+        let probes = [
+            CGPoint(x: bounds.minX, y: bounds.minY),
+            CGPoint(x: bounds.maxX, y: bounds.minY),
+            CGPoint(x: bounds.midX, y: bounds.maxY),
+        ]
 
-        expectTransform(actual, equal: expected, accuracy: rotationAccuracy)
+        for committedRotation in [0.0, 0.4] {
+            let actual = SelectionResizeMath.transform(
+                bounds: bounds,
+                anchorUnit: SelectionResizeMath.centerUnit,
+                scale: scale,
+                rotationDelta: rotationDelta,
+                committedRotation: committedRotation
+            )
+
+            expectPoint(
+                center.applying(actual),
+                equal: center,
+                accuracy: rotationAccuracy
+            )
+            for probe in probes {
+                let before = CGPoint(x: probe.x - center.x, y: probe.y - center.y)
+                let moved = probe.applying(actual)
+                let after = CGPoint(x: moved.x - center.x, y: moved.y - center.y)
+
+                expectScalar(
+                    hypot(after.x, after.y),
+                    equal: 1.4 * hypot(before.x, before.y),
+                    accuracy: rotationAccuracy
+                )
+                expectScalar(
+                    atan2(after.y, after.x),
+                    equal: atan2(before.y, before.x) + 0.27,
+                    accuracy: rotationAccuracy
+                )
+            }
+        }
     }
 
+    /// A non-uniform center scale must stretch along the chrome's own axes, not the canvas
+    /// axes: the handle sitting on the committed local x axis moves out by exactly the width
+    /// factor and stays on that axis, and likewise for y. Together with the pinned center
+    /// those two images fix all six degrees of freedom of the transform.
     @Test("Center non-uniform scale stays aligned to committed chrome axes")
     func centerNonUniformScaleStaysAlignedToCommittedAxes() {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
@@ -110,27 +132,36 @@ struct SelectionResizeMathTests {
             rotationDelta: 0,
             committedRotation: committedRotation
         )
-        let expected = CGAffineTransform(
-            translationX: -center.x,
-            y: -center.y
-        )
-        .concatenating(
-            CGAffineTransform(rotationAngle: -CGFloat(committedRotation))
-        )
-        .concatenating(
-            CGAffineTransform(scaleX: scale.width, y: scale.height)
-        )
-        .concatenating(
-            CGAffineTransform(rotationAngle: CGFloat(committedRotation))
-        )
-        .concatenating(
-            CGAffineTransform(translationX: center.x, y: center.y)
-        )
+        let axisCases: [(unit: CGPoint, factor: CGFloat)] = [
+            (CGPoint(x: 1, y: 0.5), 1.8),
+            (CGPoint(x: 0.5, y: 1), 0.7),
+        ]
 
-        expectTransform(actual, equal: expected, accuracy: rotationAccuracy)
+        expectPoint(center.applying(actual), equal: center, accuracy: rotationAccuracy)
+
+        for (unit, factor) in axisCases {
+            let handle = SelectionResizeMath.point(
+                atUnit: unit,
+                in: bounds,
+                rotation: committedRotation
+            )
+
+            expectPoint(
+                handle.applying(actual),
+                equal: CGPoint(
+                    x: center.x + factor * (handle.x - center.x),
+                    y: center.y + factor * (handle.y - center.y)
+                ),
+                accuracy: rotationAccuracy
+            )
+        }
     }
 
-    @Test("Chrome transform is derived from committed rotation and interaction transform")
+    /// The chrome is drawn from the selection's unrotated bounds, so its transform has to
+    /// carry the committed rotation the interaction transform assumes has already been
+    /// applied: a raw bounds point must land exactly where the interaction sends the
+    /// corresponding committed-rotation handle.
+    @Test("Chrome transform carries the committed rotation into the interaction transform")
     func chromeTransformUsesInteractionTransform() {
         let anchorUnit = CGPoint(x: 0, y: 1)
         let scale = CGSize(width: 1.6, height: 0.75)
@@ -143,21 +174,37 @@ struct SelectionResizeMathTests {
             rotationDelta: rotationDelta,
             committedRotation: committedRotation
         )
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let expected = rotation(
-            CGFloat(committedRotation),
-            about: center
-        )
-        .concatenating(interactionTransform)
-        let actual = SelectionResizeMath.chromeTransform(
+        let chromeTransform = SelectionResizeMath.chromeTransform(
             bounds: bounds,
             anchorUnit: anchorUnit,
             scale: scale,
             rotationDelta: rotationDelta,
             committedRotation: committedRotation
         )
+        let units = [
+            CGPoint(x: 0, y: 0),
+            CGPoint(x: 1, y: 0),
+            CGPoint(x: 1, y: 1),
+            CGPoint(x: 0, y: 1),
+        ]
 
-        expectTransform(actual, equal: expected, accuracy: mathAccuracy)
+        for unit in units {
+            let rawCorner = CGPoint(
+                x: bounds.minX + unit.x * bounds.width,
+                y: bounds.minY + unit.y * bounds.height
+            )
+            let rotatedCorner = SelectionResizeMath.point(
+                atUnit: unit,
+                in: bounds,
+                rotation: committedRotation
+            )
+
+            expectPoint(
+                rawCorner.applying(chromeTransform),
+                equal: rotatedCorner.applying(interactionTransform),
+                accuracy: mathAccuracy
+            )
+        }
     }
 
     @Test("Corner factor uses a signed projection in canvas space")
@@ -463,27 +510,4 @@ struct SelectionResizeMathTests {
         expectScalar(actual.y, equal: expected.y, accuracy: accuracy)
     }
 
-    private func expectTransform(
-        _ actual: CGAffineTransform,
-        equal expected: CGAffineTransform,
-        accuracy: CGFloat
-    ) {
-        expectScalar(actual.a, equal: expected.a, accuracy: accuracy)
-        expectScalar(actual.b, equal: expected.b, accuracy: accuracy)
-        expectScalar(actual.c, equal: expected.c, accuracy: accuracy)
-        expectScalar(actual.d, equal: expected.d, accuracy: accuracy)
-        expectScalar(actual.tx, equal: expected.tx, accuracy: accuracy)
-        expectScalar(actual.ty, equal: expected.ty, accuracy: accuracy)
-    }
-
-    private func rotation(
-        _ angle: CGFloat,
-        about center: CGPoint
-    ) -> CGAffineTransform {
-        CGAffineTransform(translationX: -center.x, y: -center.y)
-            .concatenating(CGAffineTransform(rotationAngle: angle))
-            .concatenating(
-                CGAffineTransform(translationX: center.x, y: center.y)
-            )
-    }
 }

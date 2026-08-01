@@ -384,57 +384,31 @@ final class SelectionPasteboardTests: XCTestCase {
             in: viewportSize
         )
 
+        // The 36pt-tall bubble sits 12pt clear of the tap: 150 - 12 - 18.
         XCTAssertEqual(position.x, tap.x, accuracy: 0.001)
-        XCTAssertEqual(
-            position.y,
-            tap.y - 12 - SelectionPasteBubbleView.bubbleSize.height / 2,
-            accuracy: 0.001
-        )
+        XCTAssertEqual(position.y, 120, accuracy: 0.001)
     }
 
     func testPasteBubblePositionClampsNearTopLeft() {
-        let viewportSize = CGSize(width: 400, height: 300)
-        let margin: CGFloat = 8
-
         let position = SelectionPasteBubbleView.position(
             forTapAt: CGPoint(x: 1, y: 1),
-            in: viewportSize
+            in: CGSize(width: 400, height: 300)
         )
 
-        XCTAssertEqual(
-            position.x,
-            SelectionPasteBubbleView.bubbleSize.width / 2 + margin,
-            accuracy: 0.001
-        )
-        XCTAssertEqual(
-            position.y,
-            SelectionPasteBubbleView.bubbleSize.height / 2 + margin,
-            accuracy: 0.001
-        )
+        // The 96x36 bubble is held an 8pt margin clear of the viewport edges: 48 + 8, 18 + 8.
+        XCTAssertEqual(position.x, 56, accuracy: 0.001)
+        XCTAssertEqual(position.y, 26, accuracy: 0.001)
     }
 
     func testPasteBubblePositionClampsNearBottomRight() {
-        let viewportSize = CGSize(width: 400, height: 300)
-        let margin: CGFloat = 8
-
         let position = SelectionPasteBubbleView.position(
-            forTapAt: CGPoint(
-                x: viewportSize.width + 20,
-                y: viewportSize.height + 20
-            ),
-            in: viewportSize
+            forTapAt: CGPoint(x: 420, y: 320),
+            in: CGSize(width: 400, height: 300)
         )
 
-        XCTAssertEqual(
-            position.x,
-            viewportSize.width - SelectionPasteBubbleView.bubbleSize.width / 2 - margin,
-            accuracy: 0.001
-        )
-        XCTAssertEqual(
-            position.y,
-            viewportSize.height - SelectionPasteBubbleView.bubbleSize.height / 2 - margin,
-            accuracy: 0.001
-        )
+        // Same 8pt margin from the far edges: 400 - 48 - 8, 300 - 18 - 8.
+        XCTAssertEqual(position.x, 344, accuracy: 0.001)
+        XCTAssertEqual(position.y, 274, accuracy: 0.001)
     }
 
     func testCopyPastePreservesLayerPlacement() async throws {

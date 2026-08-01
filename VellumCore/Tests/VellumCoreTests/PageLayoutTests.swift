@@ -141,26 +141,34 @@ func zeroMinimumFilledPageCountPreservesExistingBehavior() {
     }
 }
 
-@Test("The minimum filled-page count wins over a smaller ink-derived count")
-func minimumFilledPageCountWins() {
-    let bottom = 0.5 * PageGeometry.a4.pageHeight
+/// The filled-page count is the greater of the materialized minimum and the ink-derived
+/// count, and the displayed count adds one trailing blank page on top of it.
+@Test("Filled-page count takes the greater of the minimum and the ink bottom", arguments: [
+    // (content bottom in pages, minimum filled pages, displayed pages, exported pages)
+    (0.5, 3, 4, 3), // the minimum wins over a smaller ink-derived count
+    (2.5, 2, 4, 3), // the ink-derived count wins over a smaller minimum
+    (0.0, 4, 5, 4), // empty content still retains its materialized pages
+])
+func filledPageCountTakesTheGreaterOfMinimumAndInkBottom(
+    bottomInPages: Double,
+    minimumFilledPages: Int,
+    displayedPages: Int,
+    exportedPages: Int
+) {
+    let bottom = CGFloat(bottomInPages) * PageGeometry.a4.pageHeight
 
-    #expect(PageGeometry.a4.pageCount(forContentBottom: bottom, minimumFilledPages: 3) == 4)
-    #expect(PageGeometry.a4.exportPageCount(forContentBottom: bottom, minimumFilledPages: 3) == 3)
-}
-
-@Test("The ink-derived count wins over a smaller minimum filled-page count")
-func inkDerivedFilledPageCountWins() {
-    let bottom = 2.5 * PageGeometry.a4.pageHeight
-
-    #expect(PageGeometry.a4.pageCount(forContentBottom: bottom, minimumFilledPages: 2) == 4)
-    #expect(PageGeometry.a4.exportPageCount(forContentBottom: bottom, minimumFilledPages: 2) == 3)
-}
-
-@Test("Empty content retains materialized pages plus one trailing blank page")
-func emptyContentUsesMinimumFilledPageCount() {
-    #expect(PageGeometry.a4.pageCount(forContentBottom: 0, minimumFilledPages: 4) == 5)
-    #expect(PageGeometry.a4.exportPageCount(forContentBottom: 0, minimumFilledPages: 4) == 4)
+    #expect(
+        PageGeometry.a4.pageCount(
+            forContentBottom: bottom,
+            minimumFilledPages: minimumFilledPages
+        ) == displayedPages
+    )
+    #expect(
+        PageGeometry.a4.exportPageCount(
+            forContentBottom: bottom,
+            minimumFilledPages: minimumFilledPages
+        ) == exportedPages
+    )
 }
 
 @Test("Page index is clamped to the available pages")
@@ -175,20 +183,26 @@ func pageIndexIsClampedToAvailablePages() {
 
 @Test("Viewport zoom bounds scale from the content width")
 func viewportZoomBoundsScaleFromContentWidth() {
-    for width: CGFloat in [744, 834, 1_194] {
-        let expectedMinimum = width / PageLayout.portraitContentWidth
+    // Fit-to-width for the 768pt portrait content width, and the 4x ceiling above it.
+    // Every value is an exact binary fraction, so `==` is safe.
+    let cases: [(width: CGFloat, fit: CGFloat, ceiling: CGFloat)] = [
+        (744, 0.968_75, 3.875),
+        (834, 1.085_937_5, 4.343_75),
+        (1_194, 1.554_687_5, 6.218_75),
+    ]
 
+    for (width, fit, ceiling) in cases {
         #expect(
             PageLayout.minZoom(
                 forViewportWidth: width,
                 contentWidth: portraitContentWidth
-            ) == expectedMinimum
+            ) == fit
         )
         #expect(
             PageLayout.maxZoom(
                 forViewportWidth: width,
                 contentWidth: portraitContentWidth
-            ) == 4 * expectedMinimum
+            ) == ceiling
         )
     }
 
@@ -433,32 +447,22 @@ func anchoredZoomOffsetRespectsCustomMinimum() {
     )
 }
 
-@Test("Overview minimum zoom is a fraction of fit-to-width")
-func overviewMinimumZoomIsFractionOfFitToWidth() {
-    for width: CGFloat in [744, 834, 1_194] {
-        #expect(
-            PageLayout.overviewMinZoom(
-                forViewportWidth: width,
-                contentWidth: portraitContentWidth
-            )
-                == PageLayout.overviewZoomFactor
-                    * PageLayout.minZoom(
-                        forViewportWidth: width,
-                        contentWidth: portraitContentWidth
-                    )
-        )
-    }
-
+/// The zoom-out floor the multi-page overview relies on: a quarter of fit-to-width.
+/// Expectations are pinned to numbers rather than re-derived from `overviewZoomFactor`,
+/// so moving that constant has to be a deliberate, visible change here.
+/// Degenerate widths fall back to fit == 1, leaving the bare factor.
+@Test("Overview minimum zoom is a quarter of fit-to-width", arguments: [
+    (CGFloat(744), CGFloat(0.242_187_5)),
+    (CGFloat(834), CGFloat(0.271_484_375)),
+    (CGFloat(1_194), CGFloat(0.388_671_875)),
+    (CGFloat(0), CGFloat(0.25)),
+    (CGFloat(-100), CGFloat(0.25)),
+])
+func overviewMinimumZoomIsFractionOfFitToWidth(width: CGFloat, expected: CGFloat) {
     #expect(
         PageLayout.overviewMinZoom(
-            forViewportWidth: 0,
+            forViewportWidth: width,
             contentWidth: portraitContentWidth
-        ) == PageLayout.overviewZoomFactor * 1
-    )
-    #expect(
-        PageLayout.overviewMinZoom(
-            forViewportWidth: -100,
-            contentWidth: portraitContentWidth
-        ) == PageLayout.overviewZoomFactor * 1
+        ) == expected
     )
 }

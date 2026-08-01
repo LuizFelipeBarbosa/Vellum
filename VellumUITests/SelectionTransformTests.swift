@@ -100,19 +100,18 @@ final class SelectionTransformTests: XCTestCase {
             accuracy: 0.000_001
         )
 
-        // Independently mirrors the verified row-vector application order:
-        // p * T(-c) * S * R * T(c), which maps c back to c.
-        let expected = CGAffineTransform(
-            translationX: -center.x,
-            y: -center.y
-        )
-        .concatenating(CGAffineTransform(scaleX: 1, y: 1))
-        .concatenating(CGAffineTransform(rotationAngle: .pi / 2))
-        .concatenating(
-            CGAffineTransform(translationX: center.x, y: center.y)
-        )
+        // A quarter turn and nothing else: the linear part is exactly [0 1; -1 0] — no scale,
+        // no shear, no mirror — and the selection center is the point it pivots about. Those
+        // six numbers fix the transform completely without restating how it is composed.
         let actual = harness.canvasView.drawing.strokes[0].transform
-        assertTransform(actual, equals: expected)
+        XCTAssertEqual(actual.a, 0, accuracy: 0.000_001)
+        XCTAssertEqual(actual.b, 1, accuracy: 0.000_001)
+        XCTAssertEqual(actual.c, -1, accuracy: 0.000_001)
+        XCTAssertEqual(actual.d, 0, accuracy: 0.000_001)
+
+        let pivoted = center.applying(actual)
+        XCTAssertEqual(pivoted.x, center.x, accuracy: 0.000_001)
+        XCTAssertEqual(pivoted.y, center.y, accuracy: 0.000_001)
     }
 
     func testShapeHandleTransformScalesFrameStrokeWidthAndRotation() throws {

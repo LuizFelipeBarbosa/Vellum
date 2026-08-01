@@ -53,13 +53,23 @@ final class SelectionFlipTests: XCTestCase {
         let originalStrokeBounds = harness.canvasView.drawing.strokes
             .map(\.renderBounds)
             .reduce(CGRect.null) { $0.union($1) }
-        let pivot = CGPoint(x: originalBounds.midX, y: originalBounds.midY)
-        let expected = horizontalReflection(about: pivot)
+        let originalStrokeMidXs = harness.canvasView.drawing.strokes.map(\.renderBounds.midX)
 
         harness.controller.flipSelection(horizontal: true)
 
-        for stroke in harness.canvasView.drawing.strokes {
-            assertTransform(stroke.transform, equals: expected)
+        // Each stroke mirrors across the ink's own vertical center line — measured from
+        // PencilKit's render bounds, not from the controller's idea of the selection — so a
+        // flip about the canvas origin or about the wrong pivot shows up as drift here.
+        let mirrorX = originalStrokeBounds.midX
+        for (stroke, originalMidX) in zip(
+            harness.canvasView.drawing.strokes,
+            originalStrokeMidXs
+        ) {
+            XCTAssertEqual(
+                stroke.renderBounds.midX,
+                2 * mirrorX - originalMidX,
+                accuracy: 0.5
+            )
         }
         let reflectedStrokeBounds = harness.canvasView.drawing.strokes
             .map(\.renderBounds)
@@ -540,14 +550,6 @@ final class SelectionFlipTests: XCTestCase {
             frame: frame,
             rotation: rotation
         )
-    }
-
-    private func horizontalReflection(about pivot: CGPoint) -> CGAffineTransform {
-        CGAffineTransform(translationX: -pivot.x, y: -pivot.y)
-            .concatenating(CGAffineTransform(scaleX: -1, y: 1))
-            .concatenating(
-                CGAffineTransform(translationX: pivot.x, y: pivot.y)
-            )
     }
 
     private func assertTransform(

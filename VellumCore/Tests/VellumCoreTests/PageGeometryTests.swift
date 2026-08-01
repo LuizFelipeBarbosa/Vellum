@@ -58,7 +58,8 @@ func portraitAspectRatioRoundTripsThroughLandscapeGeometry() {
 @Test("Letter geometry stacks and indexes pages with the letter page height")
 func letterGeometryUsesLetterPageHeight() {
     let geometry = PageGeometry(portraitAspectRatio: letterAspect)
-    let expectedHeight = PageLayout.portraitContentWidth * CGFloat(letterAspect)
+    // 768pt of content width at US Letter's 792:612 shape.
+    let expectedHeight: CGFloat = 993.882_352_941_176_6
     let pageRect = geometry.pageRect(index: 2)
 
     #expect(geometry.pageHeight == expectedHeight)
@@ -77,13 +78,12 @@ func letterGeometryUsesLetterPageHeight() {
 func exportPageSizesScaleWithAspectRatio() {
     let geometry = PageGeometry(portraitAspectRatio: letterAspect)
 
+    // A US Letter sheet at 595.2pt wide, and its 2x raster in whole pixels. Pinned to
+    // numbers so a change of scale factor — or of rounding mode — has to show up here.
     #expect(geometry.pdfPageSize.width == 595.2)
-    #expect(geometry.pdfPageSize.height == 595.2 * CGFloat(letterAspect))
+    #expect(abs(geometry.pdfPageSize.height - 770.258_823_529_411_9) < 0.000_001)
     #expect(geometry.rasterPageSizePixels.width == 1_536)
-    #expect(
-        geometry.rasterPageSizePixels.height
-            == (1_536 * CGFloat(letterAspect)).rounded()
-    )
+    #expect(geometry.rasterPageSizePixels.height == 1_988)
 }
 
 @Test("A4 geometry preserves the former fixed export dimensions")

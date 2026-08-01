@@ -84,7 +84,12 @@ struct ShapeVertexEditorTests {
         #expect(distance(after[1], target) < accuracy)
         #expect(distance(after[0], before[0]) < accuracy)
         #expect(distance(after[2], before[2]) < accuracy)
-        expectFrameIsTight(moved.frame, around: after)
+        // The frame re-tightens around (20, 30), (-15, 145) and (130, 100):
+        // x spans -15…130, y spans 30…145.
+        #expect(abs(moved.frame.x - -15) < accuracy)
+        #expect(abs(moved.frame.y - 30) < accuracy)
+        #expect(abs(moved.frame.width - 145) < accuracy)
+        #expect(abs(moved.frame.height - 115) < accuracy)
     }
 
     @Test("Rotation compensation fixes unmoved vertices in world space")
@@ -252,29 +257,6 @@ struct ShapeVertexEditorTests {
         for (actualVertex, expectedVertex) in zip(actual, expected) {
             #expect(distance(actualVertex, expectedVertex) < accuracy)
         }
-    }
-
-    private func expectFrameIsTight(_ frame: CanvasRect, around vertices: [CGPoint]) {
-        guard let first = vertices.first else { return }
-        let minimumX = vertices.dropFirst().reduce(first.x) { min($0, $1.x) }
-        let maximumX = vertices.dropFirst().reduce(first.x) { max($0, $1.x) }
-        let minimumY = vertices.dropFirst().reduce(first.y) { min($0, $1.y) }
-        let maximumY = vertices.dropFirst().reduce(first.y) { max($0, $1.y) }
-        let expectedWidth = max(
-            maximumX - minimumX,
-            CGFloat(ShapeElementBuilder.minimumFrameExtent)
-        )
-        let expectedHeight = max(
-            maximumY - minimumY,
-            CGFloat(ShapeElementBuilder.minimumFrameExtent)
-        )
-        let expectedMidX = (minimumX + maximumX) / 2
-        let expectedMidY = (minimumY + maximumY) / 2
-
-        #expect(abs(CGFloat(frame.width) - expectedWidth) < accuracy)
-        #expect(abs(CGFloat(frame.height) - expectedHeight) < accuracy)
-        #expect(abs(CGFloat(frame.x + frame.width / 2) - expectedMidX) < accuracy)
-        #expect(abs(CGFloat(frame.y + frame.height / 2) - expectedMidY) < accuracy)
     }
 
     private func distance(_ first: CGPoint, _ second: CGPoint) -> CGFloat {

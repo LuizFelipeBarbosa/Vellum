@@ -243,21 +243,11 @@ final class TextEditingSessionTests: XCTestCase {
         guard case .text(let content) = finalized.content else {
             return XCTFail("Expected a text element")
         }
-        let expectedContent = TextBoxContent(
-            text: "hello",
-            fontSize: content.fontSize,
-            color: content.color
-        )
-        let expectedHeight = max(
-            44,
-            NotePageRenderer.growTextFrame(
-                element.frame,
-                textContent: expectedContent
-            ).height
-        )
         XCTAssertEqual(content.text, "hello")
-        XCTAssertEqual(finalized.frame.height, expectedHeight)
-        XCTAssertGreaterThanOrEqual(finalized.frame.height, 44)
+        XCTAssertEqual(content.fontSize, 18)
+        // One 18pt line still fits the element's 44pt frame, so finalizing holds it at the
+        // 44pt floor rather than growing or collapsing it.
+        XCTAssertEqual(finalized.frame.height, 44)
         XCTAssertFalse(undoManager.canUndo)
         XCTAssertEqual(changeCount, 1)
 
