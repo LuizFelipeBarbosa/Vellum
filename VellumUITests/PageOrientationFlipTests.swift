@@ -191,19 +191,11 @@ final class PageOrientationFlipTests: XCTestCase {
         rootDirectory: URL,
         configureNote: ((inout Note) -> Void)? = nil
     ) async throws -> NoteScreenModel {
-        let container = AppContainer.live(rootDirectory: rootDirectory)
-        var note = try await container.notes.createNote(title: "Orientation")
-        if let configureNote {
-            configureNote(&note)
-            try await container.notes.saveNote(note)
-        }
-        let model = NoteScreenModel(
-            noteID: note.id,
-            container: container,
-            onNoteChanged: { _ in }
-        )
-        await model.load()
-        return model
+        try await NoteScreenModelFixture.make(
+            rootDirectory: rootDirectory,
+            title: "Orientation",
+            configureNote: configureNote
+        ).model
     }
 
     @discardableResult

@@ -229,14 +229,10 @@ final class ImageImportTests: XCTestCase {
         rootDirectory: URL,
         title: String
     ) async throws -> (Note, NoteScreenModel) {
-        let container = AppContainer.live(rootDirectory: rootDirectory)
-        let note = try await container.notes.createNote(title: title)
-        let model = NoteScreenModel(
-            noteID: note.id,
-            container: container,
-            onNoteChanged: { _ in }
+        let fixture = try await NoteScreenModelFixture.make(
+            rootDirectory: rootDirectory,
+            title: title
         )
-        await model.load()
-        return (note, model)
+        return (fixture.note, fixture.model)
     }
 }

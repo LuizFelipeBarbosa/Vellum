@@ -42,14 +42,9 @@ final class PageMutationRejectionTests: XCTestCase {
     }
 
     private func makeLoadedModel(rootDirectory: URL) async throws -> NoteScreenModel {
-        let container = AppContainer.live(rootDirectory: rootDirectory)
-        let note = try await container.notes.createNote(title: "Rejection")
-        let model = NoteScreenModel(
-            noteID: note.id,
-            container: container,
-            onNoteChanged: { _ in }
-        )
-        await model.load()
-        return model
+        try await NoteScreenModelFixture.make(
+            rootDirectory: rootDirectory,
+            title: "Rejection"
+        ).model
     }
 }
