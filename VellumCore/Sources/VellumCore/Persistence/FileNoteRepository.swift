@@ -400,6 +400,9 @@ public actor FileNoteRepository: NoteRepository {
         }
 
         for pageDirectory in pageDirectories {
+            // The symlink check is not implied by `isDirectory`: a symlink pointing at a
+            // directory can report `isDirectory == true`, and following one would let the
+            // purge delete files outside the package.
             guard let pageValues = try? pageDirectory.resourceValues(
                 forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
             ),
@@ -439,21 +442,21 @@ public actor FileNoteRepository: NoteRepository {
                at: importedAssets,
                includingPropertiesForKeys: [
                    .isRegularFileKey,
-                   .isDirectoryKey,
                    .isSymbolicLinkKey,
                ],
                options: [.skipsHiddenFiles]
            ) {
             for asset in assets {
+                // `isRegularFile` is definitionally exclusive with `isDirectory`, so only
+                // the symlink check adds anything here — it stays because whether a link
+                // reports its own type or its target's depends on how the URL was made.
                 guard let assetValues = try? asset.resourceValues(
                     forKeys: [
                         .isRegularFileKey,
-                        .isDirectoryKey,
                         .isSymbolicLinkKey,
                     ]
                 ),
                 assetValues.isRegularFile == true,
-                assetValues.isDirectory != true,
                 assetValues.isSymbolicLink != true else {
                     continue
                 }
