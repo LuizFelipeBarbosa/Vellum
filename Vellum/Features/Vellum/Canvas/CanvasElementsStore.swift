@@ -102,25 +102,19 @@ final class CanvasElementsStore {
                 return
             }
 
-            let finalContent = TextBoxContent(
-                text: trimmed,
-                fontSize: content.fontSize,
-                color: content.color
-            )
-            var updated = element
-            updated.content = .text(finalContent)
-            updated.frame.height = max(
-                44,
-                NotePageRenderer.growTextFrame(
-                    updated.frame,
-                    textContent: finalContent
-                ).height
-            )
-            updateElementLive(updated)
+            // The session applied its edits live, so the whole session collapses into
+            // the one undo step registered here against the baseline taken at `begin`.
+            updateElementLive(committedTextElement(element, content: content, trimmedText: trimmed))
             registerEditingSessionUndo(from: baseline, label: "Edit Text")
             return
         }
 
+        // No session to close: a bare finalize of an element nobody opened a session
+        // for. There is no baseline, so the undo semantics have to differ. A removal is
+        // destructive and earns its own transactional undo step; a trim-and-grow is only
+        // normalization of what is already on the canvas and registers none — which also
+        // means it must short-circuit when there is nothing to normalize, or a repeated
+        // finalize would keep firing onElementsChanged.
         guard let id,
               let element = elements.first(where: { $0.id == id }),
               case .text(let content) = element.content else {
@@ -132,8 +126,22 @@ final class CanvasElementsStore {
             return
         }
 
+        let updated = committedTextElement(element, content: content, trimmedText: trimmed)
+        guard trimmed != content.text || updated.frame.height != element.frame.height else {
+            return
+        }
+        updateElementLive(updated)
+    }
+
+    /// The element a finished text edit commits: trimmed text, and a frame grown to fit
+    /// it but never shorter than the 44pt minimum touch target.
+    private func committedTextElement(
+        _ element: CanvasElement,
+        content: TextBoxContent,
+        trimmedText: String
+    ) -> CanvasElement {
         let finalContent = TextBoxContent(
-            text: trimmed,
+            text: trimmedText,
             fontSize: content.fontSize,
             color: content.color
         )
@@ -146,10 +154,7 @@ final class CanvasElementsStore {
                 textContent: finalContent
             ).height
         )
-        guard trimmed != content.text || updated.frame.height != element.frame.height else {
-            return
-        }
-        updateElementLive(updated)
+        return updated
     }
 
     /// Begin a live session that may mutate BOTH the drawing and elements without
