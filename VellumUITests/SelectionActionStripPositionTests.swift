@@ -142,7 +142,7 @@ final class SelectionActionStripPositionTests: XCTestCase {
         let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 100, y: 200, width: 120, height: 60)
         )
-        let harness = makeHarness(elements: [element])
+        let harness = CanvasHarness.make(elements: [element])
         harness.controller.selectElement(id: element.id)
 
         let selectionBounds = try XCTUnwrap(harness.controller.selectionBounds)
@@ -160,7 +160,7 @@ final class SelectionActionStripPositionTests: XCTestCase {
         let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 100, y: 200, width: 120, height: 60)
         )
-        let harness = makeHarness(elements: [element])
+        let harness = CanvasHarness.make(elements: [element])
         harness.controller.selectElement(id: element.id)
 
         let selectionBounds = try XCTUnwrap(harness.controller.selectionBounds)
@@ -198,7 +198,7 @@ final class SelectionActionStripPositionTests: XCTestCase {
             frame: CanvasRect(x: 100, y: 200, width: 200, height: 50),
             rotation: .pi / 4
         )
-        let harness = makeHarness(elements: [element])
+        let harness = CanvasHarness.make(elements: [element])
         harness.controller.selectElement(id: element.id)
 
         let selectionBounds = try XCTUnwrap(harness.controller.selectionBounds)
@@ -224,7 +224,7 @@ final class SelectionActionStripPositionTests: XCTestCase {
     }
 
     func testNoSelectionHasNoStripAvoidanceBounds() {
-        let harness = makeHarness(elements: [])
+        let harness = CanvasHarness.make(elements: [])
 
         XCTAssertNil(harness.controller.stripAvoidanceBounds)
     }
@@ -308,37 +308,5 @@ final class SelectionActionStripPositionTests: XCTestCase {
         XCTAssertEqual(actual.height, expected.height, accuracy: accuracy, file: file, line: line)
     }
 
-    private func makeHarness(elements: [CanvasElement]) -> Harness {
-        let canvasView = PKCanvasView()
-        let canvasReference = NoteCanvasReference()
-        canvasReference.canvasView = canvasView
 
-        let undoManager = UndoManager()
-        let store = CanvasElementsStore()
-        store.canvasReference = canvasReference
-        store.undoManagerOverride = undoManager
-        store.hydrate(elements)
-
-        let controller = CanvasSelectionController()
-        controller.canvasReference = canvasReference
-        controller.elementsStore = store
-        undoManager.removeAllActions()
-
-        return Harness(
-            canvasView: canvasView,
-            canvasReference: canvasReference,
-            store: store,
-            undoManager: undoManager,
-            controller: controller
-        )
-    }
-
-
-    private struct Harness {
-        let canvasView: PKCanvasView
-        let canvasReference: NoteCanvasReference
-        let store: CanvasElementsStore
-        let undoManager: UndoManager
-        let controller: CanvasSelectionController
-    }
 }

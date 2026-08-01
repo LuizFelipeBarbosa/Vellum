@@ -37,7 +37,7 @@ final class SelectionFlipTests: XCTestCase {
     }
 
     func testFlipHorizontalReflectsSelectedStrokesAndPreservesBounds() throws {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 35)]
@@ -95,7 +95,7 @@ final class SelectionFlipTests: XCTestCase {
             flippedHorizontally: true,
             flippedVertically: true
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 15, y: 25), CGPoint(x: 45, y: 55)],
@@ -137,7 +137,7 @@ final class SelectionFlipTests: XCTestCase {
             frame: CanvasRect(x: 85, y: 25, width: 35, height: 30),
             rotation: originalRotation
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 10, y: 35), CGPoint(x: 35, y: 60)]
@@ -187,7 +187,7 @@ final class SelectionFlipTests: XCTestCase {
             frame: CanvasRect(x: 65, y: 20, width: 32, height: 28),
             rotation: 0.2
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 45)]
@@ -256,7 +256,7 @@ final class SelectionFlipTests: XCTestCase {
     }
 
     func testFlipSelectionSurvivesDrawingDataRoundTrip() throws {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 35)]
@@ -299,7 +299,7 @@ final class SelectionFlipTests: XCTestCase {
             rotation: 0.28,
             flippedVertically: true
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         let imageData = try XCTUnwrap(makePNGData())
         let image = try XCTUnwrap(UIImage(data: imageData))
         harness.store.cacheImage(image, data: imageData, forAssetPath: assetPath)
@@ -371,7 +371,7 @@ final class SelectionFlipTests: XCTestCase {
             frame: CanvasRect(x: 65, y: 20, width: 32, height: 28),
             rotation: 0.2
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 45)]
@@ -432,40 +432,13 @@ final class SelectionFlipTests: XCTestCase {
     }
 
     private func select(
-        in harness: Harness,
+        in harness: CanvasHarness,
         from start: CGPoint,
         to end: CGPoint
     ) {
         harness.controller.beginCapture(at: start, mode: .boxed)
         harness.controller.extendCapture(to: end)
         harness.controller.endCapture()
-    }
-
-    private func makeHarness(strokes: [PKStroke], elements: [CanvasElement]) -> Harness {
-        let canvasView = PKCanvasView()
-        canvasView.drawing = PKDrawing(strokes: strokes)
-
-        let canvasReference = NoteCanvasReference()
-        canvasReference.canvasView = canvasView
-
-        let undoManager = UndoManager()
-        let store = CanvasElementsStore()
-        store.canvasReference = canvasReference
-        store.undoManagerOverride = undoManager
-        store.hydrate(elements)
-
-        let controller = CanvasSelectionController()
-        controller.canvasReference = canvasReference
-        controller.elementsStore = store
-        undoManager.removeAllActions()
-
-        return Harness(
-            canvasView: canvasView,
-            canvasReference: canvasReference,
-            store: store,
-            undoManager: undoManager,
-            controller: controller
-        )
     }
 
 
@@ -549,11 +522,4 @@ final class SelectionFlipTests: XCTestCase {
         )
     }
 
-    private struct Harness {
-        let canvasView: PKCanvasView
-        let canvasReference: NoteCanvasReference
-        let store: CanvasElementsStore
-        let undoManager: UndoManager
-        let controller: CanvasSelectionController
-    }
 }

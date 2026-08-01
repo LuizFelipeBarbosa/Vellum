@@ -20,7 +20,7 @@ final class SelectionPasteboardTests: XCTestCase {
 
     func testCopyPasteOffsetsFreshCopiesSelectsThemAndUndoesInOneStep() async throws {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
@@ -71,7 +71,7 @@ final class SelectionPasteboardTests: XCTestCase {
 
     func testPasteAtTargetCentersPayloadBounds() async throws {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
@@ -110,7 +110,7 @@ final class SelectionPasteboardTests: XCTestCase {
 
     func testPasteAtTargetClampsToPageEdges() async throws {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
@@ -149,7 +149,7 @@ final class SelectionPasteboardTests: XCTestCase {
 
     func testPasteAtTargetIsOneUndoTransaction() async {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
@@ -178,7 +178,7 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testHasSystemImageWithoutPayloadEnablesCanPaste() throws {
-        let harness = makeHarness(strokes: [], elements: [])
+        let harness = CanvasHarness.make(strokes: [], elements: [])
         let imageData = try XCTUnwrap(makePNGData())
         UIPasteboard.general.setData(
             imageData,
@@ -218,7 +218,7 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testPasteFromPasteboardFallsBackToSystemImageAndSelectsResult() async throws {
-        let harness = makeHarness(strokes: [], elements: [])
+        let harness = CanvasHarness.make(strokes: [], elements: [])
         let imageData = try XCTUnwrap(makePNGData())
         UIPasteboard.general.setData(
             imageData,
@@ -255,7 +255,7 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testTargetedPasteReportsClaimedUnreadableContent() async {
-        let harness = makeHarness(strokes: [], elements: [])
+        let harness = CanvasHarness.make(strokes: [], elements: [])
         UIPasteboard.general.setData(
             Data("not a Vellum payload".utf8),
             forPasteboardType: SelectionPasteboard.pasteboardType
@@ -269,7 +269,7 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testUntargetedPasteDoesNotReportClaimedUnreadableContent() async {
-        let harness = makeHarness(strokes: [], elements: [])
+        let harness = CanvasHarness.make(strokes: [], elements: [])
         UIPasteboard.general.setData(
             Data("not a Vellum payload".utf8),
             forPasteboardType: SelectionPasteboard.pasteboardType
@@ -283,7 +283,7 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testTargetedPasteDoesNotReportEmptyPasteboard() async {
-        let harness = makeHarness(strokes: [], elements: [])
+        let harness = CanvasHarness.make(strokes: [], elements: [])
         var failureMessage: String?
         harness.controller.onOperationFailed = { failureMessage = $0 }
 
@@ -294,7 +294,7 @@ final class SelectionPasteboardTests: XCTestCase {
 
     func testPasteFromPasteboardPrefersVellumPayloadOverSystemImage() async throws {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
@@ -326,7 +326,7 @@ final class SelectionPasteboardTests: XCTestCase {
 
     func testRequestPasteAffordanceLifecycle() async {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
@@ -416,7 +416,7 @@ final class SelectionPasteboardTests: XCTestCase {
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30)
         )
         element.layerPlacement = .aboveInk
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         harness.controller.selectElement(id: element.id)
 
         XCTAssertTrue(harness.controller.copySelection())
@@ -430,7 +430,7 @@ final class SelectionPasteboardTests: XCTestCase {
 
     func testCutLeavesPayloadAndPasteRestoresOffsetEquivalentContent() async throws {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
@@ -470,7 +470,7 @@ final class SelectionPasteboardTests: XCTestCase {
 
     func testColdCacheCutDoesNotDeleteOrReplacePasteboard() {
         let element = makeImageElement(assetPath: "assets/cold.jpg")
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
@@ -497,7 +497,7 @@ final class SelectionPasteboardTests: XCTestCase {
     func testWarmCacheCopyPreservesOriginalImageBytes() throws {
         let assetPath = "assets/original.png"
         let element = makeImageElement(assetPath: assetPath)
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         let originalData = try XCTUnwrap(makePNGData())
         let image = try XCTUnwrap(UIImage(data: originalData))
         harness.store.cacheImage(image, data: originalData, forAssetPath: assetPath)
@@ -520,7 +520,7 @@ final class SelectionPasteboardTests: XCTestCase {
             ),
             frame: CanvasRect(x: 40, y: 30, width: 50, height: 50)
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         let originalData = try XCTUnwrap(makePNGData())
         let image = try XCTUnwrap(UIImage(data: originalData))
         harness.store.cacheImage(
@@ -547,37 +547,10 @@ final class SelectionPasteboardTests: XCTestCase {
         XCTAssertEqual(harness.store.imageDataCache["assets/new.jpg"], originalData)
     }
 
-    private func selectMixedContent(in harness: Harness) {
+    private func selectMixedContent(in harness: CanvasHarness) {
         harness.controller.beginCapture(at: CGPoint(x: 0, y: 0), mode: .boxed)
         harness.controller.extendCapture(to: CGPoint(x: 110, y: 80))
         harness.controller.endCapture()
-    }
-
-    private func makeHarness(strokes: [PKStroke], elements: [CanvasElement]) -> Harness {
-        let canvasView = PKCanvasView()
-        canvasView.drawing = PKDrawing(strokes: strokes)
-
-        let canvasReference = NoteCanvasReference()
-        canvasReference.canvasView = canvasView
-
-        let undoManager = UndoManager()
-        let store = CanvasElementsStore()
-        store.canvasReference = canvasReference
-        store.undoManagerOverride = undoManager
-        store.hydrate(elements)
-
-        let controller = CanvasSelectionController()
-        controller.canvasReference = canvasReference
-        controller.elementsStore = store
-        undoManager.removeAllActions()
-
-        return Harness(
-            canvasView: canvasView,
-            canvasReference: canvasReference,
-            store: store,
-            undoManager: undoManager,
-            controller: controller
-        )
     }
 
 
@@ -603,11 +576,4 @@ final class SelectionPasteboardTests: XCTestCase {
         )
     }
 
-    private struct Harness {
-        let canvasView: PKCanvasView
-        let canvasReference: NoteCanvasReference
-        let store: CanvasElementsStore
-        let undoManager: UndoManager
-        let controller: CanvasSelectionController
-    }
 }

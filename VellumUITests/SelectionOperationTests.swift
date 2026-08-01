@@ -8,7 +8,7 @@ import XCTest
 final class SelectionOperationTests: XCTestCase {
     func testBoxedCaptureSelectsStrokeAndTextElement() throws {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: [element]
         )
@@ -27,7 +27,7 @@ final class SelectionOperationTests: XCTestCase {
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
             rotation: rotation
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
 
         harness.controller.selectElement(id: element.id)
 
@@ -47,7 +47,7 @@ final class SelectionOperationTests: XCTestCase {
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
             rotation: Double.pi / 4
         )
-        let harness = makeHarness(strokes: [], elements: [first, second])
+        let harness = CanvasHarness.make(strokes: [], elements: [first, second])
 
         selectMixedContent(in: harness)
 
@@ -56,7 +56,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testCommittedChromeRotationIsZeroForStrokeOnlySelection() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
             ],
@@ -74,7 +74,7 @@ final class SelectionOperationTests: XCTestCase {
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
             rotation: Double.pi / 3
         )
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
             ],
@@ -119,7 +119,7 @@ final class SelectionOperationTests: XCTestCase {
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
             rotation: initialRotation
         )
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         harness.controller.selectElement(id: element.id)
 
         harness.controller.beginHandleDrag()
@@ -151,35 +151,35 @@ final class SelectionOperationTests: XCTestCase {
             locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
         )
 
-        let strokesOnly = makeHarness(strokes: [stroke], elements: [])
+        let strokesOnly = CanvasHarness.make(strokes: [stroke], elements: [])
         selectMixedContent(in: strokesOnly)
         XCTAssertTrue(strokesOnly.controller.selectionSupportsStyling)
 
         let shape = makeShapeElement(frame: frame)
-        let shapeOnly = makeHarness(strokes: [], elements: [shape])
+        let shapeOnly = CanvasHarness.make(strokes: [], elements: [shape])
         shapeOnly.controller.selectElement(id: shape.id)
         XCTAssertTrue(shapeOnly.controller.selectionSupportsStyling)
 
         let text = CanvasFixtures.makeTextElement(frame: frame)
-        let textOnly = makeHarness(strokes: [], elements: [text])
+        let textOnly = CanvasHarness.make(strokes: [], elements: [text])
         textOnly.controller.selectElement(id: text.id)
         XCTAssertTrue(textOnly.controller.selectionSupportsStyling)
 
         let image = makeImageElement(frame: frame)
-        let imageOnly = makeHarness(strokes: [], elements: [image])
+        let imageOnly = CanvasHarness.make(strokes: [], elements: [image])
         imageOnly.controller.selectElement(id: image.id)
         XCTAssertFalse(imageOnly.controller.selectionSupportsStyling)
 
-        let imageAndStroke = makeHarness(strokes: [stroke], elements: [image])
+        let imageAndStroke = CanvasHarness.make(strokes: [stroke], elements: [image])
         selectMixedContent(in: imageAndStroke)
         XCTAssertTrue(imageAndStroke.controller.selectionSupportsStyling)
 
-        let noSelection = makeHarness(strokes: [], elements: [])
+        let noSelection = CanvasHarness.make(strokes: [], elements: [])
         XCTAssertFalse(noSelection.controller.selectionSupportsStyling)
     }
 
     func testBeginMoveDragHidesSelectedStrokeAndCreatesSnapshot() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -193,7 +193,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testBeginMoveDragSetsTransientOverrideFlagAndEndMoveDragClearsIt() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -219,7 +219,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testBeginHandleDragSetsTransientOverrideFlagAndEndHandleDragClearsIt() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -240,7 +240,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testExternalDrawingChangeDuringDragClearsTransientOverrideFlag() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -259,7 +259,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testClearSelectionDuringDragClearsTransientOverrideFlag() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -279,7 +279,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testMoveCommitsStrokeAndElementAsOneUndoableTransaction() throws {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: [element]
         )
@@ -321,7 +321,7 @@ final class SelectionOperationTests: XCTestCase {
         let selected = CanvasFixtures.makeTextElement(frame: frame)
         let front = CanvasFixtures.makeTextElement(frame: frame)
         let originalElements = [selected, front].zOrderMaterialized()
-        let harness = makeHarness(strokes: [], elements: originalElements)
+        let harness = CanvasHarness.make(strokes: [], elements: originalElements)
         harness.controller.selectElement(id: selected.id)
 
         XCTAssertTrue(harness.controller.canReorderSelection)
@@ -377,7 +377,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testMoveDragRestoresStrokeAndPreservesSingleUndoEntry() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -403,7 +403,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testZeroTranslationMoveDragRestoresStrokeWithoutUndoEntry() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -419,7 +419,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testHandleDragHidesThenRestoresAndTransformsSelectedStroke() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -444,7 +444,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testClearSelectionRestoresStrokeHiddenForMoveDrag() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -460,7 +460,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testExternalDrawingChangeDiscardsHiddenStrokeStateWithoutRestoringIt() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -476,7 +476,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testUndoOfCommittedMoveClearsSelectionViaSnapshotHook() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -501,7 +501,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testDeleteRemovesStrokeAndElementAsOneUndoableTransaction() {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: [element]
         )
@@ -534,7 +534,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testDuplicateSelectsOffsetCopiesAndUsesOneUndoableTransaction() throws {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: [element]
         )
@@ -579,7 +579,7 @@ final class SelectionOperationTests: XCTestCase {
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30)
         )
         element.layerPlacement = .aboveInk
-        let harness = makeHarness(strokes: [], elements: [element])
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
         harness.controller.selectElement(id: element.id)
 
         harness.controller.duplicateSelection()
@@ -591,7 +591,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testExternalDrawingChangeClearsSelection() {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
@@ -607,7 +607,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testOpenFreeformCaptureSelectsEnclosedStroke() throws {
-        let harness = makeHarness(
+        let harness = CanvasHarness.make(
             strokes: [
                 CanvasFixtures.makeStroke(
                     locations: [
@@ -633,37 +633,10 @@ final class SelectionOperationTests: XCTestCase {
         XCTAssertTrue(selection.elementIDs.isEmpty)
     }
 
-    private func selectMixedContent(in harness: Harness) {
+    private func selectMixedContent(in harness: CanvasHarness) {
         harness.controller.beginCapture(at: CGPoint(x: 0, y: 0), mode: .boxed)
         harness.controller.extendCapture(to: CGPoint(x: 110, y: 80))
         harness.controller.endCapture()
-    }
-
-    private func makeHarness(strokes: [PKStroke], elements: [CanvasElement]) -> Harness {
-        let canvasView = PKCanvasView()
-        canvasView.drawing = PKDrawing(strokes: strokes)
-
-        let canvasReference = NoteCanvasReference()
-        canvasReference.canvasView = canvasView
-
-        let undoManager = UndoManager()
-        let store = CanvasElementsStore()
-        store.canvasReference = canvasReference
-        store.undoManagerOverride = undoManager
-        store.hydrate(elements)
-
-        let controller = CanvasSelectionController()
-        controller.canvasReference = canvasReference
-        controller.elementsStore = store
-        undoManager.removeAllActions()
-
-        return Harness(
-            canvasView: canvasView,
-            canvasReference: canvasReference,
-            store: store,
-            undoManager: undoManager,
-            controller: controller
-        )
     }
 
 
@@ -708,14 +681,6 @@ final class SelectionOperationTests: XCTestCase {
     ) {
         XCTAssertEqual(stroke.transform.tx, x, accuracy: 0.001, file: file, line: line)
         XCTAssertEqual(stroke.transform.ty, y, accuracy: 0.001, file: file, line: line)
-    }
-
-    private struct Harness {
-        let canvasView: PKCanvasView
-        let canvasReference: NoteCanvasReference
-        let store: CanvasElementsStore
-        let undoManager: UndoManager
-        let controller: CanvasSelectionController
     }
 
     private final class DrawingChangeCounter {
