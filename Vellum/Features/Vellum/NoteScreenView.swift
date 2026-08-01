@@ -878,7 +878,7 @@ struct NoteScreenView: View {
     private func entityColor(for kind: EntityKind) -> Color {
         switch kind {
         case .person: VellumTheme.accent
-        case .topic: VellumTheme.thesis
+        case .topic: VellumTheme.spaceGreen
         case .document: VellumTheme.spaceBlue
         }
     }

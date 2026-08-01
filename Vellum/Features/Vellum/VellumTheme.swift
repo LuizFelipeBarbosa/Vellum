@@ -45,13 +45,13 @@ enum VellumTheme {
     static let bodyInk = dynamic(light: "#33302A", dark: "#DDD6C6")
     static let waveform = dynamic(light: "#B9AE97", dark: "#8F866F")
     static let toolbarMarker = dynamic(light: "#C9BFA8", dark: "#5A5344")
-    static let studio = dynamic(light: "#9A6B35", dark: "#C99A5F")
-    static let thesis = dynamic(light: "#4E6E58", dark: "#7FA98C")
-    static let team = dynamic(light: "#6E5E7A", dark: "#A896B5")
-    static let reading = dynamic(light: "#8A6E4B", dark: "#C2A379")
     static let spaceRed = dynamic(light: "#955B52", dark: "#C99189")
+    static let spaceOrange = dynamic(light: "#9A6B35", dark: "#C99A5F")
+    static let spaceYellow = dynamic(light: "#8A6E4B", dark: "#C2A379")
+    static let spaceGreen = dynamic(light: "#4E6E58", dark: "#7FA98C")
     static let spaceTeal = dynamic(light: "#4F7470", dark: "#82ACA7")
     static let spaceBlue = dynamic(light: "#586E82", dark: "#8FA8BC")
+    static let spacePurple = dynamic(light: "#6E5E7A", dark: "#A896B5")
     static let spacePink = dynamic(light: "#936B76", dark: "#C8A0AB")
     static let spaceGray = dynamic(light: "#7B776E", dark: "#A9A59B")
 
@@ -62,12 +62,12 @@ enum VellumTheme {
     static func color(for spaceColor: SpaceColor) -> Color {
         switch spaceColor {
         case .red: spaceRed
-        case .orange: studio
-        case .yellow: reading
-        case .green: thesis
+        case .orange: spaceOrange
+        case .yellow: spaceYellow
+        case .green: spaceGreen
         case .teal: spaceTeal
         case .blue: spaceBlue
-        case .purple: team
+        case .purple: spacePurple
         case .pink: spacePink
         case .gray: spaceGray
         }
