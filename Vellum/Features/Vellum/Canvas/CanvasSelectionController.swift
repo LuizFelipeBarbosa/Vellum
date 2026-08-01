@@ -299,7 +299,7 @@ final class CanvasSelectionController {
             elementsStore.mutateDrawing { drawing in
                 var strokes = drawing.strokes
                 for index in selection.strokeIndices where strokes.indices.contains(index) {
-                    strokes[index] = Self.copy(
+                    strokes[index] = StrokeEditing.copy(
                         strokes[index],
                         translatedBy: translation
                     )
@@ -396,7 +396,7 @@ final class CanvasSelectionController {
             elementsStore.mutateDrawing { drawing in
                 var strokes = drawing.strokes
                 for index in selection.strokeIndices where strokes.indices.contains(index) {
-                    strokes[index] = Self.copy(strokes[index], applying: composite)
+                    strokes[index] = StrokeEditing.copy(strokes[index], applying: composite)
                 }
                 drawing = PKDrawing(strokes: strokes)
             }
@@ -621,11 +621,11 @@ final class CanvasSelectionController {
 
                     if let strokeWidth,
                        strokeWidth > 0,
-                       let currentWidth = Self.currentAverageTipWidth(stroke),
+                       let currentWidth = StrokeEditing.averageTipWidth(of: stroke),
                        currentWidth > 0 {
                         let factor = CGFloat(strokeWidth / currentWidth)
                         let points = stroke.path.map { point in
-                            Self.copy(point, scalingTipBy: factor)
+                            StrokeEditing.copy(point, scalingTipBy: factor)
                         }
                         // Rebuilding the path can shift random-seeded pencil/crayon textures
                         // slightly; preserving the seed still makes that accepted and expected.
@@ -713,7 +713,7 @@ final class CanvasSelectionController {
             elementsStore.mutateDrawing { drawing in
                 var strokes = drawing.strokes
                 for index in selection.strokeIndices where strokes.indices.contains(index) {
-                    strokes[index] = Self.flippedStroke(strokes[index], applying: reflection)
+                    strokes[index] = StrokeEditing.copy(strokes[index], applying: reflection)
                 }
                 drawing = PKDrawing(strokes: strokes)
             }
@@ -847,7 +847,7 @@ final class CanvasSelectionController {
             duplicateOffset = CGSize(width: 20, height: 20)
         }
         let pastedStrokes = drawing.strokes.map {
-            Self.copy($0, translatedBy: duplicateOffset)
+            StrokeEditing.copy($0, translatedBy: duplicateOffset)
         }
         var pastedElements: [CanvasElement] = []
         var imagesToCache: [(image: UIImage, data: Data, assetPath: String)] = []
@@ -952,7 +952,7 @@ final class CanvasSelectionController {
                 let firstDuplicateIndex = drawing.strokes.count
                 drawing.strokes.append(
                     contentsOf: selectedStrokes.map {
-                        Self.copy($0, translatedBy: duplicateOffset)
+                        StrokeEditing.copy($0, translatedBy: duplicateOffset)
                     }
                 )
                 duplicatedStrokeIndices = IndexSet(
@@ -1197,81 +1197,5 @@ final class CanvasSelectionController {
             delta.height -= translatedMinY
         }
         return delta
-    }
-
-    private static func copy(_ stroke: PKStroke, translatedBy translation: CGSize) -> PKStroke {
-        PKStroke(
-            ink: stroke.ink,
-            path: stroke.path,
-            transform: stroke.transform.concatenating(
-                CGAffineTransform(
-                    translationX: translation.width,
-                    y: translation.height
-                )
-            ),
-            mask: stroke.mask,
-            randomSeed: stroke.randomSeed
-        )
-    }
-
-    private static func copy(_ stroke: PKStroke, applying transform: CGAffineTransform) -> PKStroke {
-        PKStroke(
-            ink: stroke.ink,
-            path: stroke.path,
-            transform: stroke.transform.concatenating(transform),
-            mask: stroke.mask,
-            randomSeed: stroke.randomSeed
-        )
-    }
-
-    private static func flippedStroke(
-        _ stroke: PKStroke,
-        applying reflection: CGAffineTransform
-    ) -> PKStroke {
-        // FALLBACK: If PencilKit rejects or normalizes negative-determinant transforms, rebuild
-        // stroke.path as in restyleSelection, applying the same reflection directly to each
-        // PKStrokePoint location, and drop the transform-based approach. The rest can stay put.
-        Self.copy(stroke, applying: reflection)
-    }
-
-    private static func currentAverageTipWidth(_ stroke: PKStroke) -> Double? {
-        guard !stroke.path.isEmpty else { return nil }
-        let total = stroke.path.reduce(CGFloat.zero) { partial, point in
-            partial + point.size.width
-        }
-        return Double(total / CGFloat(stroke.path.count))
-    }
-
-    private static func copy(
-        _ point: PKStrokePoint,
-        scalingTipBy factor: CGFloat
-    ) -> PKStrokePoint {
-        let size = CGSize(
-            width: point.size.width * factor,
-            height: point.size.height * factor
-        )
-        if #available(iOS 26.0, *) {
-            return PKStrokePoint(
-                location: point.location,
-                timeOffset: point.timeOffset,
-                size: size,
-                opacity: point.opacity,
-                force: point.force,
-                azimuth: point.azimuth,
-                altitude: point.altitude,
-                secondaryScale: point.secondaryScale,
-                threshold: point.threshold
-            )
-        }
-        return PKStrokePoint(
-            location: point.location,
-            timeOffset: point.timeOffset,
-            size: size,
-            opacity: point.opacity,
-            force: point.force,
-            azimuth: point.azimuth,
-            altitude: point.altitude,
-            secondaryScale: point.secondaryScale
-        )
     }
 }
