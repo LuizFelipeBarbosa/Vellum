@@ -33,7 +33,7 @@ enum PageDeleter {
             guard band != index else { return nil }
             guard band > index else { return stroke }
 
-            return copy(
+            return StrokeEditing.copy(
                 stroke,
                 translatedBy: CGSize(width: 0, height: -geometry.pageHeight)
             )
@@ -70,24 +70,6 @@ enum PageDeleter {
             drawing: PKDrawing(strokes: strokes),
             elements: remainingElements,
             pages: remainingPages
-        )
-    }
-
-    private static func copy(
-        _ stroke: PKStroke,
-        translatedBy translation: CGSize
-    ) -> PKStroke {
-        PKStroke(
-            ink: stroke.ink,
-            path: stroke.path,
-            transform: stroke.transform.concatenating(
-                CGAffineTransform(
-                    translationX: translation.width,
-                    y: translation.height
-                )
-            ),
-            mask: stroke.mask,
-            randomSeed: stroke.randomSeed
         )
     }
 }
