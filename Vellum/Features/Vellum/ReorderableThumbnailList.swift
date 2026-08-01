@@ -208,10 +208,10 @@ struct ReorderableThumbnailList: View {
     private func beginDrag(_ fingerPanelY: CGFloat) {
         let height = effectiveRowHeight
         let fingerContentY = fingerPanelY + scrollMetrics.contentOffsetY
-        guard let draggedIndex = ThumbnailDragMath.liftedIndex(
-            fingerContentY: fingerContentY,
+        guard let draggedIndex = RowDragMath.rowIndex(
+            forContentY: fingerContentY,
             rowHeight: height,
-            pageCount: pages.count
+            rowCount: pages.count
         ) else {
             return
         }

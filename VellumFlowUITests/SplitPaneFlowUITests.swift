@@ -330,7 +330,7 @@ final class SplitPaneFlowUITests: XCTestCase {
                 && button.label != "Close notes"
                 && button.frame.intersects(sidebar.frame)
         }.count
-        // Mirrors SplitSidebarDragMath.rowHeight, which is internal to the app.
+        // Mirrors SplitSidebarLayout.rowHeight, which is internal to the app.
         let sidebarRowHeight: CGFloat = 56
         let contentHeight = CGFloat(rowCount) * sidebarRowHeight
         let viewportHeight = sidebar.frame.height
