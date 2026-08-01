@@ -224,14 +224,11 @@ public actor FileNoteRepository: NoteRepository {
     }
 
     public func insertNote(_ note: Note) async throws {
-        let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: note.id)
         do {
-            try createPackage(for: note, at: package)
+            try stageAndInstallPackage(for: note, assets: [])
         } catch let error as VellumError {
-            try? FileManager.default.removeItem(at: package)
             throw error
         } catch {
-            try? FileManager.default.removeItem(at: package)
             throw VellumError.persistenceFailure("Could not create note: \(error.localizedDescription)")
         }
     }
@@ -240,38 +237,7 @@ public actor FileNoteRepository: NoteRepository {
         _ note: Note,
         assets: [(relativePath: String, data: Data)]
     ) async throws {
-        let fileManager = FileManager.default
-        let finalPackage = FilePersistence.packageURL(
-            rootDirectory: rootDirectory,
-            noteID: note.id
-        )
-        let stagingPackage = rootDirectory.appendingPathComponent(
-            ".staging-\(UUID().uuidString)",
-            isDirectory: true
-        )
-
-        do {
-            try fileManager.createDirectory(
-                at: rootDirectory,
-                withIntermediateDirectories: true
-            )
-            try createPackage(for: note, at: stagingPackage)
-            for asset in assets {
-                let url = try FilePersistence.validatedAssetURL(
-                    package: stagingPackage,
-                    relativePath: asset.relativePath
-                )
-                try fileManager.createDirectory(
-                    at: url.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try asset.data.write(to: url, options: .atomic)
-            }
-            try fileManager.moveItem(at: stagingPackage, to: finalPackage)
-        } catch {
-            try? fileManager.removeItem(at: stagingPackage)
-            throw error
-        }
+        try stageAndInstallPackage(for: note, assets: assets)
     }
 
     public func loadNote(id: UUID) async throws -> Note {
@@ -528,6 +494,49 @@ public actor FileNoteRepository: NoteRepository {
                 guard !referencedPaths.contains(relativePath) else { continue }
                 try? fileManager.removeItem(at: asset)
             }
+        }
+    }
+
+    /// Builds the whole package under a hidden staging name and moves it into place
+    /// in one step, so the workspace only ever sees a finished package. `listNotes`
+    /// is fail-closed — a single torn package makes the entire library unreadable —
+    /// and a write interrupted partway leaves nothing behind but staging, which the
+    /// scan skips as hidden.
+    private func stageAndInstallPackage(
+        for note: Note,
+        assets: [(relativePath: String, data: Data)]
+    ) throws {
+        let fileManager = FileManager.default
+        let finalPackage = FilePersistence.packageURL(
+            rootDirectory: rootDirectory,
+            noteID: note.id
+        )
+        let stagingPackage = rootDirectory.appendingPathComponent(
+            ".staging-\(UUID().uuidString)",
+            isDirectory: true
+        )
+
+        do {
+            try fileManager.createDirectory(
+                at: rootDirectory,
+                withIntermediateDirectories: true
+            )
+            try createPackage(for: note, at: stagingPackage)
+            for asset in assets {
+                let url = try FilePersistence.validatedAssetURL(
+                    package: stagingPackage,
+                    relativePath: asset.relativePath
+                )
+                try fileManager.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try asset.data.write(to: url, options: .atomic)
+            }
+            try fileManager.moveItem(at: stagingPackage, to: finalPackage)
+        } catch {
+            try? fileManager.removeItem(at: stagingPackage)
+            throw error
         }
     }
 
