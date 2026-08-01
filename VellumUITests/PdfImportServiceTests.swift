@@ -50,66 +50,29 @@ final class PdfImportServiceTests: XCTestCase {
         }
     }
 
-    func testLetterPDFSetsTheNoteAspectRatio() throws {
-        let result = try PDFImportService.buildNote(
-            fromPDFData: makePDF(
-                pageCount: 1,
-                pageSize: CGSize(width: 612, height: 792)
-            ),
-            title: "Letter"
-        )
+    func testSourcePageSizeDrivesOrientationAspectRatioAndGeometry() throws {
+        // (source page size, page orientation, upright aspect ratio, geometry wider than tall)
+        let cases: [(size: CGSize, orientation: PageOrientation, aspect: Double, isWide: Bool, line: UInt)] = [
+            (CGSize(width: 612, height: 792), .portrait, 792.0 / 612.0, false, #line),
+            (CGSize(width: 792, height: 612), .landscape, 792.0 / 612.0, true, #line),
+            (CGSize(width: 700, height: 700), .portrait, 1, false, #line),
+        ]
 
-        XCTAssertEqual(result.note.pageAspectRatio, 792.0 / 612.0, accuracy: 0.001)
-    }
+        for (size, orientation, aspect, isWide, line) in cases {
+            let result = try PDFImportService.buildNote(
+                fromPDFData: makePDF(pageCount: 1, pageSize: size),
+                title: "Imported"
+            )
+            let geometry = result.note.pageGeometry
 
-    func testLandscapePDFSetsOrientationAndAspectRatio() throws {
-        let result = try PDFImportService.buildNote(
-            fromPDFData: makePDF(
-                pageCount: 1,
-                pageSize: CGSize(width: 792, height: 612)
-            ),
-            title: "Landscape"
-        )
-
-        XCTAssertEqual(result.note.pageOrientation, .landscape)
-        XCTAssertEqual(result.note.pageAspectRatio, 792.0 / 612.0, accuracy: 0.001)
-    }
-
-    func testPortraitPDFKeepsOrientationAndAspectRatio() throws {
-        let result = try PDFImportService.buildNote(
-            fromPDFData: makePDF(
-                pageCount: 1,
-                pageSize: CGSize(width: 612, height: 792)
-            ),
-            title: "Portrait"
-        )
-
-        XCTAssertEqual(result.note.pageOrientation, .portrait)
-        XCTAssertEqual(result.note.pageAspectRatio, 792.0 / 612.0, accuracy: 0.001)
-    }
-
-    func testSquarePDFKeepsPortraitOrientation() throws {
-        let result = try PDFImportService.buildNote(
-            fromPDFData: makePDF(
-                pageCount: 1,
-                pageSize: CGSize(width: 700, height: 700)
-            ),
-            title: "Square"
-        )
-
-        XCTAssertEqual(result.note.pageOrientation, .portrait)
-    }
-
-    func testLandscapePDFGeometryIsWiderThanTall() throws {
-        let result = try PDFImportService.buildNote(
-            fromPDFData: makePDF(
-                pageCount: 1,
-                pageSize: CGSize(width: 792, height: 612)
-            ),
-            title: "Landscape Geometry"
-        )
-
-        XCTAssertGreaterThan(result.note.pageGeometry.contentWidth, result.note.pageGeometry.pageHeight)
+            XCTAssertEqual(result.note.pageOrientation, orientation, line: line)
+            XCTAssertEqual(result.note.pageAspectRatio, aspect, accuracy: 0.001, line: line)
+            XCTAssertEqual(
+                geometry.contentWidth > geometry.pageHeight,
+                isWide,
+                line: line
+            )
+        }
     }
 
     func testRotatedFirstPageSwapsTheDerivedAspectRatio() throws {

@@ -2,14 +2,18 @@
 import XCTest
 
 final class SqueezeEraserControllerTests: XCTestCase {
-    func testBeginSwitchesToEraserAndEndRestores() {
-        var controller = SqueezeEraserController()
+    func testSqueezeRestoresTheToolItStartedFromAndThenResets() {
+        for tool in [ToolID.pen, .select, .text] {
+            var controller = SqueezeEraserController()
 
-        XCTAssertEqual(controller.begin(current: .pen), .eraser)
-        XCTAssertEqual(controller.end(current: .eraser), .pen)
+            XCTAssertEqual(controller.begin(current: tool), .eraser)
+            XCTAssertEqual(controller.end(current: .eraser), tool)
+            // The saved tool is cleared on end, so a stray second end restores nothing.
+            XCTAssertNil(controller.end(current: .eraser))
+        }
     }
 
-    func testBeginWhileEraserIsNoOp() {
+    func testBeginWhileAlreadyErasingIsANoOpAndSavesNoTool() {
         var controller = SqueezeEraserController()
 
         XCTAssertNil(controller.begin(current: .eraser))
@@ -23,34 +27,11 @@ final class SqueezeEraserControllerTests: XCTestCase {
         XCTAssertNil(controller.end(current: .highlighter))
     }
 
-    func testEndWithoutBeginReturnsNil() {
-        var controller = SqueezeEraserController()
-
-        XCTAssertNil(controller.end(current: .eraser))
-    }
-
     func testDoubleBeginPreservesOriginalTool() {
         var controller = SqueezeEraserController()
 
         XCTAssertEqual(controller.begin(current: .pen), .eraser)
         XCTAssertEqual(controller.begin(current: .pen), .eraser)
         XCTAssertEqual(controller.end(current: .eraser), .pen)
-    }
-
-    func testStateResetsAfterEnd() {
-        var controller = SqueezeEraserController()
-
-        XCTAssertEqual(controller.begin(current: .pen), .eraser)
-        XCTAssertEqual(controller.end(current: .eraser), .pen)
-        XCTAssertNil(controller.end(current: .eraser))
-    }
-
-    func testWorksFromSelectAndTextTools() {
-        var controller = SqueezeEraserController()
-
-        XCTAssertEqual(controller.begin(current: .select), .eraser)
-        XCTAssertEqual(controller.end(current: .eraser), .select)
-        XCTAssertEqual(controller.begin(current: .text), .eraser)
-        XCTAssertEqual(controller.end(current: .eraser), .text)
     }
 }

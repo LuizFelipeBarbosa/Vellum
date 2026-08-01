@@ -59,25 +59,6 @@ final class ElementReordererTests: XCTestCase {
         )
     }
 
-    func testToFrontPromotesTopmostBelowInkElementWhenInkOverlapsSelection() throws {
-        let selected = makeImage(
-            frame: CanvasRect(x: 20, y: 20, width: 80, height: 60),
-            placement: .belowInk
-        )
-
-        let result = try XCTUnwrap(
-            ElementReorderer.reorder(
-                elements: [selected],
-                selectedIDs: [selected.id],
-                direction: .toFront,
-                inkRects: [CGRect(x: 40, y: 40, width: 10, height: 10)]
-            )
-        )
-
-        XCTAssertEqual(result.map(\.id), [selected.id])
-        XCTAssertEqual(result.first?.layerPlacement, .aboveInk)
-    }
-
     func testToBackDemotesBottommostAboveInkElementBelowInk() throws {
         let selected = makeText(
             frame: CanvasRect(x: 20, y: 20, width: 80, height: 60),

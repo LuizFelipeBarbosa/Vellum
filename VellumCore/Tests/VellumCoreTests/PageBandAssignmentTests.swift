@@ -65,58 +65,29 @@ func nonpositiveBandCountResolvesToZero() {
     )
 }
 
-@Test("The permutation moves one item forward")
-func permutationMovesOneItemForward() {
+/// The hand-picked moves, side by side so the shape of each kind of move stays readable.
+/// `randomizedPermutationsMatchArrayMove` below covers the same ground against the stdlib
+/// `Array.move` as an independent oracle; these pin the cases that were written by hand.
+@Test("The permutation reindexes the moved items and everything they pass", arguments: [
+    // (item count, indices moved, destination offset, resulting permutation)
+    (4, IndexSet(integer: 1), 4, [0, 3, 1, 2]), // one item forward
+    (4, IndexSet(integer: 3), 1, [0, 2, 3, 1]), // one item backward
+    (4, IndexSet([1, 3]), 0, [2, 0, 3, 1]), // multiple items together
+    (5, IndexSet([0, 2]), 5, [3, 0, 4, 1, 2]), // multiple items to the end
+    (5, IndexSet([1, 2]), 3, [0, 1, 2, 3, 4]), // onto the source's own post-removal slot
+])
+func permutationReindexesMovedItems(
+    count: Int,
+    moving: IndexSet,
+    to destination: Int,
+    expected: [Int]
+) {
     #expect(
         PageBandAssignment.permutation(
-            count: 4,
-            moving: IndexSet(integer: 1),
-            to: 4
-        ) == [0, 3, 1, 2]
-    )
-}
-
-@Test("The permutation moves one item backward")
-func permutationMovesOneItemBackward() {
-    #expect(
-        PageBandAssignment.permutation(
-            count: 4,
-            moving: IndexSet(integer: 3),
-            to: 1
-        ) == [0, 2, 3, 1]
-    )
-}
-
-@Test("The permutation moves multiple indexed items together")
-func permutationMovesMultipleItems() {
-    #expect(
-        PageBandAssignment.permutation(
-            count: 4,
-            moving: IndexSet([1, 3]),
-            to: 0
-        ) == [2, 0, 3, 1]
-    )
-}
-
-@Test("The permutation supports moving multiple items to the end")
-func permutationMovesMultipleItemsToEnd() {
-    #expect(
-        PageBandAssignment.permutation(
-            count: 5,
-            moving: IndexSet([0, 2]),
-            to: 5
-        ) == [3, 0, 4, 1, 2]
-    )
-}
-
-@Test("A move onto the source's post-removal position is a no-op")
-func permutationNoOpIsIdentity() {
-    #expect(
-        PageBandAssignment.permutation(
-            count: 5,
-            moving: IndexSet([1, 2]),
-            to: 3
-        ) == Array(0..<5)
+            count: count,
+            moving: moving,
+            to: destination
+        ) == expected
     )
 }
 
