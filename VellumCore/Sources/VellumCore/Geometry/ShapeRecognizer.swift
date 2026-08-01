@@ -97,7 +97,7 @@ public enum ShapeRecognizer {
             points: finiteInput,
             tolerance: config.dwellTailTolerance
         )
-        guard let bounds = bounds(of: stroke),
+        guard let bounds = PointBounds(of: stroke),
               bounds.diagonal.isFinite,
               bounds.diagonal >= max(0, config.minDiagonal),
               hasAtLeastTwoDistinctPoints(stroke) else {
@@ -792,27 +792,6 @@ public enum ShapeRecognizer {
         return result
     }
 
-    private static func bounds(of points: [CGPoint]) -> PointBounds? {
-        guard let first = points.first else { return nil }
-
-        var minimumX = first.x
-        var maximumX = first.x
-        var minimumY = first.y
-        var maximumY = first.y
-        for point in points.dropFirst() {
-            minimumX = min(minimumX, point.x)
-            maximumX = max(maximumX, point.x)
-            minimumY = min(minimumY, point.y)
-            maximumY = max(maximumY, point.y)
-        }
-        return PointBounds(
-            minimumX: minimumX,
-            maximumX: maximumX,
-            minimumY: minimumY,
-            maximumY: maximumY
-        )
-    }
-
     private static func polylineLength(_ points: [CGPoint]) -> CGFloat {
         guard points.count > 1 else { return 0 }
         return zip(points, points.dropFirst()).reduce(CGFloat.zero) {
@@ -886,14 +865,4 @@ public enum ShapeRecognizer {
         let minorVariance: CGFloat
     }
 
-    private struct PointBounds {
-        let minimumX: CGFloat
-        let maximumX: CGFloat
-        let minimumY: CGFloat
-        let maximumY: CGFloat
-
-        var diagonal: CGFloat {
-            hypot(maximumX - minimumX, maximumY - minimumY)
-        }
-    }
 }

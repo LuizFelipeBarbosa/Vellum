@@ -66,17 +66,12 @@ public enum ShapeVertexEditor {
             cosine: cosine,
             sine: sine
         )
-        guard let bounds = bounds(of: unrotatedVertices) else { return nil }
+        guard let bounds = PointBounds(of: unrotatedVertices) else { return nil }
 
         let minimumExtent = CGFloat(ShapeElementBuilder.minimumFrameExtent)
-        let rawWidth = bounds.maximumX - bounds.minimumX
-        let rawHeight = bounds.maximumY - bounds.minimumY
-        let width = max(rawWidth, minimumExtent)
-        let height = max(rawHeight, minimumExtent)
-        let midpoint = CGPoint(
-            x: (bounds.minimumX + bounds.maximumX) / 2,
-            y: (bounds.minimumY + bounds.maximumY) / 2
-        )
+        let width = max(bounds.width, minimumExtent)
+        let height = max(bounds.height, minimumExtent)
+        let midpoint = bounds.midpoint
         let tightOrigin = CGPoint(
             x: midpoint.x - width / 2,
             y: midpoint.y - height / 2
@@ -108,8 +103,8 @@ public enum ShapeVertexEditor {
 
         // Translating both the tight frame and its unrotated geometry by the compensation keeps
         // normalized coordinates stable while moving the eventual rotation center.
-        let horizontalCollapsed = rawWidth == 0
-        let verticalCollapsed = rawHeight == 0
+        let horizontalCollapsed = bounds.width == 0
+        let verticalCollapsed = bounds.height == 0
         let normalizedVertices = unrotatedVertices.map { vertex in
             let compensatedVertex = CGPoint(
                 x: vertex.x + compensation.x,
@@ -133,38 +128,5 @@ public enum ShapeVertexEditor {
             strokeWidth: content.strokeWidth
         )
         return (content: updatedContent, frame: newFrame)
-    }
-
-    private static func bounds(of points: [CGPoint]) -> PointBounds? {
-        guard let first = points.first,
-              first.x.isFinite,
-              first.y.isFinite else {
-            return nil
-        }
-
-        var minimumX = first.x
-        var maximumX = first.x
-        var minimumY = first.y
-        var maximumY = first.y
-        for point in points.dropFirst() {
-            guard point.x.isFinite, point.y.isFinite else { return nil }
-            minimumX = min(minimumX, point.x)
-            maximumX = max(maximumX, point.x)
-            minimumY = min(minimumY, point.y)
-            maximumY = max(maximumY, point.y)
-        }
-        return PointBounds(
-            minimumX: minimumX,
-            maximumX: maximumX,
-            minimumY: minimumY,
-            maximumY: maximumY
-        )
-    }
-
-    private struct PointBounds {
-        let minimumX: CGFloat
-        let maximumX: CGFloat
-        let minimumY: CGFloat
-        let maximumY: CGFloat
     }
 }

@@ -27,11 +27,11 @@ public enum ShapeElementBuilder {
             )
 
         case .ellipse(let center, let radiusX, let radiusY, let rotation):
-            let centerX = center.x.isFinite ? Double(center.x) : 0
-            let centerY = center.y.isFinite ? Double(center.y) : 0
-            let horizontalRadius = radiusX.isFinite ? abs(Double(radiusX)) : 0
-            let verticalRadius = radiusY.isFinite ? abs(Double(radiusY)) : 0
-            let rawFrame = AxisBounds(
+            let centerX = center.x.isFinite ? center.x : 0
+            let centerY = center.y.isFinite ? center.y : 0
+            let horizontalRadius = radiusX.isFinite ? abs(radiusX) : 0
+            let verticalRadius = radiusY.isFinite ? abs(radiusY) : 0
+            let rawFrame = PointBounds(
                 minimumX: centerX - horizontalRadius,
                 maximumX: centerX + horizontalRadius,
                 minimumY: centerY - verticalRadius,
@@ -52,7 +52,7 @@ public enum ShapeElementBuilder {
     private static func normalizedGeometry(
         for vertices: [CGPoint]
     ) -> (vertices: [CanvasPoint], frame: CanvasRect) {
-        guard let first = vertices.first else {
+        guard let bounds = PointBounds(of: vertices) else {
             return (
                 vertices: [],
                 frame: CanvasRect(
@@ -62,19 +62,6 @@ public enum ShapeElementBuilder {
                     height: minimumFrameExtent
                 )
             )
-        }
-
-        var bounds = AxisBounds(
-            minimumX: Double(first.x),
-            maximumX: Double(first.x),
-            minimumY: Double(first.y),
-            maximumY: Double(first.y)
-        )
-        for vertex in vertices.dropFirst() {
-            bounds.minimumX = min(bounds.minimumX, Double(vertex.x))
-            bounds.maximumX = max(bounds.maximumX, Double(vertex.x))
-            bounds.minimumY = min(bounds.minimumY, Double(vertex.y))
-            bounds.maximumY = max(bounds.maximumY, Double(vertex.y))
         }
 
         let frame = inflatedFrame(for: bounds)
@@ -93,25 +80,15 @@ public enum ShapeElementBuilder {
         return (vertices: normalized, frame: frame)
     }
 
-    private static func inflatedFrame(for bounds: AxisBounds) -> CanvasRect {
-        let rawWidth = bounds.maximumX - bounds.minimumX
-        let rawHeight = bounds.maximumY - bounds.minimumY
-        let width = max(rawWidth, minimumFrameExtent)
-        let height = max(rawHeight, minimumFrameExtent)
-        let midpointX = (bounds.minimumX + bounds.maximumX) / 2
-        let midpointY = (bounds.minimumY + bounds.maximumY) / 2
+    private static func inflatedFrame(for bounds: PointBounds) -> CanvasRect {
+        let width = max(Double(bounds.width), minimumFrameExtent)
+        let height = max(Double(bounds.height), minimumFrameExtent)
+        let midpoint = bounds.midpoint
         return CanvasRect(
-            x: midpointX - width / 2,
-            y: midpointY - height / 2,
+            x: Double(midpoint.x) - width / 2,
+            y: Double(midpoint.y) - height / 2,
             width: width,
             height: height
         )
-    }
-
-    private struct AxisBounds {
-        var minimumX: Double
-        var maximumX: Double
-        var minimumY: Double
-        var maximumY: Double
     }
 }
