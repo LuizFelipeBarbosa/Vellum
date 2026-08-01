@@ -19,10 +19,10 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testCopyPasteOffsetsFreshCopiesSelectsThemAndUndoesInOneStep() async throws {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
                 ),
             ],
@@ -70,10 +70,10 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testPasteAtTargetCentersPayloadBounds() async throws {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
                 ),
             ],
@@ -109,10 +109,10 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testPasteAtTargetClampsToPageEdges() async throws {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
                 ),
             ],
@@ -148,10 +148,10 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testPasteAtTargetIsOneUndoTransaction() async {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
                 ),
             ],
@@ -293,10 +293,10 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testPasteFromPasteboardPrefersVellumPayloadOverSystemImage() async throws {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
                 ),
             ],
@@ -325,10 +325,10 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testRequestPasteAffordanceLifecycle() async {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
                 ),
             ],
@@ -412,7 +412,7 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testCopyPastePreservesLayerPlacement() async throws {
-        var element = makeElement(
+        var element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30)
         )
         element.layerPlacement = .aboveInk
@@ -429,10 +429,10 @@ final class SelectionPasteboardTests: XCTestCase {
     }
 
     func testCutLeavesPayloadAndPasteRestoresOffsetEquivalentContent() async throws {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
                 ),
             ],
@@ -472,7 +472,7 @@ final class SelectionPasteboardTests: XCTestCase {
         let element = makeImageElement(assetPath: "assets/cold.jpg")
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
                 ),
             ],
@@ -580,36 +580,7 @@ final class SelectionPasteboardTests: XCTestCase {
         )
     }
 
-    private func makeStroke(locations: [CGPoint]) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: CGSize(width: 4, height: 4),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
-    }
 
-    private func makeElement(frame: CanvasRect) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Selected",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
-            frame: frame
-        )
-    }
 
     private func makeImageElement(
         assetPath: String,

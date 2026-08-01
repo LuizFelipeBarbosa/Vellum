@@ -8,7 +8,7 @@ import XCTest
 @MainActor
 final class SelectionFlipTests: XCTestCase {
     func testPKStrokeAcceptsNegativeDeterminantTransform() {
-        let original = makeStroke(
+        let original = CanvasFixtures.makeStroke(
             locations: [CGPoint(x: 20, y: 30), CGPoint(x: 40, y: 70)]
         )
         let pivot = CGPoint(x: 50, y: 50)
@@ -39,10 +39,10 @@ final class SelectionFlipTests: XCTestCase {
     func testFlipHorizontalReflectsSelectedStrokesAndPreservesBounds() throws {
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 35)]
                 ),
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 70, y: 45), CGPoint(x: 95, y: 75)]
                 ),
             ],
@@ -97,7 +97,7 @@ final class SelectionFlipTests: XCTestCase {
         )
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 15, y: 25), CGPoint(x: 45, y: 55)],
                     transform: originalTransform
                 ),
@@ -139,7 +139,7 @@ final class SelectionFlipTests: XCTestCase {
         )
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 10, y: 35), CGPoint(x: 35, y: 60)]
                 ),
             ],
@@ -189,7 +189,7 @@ final class SelectionFlipTests: XCTestCase {
         )
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 45)]
                 ),
             ],
@@ -258,7 +258,7 @@ final class SelectionFlipTests: XCTestCase {
     func testFlipSelectionSurvivesDrawingDataRoundTrip() throws {
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 35)]
                 ),
             ],
@@ -367,13 +367,13 @@ final class SelectionFlipTests: XCTestCase {
     }
 
     func testFlipSelectionNoOpsWithoutSelectionAndDuringHandleDrag() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 65, y: 20, width: 32, height: 28),
             rotation: 0.2
         )
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 20, y: 20), CGPoint(x: 45, y: 45)]
                 ),
             ],
@@ -468,44 +468,7 @@ final class SelectionFlipTests: XCTestCase {
         )
     }
 
-    private func makeStroke(
-        locations: [CGPoint],
-        color: UIColor = .black,
-        size: CGSize = CGSize(width: 4, height: 4),
-        transform: CGAffineTransform = .identity,
-        creationDate: Date = Date()
-    ) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: size,
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: color),
-            path: PKStrokePath(controlPoints: points, creationDate: creationDate),
-            transform: transform
-        )
-    }
 
-    private func makeElement(frame: CanvasRect, rotation: Double = 0) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Selected",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
-            frame: frame,
-            rotation: rotation
-        )
-    }
 
     private func makeShapeElement(
         frame: CanvasRect,

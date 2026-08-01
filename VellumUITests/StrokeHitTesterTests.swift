@@ -8,14 +8,14 @@ import XCTest
 @MainActor
 final class StrokeHitTesterTests: XCTestCase {
     func testOpenLassoContainsNearbyStrokeAndExcludesDistantStroke() {
-        let nearbyStroke = makeStroke(
+        let nearbyStroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 10, y: 10),
                 CGPoint(x: 20, y: 20),
                 CGPoint(x: 30, y: 18),
             ]
         )
-        let distantStroke = makeStroke(
+        let distantStroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 200, y: 200),
                 CGPoint(x: 220, y: 220),
@@ -34,11 +34,11 @@ final class StrokeHitTesterTests: XCTestCase {
     }
 
     func testRectHitTestingAppliesStrokeTransform() {
-        let translatedStroke = makeStroke(
+        let translatedStroke = CanvasFixtures.makeStroke(
             locations: [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 10)],
             transform: CGAffineTransform(translationX: 100, y: 100)
         )
-        let untranslatedStroke = makeStroke(
+        let untranslatedStroke = CanvasFixtures.makeStroke(
             locations: [CGPoint(x: 0, y: 0), CGPoint(x: 10, y: 10)]
         )
         let drawing = PKDrawing(strokes: [translatedStroke, untranslatedStroke])
@@ -84,38 +84,8 @@ final class StrokeHitTesterTests: XCTestCase {
         XCTAssertEqual(ids, Set([centerInside.id, cornerInside.id]))
     }
 
-    private func makeStroke(
-        locations: [CGPoint],
-        transform: CGAffineTransform = .identity
-    ) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: CGSize(width: 4, height: 4),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date()),
-            transform: transform
-        )
-    }
 
     private func makeElement(frame: CanvasRect) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Selection",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
-            frame: frame
-        )
+        CanvasFixtures.makeTextElement(frame: frame, text: "Selection")
     }
 }

@@ -13,28 +13,28 @@ final class PageDeleterTests: XCTestCase {
         ]
 
         for geometry in geometries {
-            let firstStroke = makeStroke(
+            let firstStroke = CanvasFixtures.makeStroke(
                 locations: [
                     CGPoint(x: 20, y: 80),
                     CGPoint(x: 60, y: 120),
                 ]
             )
-            let deletedStroke = makeStroke(
+            let deletedStroke = CanvasFixtures.makeStroke(
                 locations: [
                     CGPoint(x: 20, y: geometry.pageHeight + 80),
                     CGPoint(x: 60, y: geometry.pageHeight + 120),
                 ]
             )
-            let laterStroke = makeStroke(
+            let laterStroke = CanvasFixtures.makeStroke(
                 locations: [
                     CGPoint(x: 20, y: 2 * geometry.pageHeight + 80),
                     CGPoint(x: 60, y: 2 * geometry.pageHeight + 120),
                 ]
             )
-            let firstElement = makeElement(
+            let firstElement = CanvasFixtures.makeImageElement(
                 frame: CanvasRect(x: 20, y: 60, width: 100, height: 40)
             )
-            let deletedElement = makeElement(
+            let deletedElement = CanvasFixtures.makeImageElement(
                 frame: CanvasRect(
                     x: 30,
                     y: Double(geometry.pageHeight + 60),
@@ -42,7 +42,7 @@ final class PageDeleterTests: XCTestCase {
                     height: 40
                 )
             )
-            let laterElement = makeElement(
+            let laterElement = CanvasFixtures.makeImageElement(
                 frame: CanvasRect(
                     x: 40,
                     y: Double(2 * geometry.pageHeight + 60),
@@ -87,14 +87,14 @@ final class PageDeleterTests: XCTestCase {
 
     func testBoundaryStraddlingStrokesFollowTheirMidpointBands() throws {
         let geometry = PageGeometry.a4
-        let deletedStroke = makeStroke(
+        let deletedStroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 20, y: geometry.pageHeight - 80),
                 CGPoint(x: 60, y: geometry.pageHeight + 120),
             ],
             size: CGSize(width: 16, height: 16)
         )
-        let laterStroke = makeStroke(
+        let laterStroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 20, y: 2 * geometry.pageHeight - 120),
                 CGPoint(x: 60, y: 2 * geometry.pageHeight + 160),
@@ -128,10 +128,10 @@ final class PageDeleterTests: XCTestCase {
     }
 
     func testDeletingFirstPageHandsAttachmentToNewFirstPageAndResequencesOrders() {
-        let attachmentElement = makeElement(
+        let attachmentElement = CanvasFixtures.makeImageElement(
             frame: CanvasRect(x: 20, y: 30, width: 40, height: 50)
         )
-        let survivorElement = makeElement(
+        let survivorElement = CanvasFixtures.makeImageElement(
             frame: CanvasRect(
                 x: 25,
                 y: Double(PageGeometry.a4.pageHeight + 45),
@@ -244,13 +244,13 @@ final class PageDeleterTests: XCTestCase {
     }
 
     func testInvalidDeletesPreserveEveryInputValue() {
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 10, y: PageGeometry.a4.pageHeight + 20),
                 CGPoint(x: 30, y: PageGeometry.a4.pageHeight + 40),
             ]
         )
-        let element = makeElement(
+        let element = CanvasFixtures.makeImageElement(
             frame: CanvasRect(x: 10, y: 30, width: 40, height: 50)
         )
         let drawing = PKDrawing(strokes: [stroke])
@@ -286,42 +286,7 @@ final class PageDeleterTests: XCTestCase {
         assertPages(outOfRangeResult.pages, equal: multiplePages)
     }
 
-    private func makeStroke(
-        locations: [CGPoint],
-        size: CGSize = CGSize(width: 4, height: 4)
-    ) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: size,
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
-    }
 
-    private func makeElement(
-        frame: CanvasRect,
-        rotation: Double = 0
-    ) -> CanvasElement {
-        CanvasElement(
-            content: .image(
-                ImageContent(
-                    assetPath: "assets/image.jpg",
-                    originalPixelSize: CanvasSize(width: 100, height: 100)
-                )
-            ),
-            frame: frame,
-            rotation: rotation
-        )
-    }
 
     private func makePages(count: Int) -> [NotePage] {
         (0..<count).map { index in

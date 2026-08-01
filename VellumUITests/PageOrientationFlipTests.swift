@@ -237,16 +237,12 @@ final class PageOrientationFlipTests: XCTestCase {
         return try encoder.encode(note)
     }
 
+    /// Pinned above the ink explicitly: these tests assert the stored placement survives a
+    /// flip, so the element must not rely on the placement being resolved from its content.
     private func makeElement(frame: CanvasRect) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Coordinates stay fixed",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
+        CanvasFixtures.makeTextElement(
             frame: frame,
+            text: "Coordinates stay fixed",
             layerPlacement: .aboveInk
         )
     }

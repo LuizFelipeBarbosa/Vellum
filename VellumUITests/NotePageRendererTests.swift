@@ -11,7 +11,7 @@ final class NotePageRendererTests: XCTestCase {
     func testInkIsCroppedToItsPage() throws {
         let relativeY = PageGeometry.a4.pageHeight / 2
         let absoluteY = PageGeometry.a4.pageHeight + relativeY
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 300, y: absoluteY - 24),
                 CGPoint(x: 300, y: absoluteY),
@@ -272,7 +272,7 @@ final class NotePageRendererTests: XCTestCase {
             content: .image(imageContent),
             frame: frame
         )
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: center.x - 40, y: center.y),
                 center,
@@ -686,7 +686,7 @@ final class NotePageRendererTests: XCTestCase {
             ),
             frame: CanvasRect(x: 250, y: 300, width: 160, height: 160)
         )
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 250, y: 460),
                 CGPoint(x: 330, y: 380),
@@ -1273,7 +1273,7 @@ final class NotePageRendererTests: XCTestCase {
         XCTAssertEqual(CGFloat(paperPixel.green), 0x20, accuracy: 10)
         XCTAssertEqual(CGFloat(paperPixel.blue), 0x19, accuracy: 10)
 
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: center.x - 40, y: center.y),
                 center,
@@ -1405,7 +1405,7 @@ final class NotePageRendererTests: XCTestCase {
             x: PageLayout.portraitContentWidth / 2,
             y: PageGeometry.a4.pageHeight / 2
         )
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: center.x - 40, y: center.y),
                 center,
@@ -1532,26 +1532,6 @@ final class NotePageRendererTests: XCTestCase {
         return try XCTUnwrap(PDFDocument(data: data))
     }
 
-    private func makeStroke(
-        locations: [CGPoint],
-        size: CGSize
-    ) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: size,
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
-    }
 
     private func makeHorizontalShape(
         strokeColor: CodableColor,

@@ -416,7 +416,7 @@ final class NoteExporterTests: XCTestCase {
     }
 
     private func makeThreePageContent() -> NotePageRenderer.Content {
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 180, y: 80),
                 CGPoint(x: 260, y: PageGeometry.a4.pageHeight * 1.4),
@@ -460,26 +460,6 @@ final class NoteExporterTests: XCTestCase {
         )
     }
 
-    private func makeStroke(
-        locations: [CGPoint],
-        size: CGSize
-    ) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: size,
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
-    }
 
     private func solidImage(color: UIColor, size: CGSize) -> UIImage {
         let format = UIGraphicsImageRendererFormat()

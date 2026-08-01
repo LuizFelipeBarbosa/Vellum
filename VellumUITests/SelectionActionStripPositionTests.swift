@@ -139,7 +139,7 @@ final class SelectionActionStripPositionTests: XCTestCase {
     }
 
     func testUnrotatedSelectionAvoidsResizeAndRotationHandleChrome() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 100, y: 200, width: 120, height: 60)
         )
         let harness = makeHarness(elements: [element])
@@ -157,7 +157,7 @@ final class SelectionActionStripPositionTests: XCTestCase {
     }
 
     func testAvoidanceBoundsContainsEveryHandleHitRect() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 100, y: 200, width: 120, height: 60)
         )
         let harness = makeHarness(elements: [element])
@@ -194,7 +194,7 @@ final class SelectionActionStripPositionTests: XCTestCase {
     }
 
     func testRotatedSelectionAvoidsPaintedBoundingBox() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 100, y: 200, width: 200, height: 50),
             rotation: .pi / 4
         )
@@ -333,19 +333,6 @@ final class SelectionActionStripPositionTests: XCTestCase {
         )
     }
 
-    private func makeElement(frame: CanvasRect, rotation: Double = 0) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Selected",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
-            frame: frame,
-            rotation: rotation
-        )
-    }
 
     private struct Harness {
         let canvasView: PKCanvasView

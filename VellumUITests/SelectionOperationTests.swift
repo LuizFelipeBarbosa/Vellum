@@ -7,9 +7,9 @@ import XCTest
 @MainActor
 final class SelectionOperationTests: XCTestCase {
     func testBoxedCaptureSelectsStrokeAndTextElement() throws {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: [element]
         )
 
@@ -23,7 +23,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testCommittedChromeRotationUsesSingleSelectedElementRotation() {
         let rotation = Double.pi / 3
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
             rotation: rotation
         )
@@ -39,11 +39,11 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testCommittedChromeRotationIsZeroForTwoSelectedElements() {
-        let first = makeElement(
+        let first = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 20, y: 20, width: 30, height: 30),
             rotation: Double.pi / 3
         )
-        let second = makeElement(
+        let second = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
             rotation: Double.pi / 4
         )
@@ -58,7 +58,7 @@ final class SelectionOperationTests: XCTestCase {
     func testCommittedChromeRotationIsZeroForStrokeOnlySelection() {
         let harness = makeHarness(
             strokes: [
-                makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
+                CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
             ],
             elements: []
         )
@@ -70,13 +70,13 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testCommittedChromeRotationIsZeroForElementAndStrokeSelection() {
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
             rotation: Double.pi / 3
         )
         let harness = makeHarness(
             strokes: [
-                makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
+                CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])
             ],
             elements: [element]
         )
@@ -115,7 +115,7 @@ final class SelectionOperationTests: XCTestCase {
     func testRotateCommitBecomesCommittedChromeRotationAndClearsLiveDelta() throws {
         let initialRotation = 0.2
         let rotationDelta = 0.37
-        let element = makeElement(
+        let element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30),
             rotation: initialRotation
         )
@@ -147,7 +147,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testSelectionSupportsStylingTruthTable() {
         let frame = CanvasRect(x: 60, y: 20, width: 30, height: 30)
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
         )
 
@@ -160,7 +160,7 @@ final class SelectionOperationTests: XCTestCase {
         shapeOnly.controller.selectElement(id: shape.id)
         XCTAssertTrue(shapeOnly.controller.selectionSupportsStyling)
 
-        let text = makeElement(frame: frame)
+        let text = CanvasFixtures.makeTextElement(frame: frame)
         let textOnly = makeHarness(strokes: [], elements: [text])
         textOnly.controller.selectElement(id: text.id)
         XCTAssertTrue(textOnly.controller.selectionSupportsStyling)
@@ -180,7 +180,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testBeginMoveDragHidesSelectedStrokeAndCreatesSnapshot() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         selectMixedContent(in: harness)
@@ -194,7 +194,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testBeginMoveDragSetsTransientOverrideFlagAndEndMoveDragClearsIt() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         let drawingChangeCounter = DrawingChangeCounter()
@@ -220,7 +220,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testBeginHandleDragSetsTransientOverrideFlagAndEndHandleDragClearsIt() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         let coordinator = PencilCanvasView.Coordinator(
@@ -241,7 +241,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testExternalDrawingChangeDuringDragClearsTransientOverrideFlag() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         let coordinator = PencilCanvasView.Coordinator(
@@ -260,7 +260,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testClearSelectionDuringDragClearsTransientOverrideFlag() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         let coordinator = PencilCanvasView.Coordinator(
@@ -278,9 +278,9 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testMoveCommitsStrokeAndElementAsOneUndoableTransaction() throws {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: [element]
         )
         selectMixedContent(in: harness)
@@ -318,8 +318,8 @@ final class SelectionOperationTests: XCTestCase {
 
     func testReorderSelectionUsesOneUndoAndRestoresOriginalPlacements() {
         let frame = CanvasRect(x: 60, y: 20, width: 30, height: 30)
-        let selected = makeElement(frame: frame)
-        let front = makeElement(frame: frame)
+        let selected = CanvasFixtures.makeTextElement(frame: frame)
+        let front = CanvasFixtures.makeTextElement(frame: frame)
         let originalElements = [selected, front].zOrderMaterialized()
         let harness = makeHarness(strokes: [], elements: originalElements)
         harness.controller.selectElement(id: selected.id)
@@ -347,7 +347,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testMaterializedLegacyHydrateKeepsScreenAndEffectiveZOrderAlignedAfterAppend() {
-        let legacyText = makeElement(
+        let legacyText = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 20, y: 20, width: 80, height: 40)
         )
         let legacyShape = makeShapeElement(
@@ -378,7 +378,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testMoveDragRestoresStrokeAndPreservesSingleUndoEntry() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         selectMixedContent(in: harness)
@@ -404,7 +404,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testZeroTranslationMoveDragRestoresStrokeWithoutUndoEntry() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         selectMixedContent(in: harness)
@@ -420,7 +420,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testHandleDragHidesThenRestoresAndTransformsSelectedStroke() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         selectMixedContent(in: harness)
@@ -445,7 +445,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testClearSelectionRestoresStrokeHiddenForMoveDrag() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         selectMixedContent(in: harness)
@@ -461,7 +461,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testExternalDrawingChangeDiscardsHiddenStrokeStateWithoutRestoringIt() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         selectMixedContent(in: harness)
@@ -477,7 +477,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testUndoOfCommittedMoveClearsSelectionViaSnapshotHook() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         harness.store.onSnapshotApplied = { [weak controller = harness.controller] in
@@ -500,9 +500,9 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testDeleteRemovesStrokeAndElementAsOneUndoableTransaction() {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: [element]
         )
         selectMixedContent(in: harness)
@@ -533,9 +533,9 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testDuplicateSelectsOffsetCopiesAndUsesOneUndoableTransaction() throws {
-        let element = makeElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
+        let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: [element]
         )
         selectMixedContent(in: harness)
@@ -575,7 +575,7 @@ final class SelectionOperationTests: XCTestCase {
     }
 
     func testDuplicatePreservesLayerPlacement() throws {
-        var element = makeElement(
+        var element = CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 60, y: 20, width: 30, height: 30)
         )
         element.layerPlacement = .aboveInk
@@ -592,7 +592,7 @@ final class SelectionOperationTests: XCTestCase {
 
     func testExternalDrawingChangeClearsSelection() {
         let harness = makeHarness(
-            strokes: [makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
+            strokes: [CanvasFixtures.makeStroke(locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)])],
             elements: []
         )
         harness.controller.beginCapture(at: CGPoint(x: 0, y: 0), mode: .boxed)
@@ -609,14 +609,14 @@ final class SelectionOperationTests: XCTestCase {
     func testOpenFreeformCaptureSelectsEnclosedStroke() throws {
         let harness = makeHarness(
             strokes: [
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [
                         CGPoint(x: 10, y: 10),
                         CGPoint(x: 20, y: 20),
                         CGPoint(x: 30, y: 18),
                     ]
                 ),
-                makeStroke(
+                CanvasFixtures.makeStroke(
                     locations: [CGPoint(x: 200, y: 200), CGPoint(x: 220, y: 220)]
                 ),
             ],
@@ -666,37 +666,7 @@ final class SelectionOperationTests: XCTestCase {
         )
     }
 
-    private func makeStroke(locations: [CGPoint]) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: CGSize(width: 4, height: 4),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
-    }
 
-    private func makeElement(frame: CanvasRect, rotation: Double = 0) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: "Selected",
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
-            frame: frame,
-            rotation: rotation
-        )
-    }
 
     private func makeShapeElement(frame: CanvasRect) -> CanvasElement {
         CanvasElement(

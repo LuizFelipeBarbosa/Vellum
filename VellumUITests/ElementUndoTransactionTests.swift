@@ -263,7 +263,7 @@ final class ElementUndoTransactionTests: XCTestCase {
     }
 
     func testDrawShapeTransactionUndoesAndRedoesAtomically() {
-        let originalStroke = makeStroke()
+        let originalStroke = CanvasFixtures.makeStroke(from: CGPoint(x: 10, y: 12), to: CGPoint(x: 110, y: 12))
         let canvasView = PKCanvasView()
         canvasView.drawing = PKDrawing(strokes: [originalStroke])
         let coordinator = PencilCanvasView.Coordinator(
@@ -653,7 +653,7 @@ final class ElementUndoTransactionTests: XCTestCase {
         let harness = makeSelectionController(for: store)
         // Diagonal, so the selection box clears the 12pt floor `endHandleDrag` clamps its scale
         // to: an untouched handle drag then really commits nothing.
-        let stroke = makeStroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 120, y: 120))
+        let stroke = CanvasFixtures.makeStroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 120, y: 120))
         harness.canvasView.drawing = PKDrawing(strokes: [stroke])
         selectEverything(with: harness.controller)
         XCTAssertEqual(harness.controller.selection?.strokeIndices.count, 1)
@@ -682,7 +682,7 @@ final class ElementUndoTransactionTests: XCTestCase {
         let (store, undoManager) = makeStore()
         let harness = makeSelectionController(for: store)
         harness.canvasView.drawing = PKDrawing(
-            strokes: [makeStroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 120, y: 120))]
+            strokes: [CanvasFixtures.makeStroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 120, y: 120))]
         )
         selectEverything(with: harness.controller)
 
@@ -715,7 +715,7 @@ final class ElementUndoTransactionTests: XCTestCase {
         let (store, undoManager) = makeStore()
         let harness = makeSelectionController(for: store)
         harness.canvasView.drawing = PKDrawing(
-            strokes: [makeStroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 120, y: 120))]
+            strokes: [CanvasFixtures.makeStroke(from: CGPoint(x: 20, y: 20), to: CGPoint(x: 120, y: 120))]
         )
         selectEverything(with: harness.controller)
         // In production the move and the transform commit on separate run-loop turns, so they are
@@ -812,16 +812,12 @@ final class ElementUndoTransactionTests: XCTestCase {
         controller.endCapture()
     }
 
+    /// Keyed by text rather than frame: this file identifies elements across undo steps by
+    /// their content, so every element shares one frame.
     private func makeElement(text: String) -> CanvasElement {
-        CanvasElement(
-            content: .text(
-                TextBoxContent(
-                    text: text,
-                    fontSize: 18,
-                    color: CodableColor(red: 0, green: 0, blue: 0)
-                )
-            ),
+        CanvasFixtures.makeTextElement(
             frame: CanvasRect(x: 10, y: 20, width: 100, height: 40),
+            text: text,
             layerPlacement: .aboveInk
         )
     }
@@ -855,33 +851,4 @@ final class ElementUndoTransactionTests: XCTestCase {
         )
     }
 
-    private func makeStroke(
-        from start: CGPoint = CGPoint(x: 10, y: 12),
-        to end: CGPoint = CGPoint(x: 110, y: 12)
-    ) -> PKStroke {
-        let points = [
-            PKStrokePoint(
-                location: start,
-                timeOffset: 0,
-                size: CGSize(width: 4, height: 4),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            ),
-            PKStrokePoint(
-                location: end,
-                timeOffset: 0.1,
-                size: CGSize(width: 4, height: 4),
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            ),
-        ]
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
-    }
 }

@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class PageReordererTests: XCTestCase {
     func testMovingFirstPageToSecondTranslatesStrokeByOnePageHeight() throws {
-        let original = makeStroke(
+        let original = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 20, y: 80),
                 CGPoint(x: 60, y: 120),
@@ -35,7 +35,7 @@ final class PageReordererTests: XCTestCase {
     }
 
     func testBoundaryStraddlingStrokeMovesWholeWithItsMidpointBand() throws {
-        let original = makeStroke(
+        let original = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 20, y: PageGeometry.a4.pageHeight - 40),
                 CGPoint(x: 60, y: PageGeometry.a4.pageHeight + 100),
@@ -65,7 +65,7 @@ final class PageReordererTests: XCTestCase {
     }
 
     func testElementUsesEffectiveBoundingBoxBandAndMovesVertically() throws {
-        let element = makeElement(
+        let element = CanvasFixtures.makeImageElement(
             frame: CanvasRect(
                 x: 90,
                 y: Double(PageGeometry.a4.pageHeight + 60),
@@ -95,7 +95,7 @@ final class PageReordererTests: XCTestCase {
     }
 
     func testPagesPermuteAndAttachmentIsNormalizedOntoNewFirstRow() {
-        let attachmentElement = makeElement(
+        let attachmentElement = CanvasFixtures.makeImageElement(
             frame: CanvasRect(x: 20, y: 30, width: 40, height: 50)
         )
         let firstID = UUID()
@@ -163,13 +163,13 @@ final class PageReordererTests: XCTestCase {
     }
 
     func testNoOpMovePreservesEveryInputValue() {
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 10, y: PageGeometry.a4.pageHeight + 20),
                 CGPoint(x: 30, y: PageGeometry.a4.pageHeight + 40),
             ]
         )
-        let element = makeElement(
+        let element = CanvasFixtures.makeImageElement(
             frame: CanvasRect(x: 10, y: 30, width: 40, height: 50)
         )
         let pages = makePages(count: 5)
@@ -194,13 +194,13 @@ final class PageReordererTests: XCTestCase {
 
     func testLetterGeometryTranslatesStrokeAndElementByLetterPageHeight() throws {
         let geometry = PageGeometry(portraitAspectRatio: 792.0 / 612.0)
-        let stroke = makeStroke(
+        let stroke = CanvasFixtures.makeStroke(
             locations: [
                 CGPoint(x: 20, y: 80),
                 CGPoint(x: 60, y: 120),
             ]
         )
-        let element = makeElement(
+        let element = CanvasFixtures.makeImageElement(
             frame: CanvasRect(x: 20, y: 40, width: 100, height: 80)
         )
 
@@ -229,42 +229,7 @@ final class PageReordererTests: XCTestCase {
         XCTAssertNotEqual(geometry.pageHeight, PageGeometry.a4.pageHeight)
     }
 
-    private func makeStroke(
-        locations: [CGPoint],
-        size: CGSize = CGSize(width: 4, height: 4)
-    ) -> PKStroke {
-        let points = locations.enumerated().map { index, location in
-            PKStrokePoint(
-                location: location,
-                timeOffset: TimeInterval(index) * 0.1,
-                size: size,
-                opacity: 1,
-                force: 1,
-                azimuth: 0,
-                altitude: .pi / 2
-            )
-        }
-        return PKStroke(
-            ink: PKInk(.pen, color: .black),
-            path: PKStrokePath(controlPoints: points, creationDate: Date())
-        )
-    }
 
-    private func makeElement(
-        frame: CanvasRect,
-        rotation: Double = 0
-    ) -> CanvasElement {
-        CanvasElement(
-            content: .image(
-                ImageContent(
-                    assetPath: "assets/image.jpg",
-                    originalPixelSize: CanvasSize(width: 100, height: 100)
-                )
-            ),
-            frame: frame,
-            rotation: rotation
-        )
-    }
 
     private func makePages(count: Int) -> [NotePage] {
         (0..<count).map { index in
