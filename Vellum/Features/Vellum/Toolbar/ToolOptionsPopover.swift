@@ -74,7 +74,7 @@ struct InkToolOptionsView: View {
                     .accessibilityValue("Level \(currentLevel)")
 
                 Capsule()
-                    .fill(config.color.swiftUIColor)
+                    .fill(displayedColor(config.color))
                     .frame(width: 34, height: strokePreviewHeight(for: config))
                     .frame(width: 38, height: 16)
                     .accessibilityHidden(true)

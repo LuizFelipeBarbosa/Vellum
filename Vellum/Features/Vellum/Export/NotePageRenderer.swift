@@ -14,7 +14,10 @@ enum NotePageRenderer {
         var pageCount: Int
         var geometry: PageGeometry = .a4
         var style: PageBackgroundStyle = .legacyDefault
+        /// Effective-paper appearance for ink adaptation and nil-tint paper color.
         var interfaceStyle: UIUserInterfaceStyle = .light
+        /// Surrounding UI appearance for PDF raster inversion, matching `PdfPagesLayer`.
+        var pdfInterfaceStyle: UIUserInterfaceStyle = .light
         var pdfPagesByBand: [Int: PDFPage] = [:]
         var pdfExpectedBands: Set<Int> = []
     }
@@ -72,7 +75,7 @@ enum NotePageRenderer {
                     pageRect: pageRect,
                     pageBounds: pageBounds,
                     geometry: content.geometry,
-                    interfaceStyle: content.interfaceStyle,
+                    pdfInterfaceStyle: content.pdfInterfaceStyle,
                     in: ctx
                 )
             }
@@ -262,7 +265,7 @@ enum NotePageRenderer {
         pageRect: CGRect,
         pageBounds: CGRect,
         geometry: PageGeometry,
-        interfaceStyle: UIUserInterfaceStyle,
+        pdfInterfaceStyle: UIUserInterfaceStyle,
         in ctx: CGContext
     ) {
         guard let pageRef = page.pageRef else { return }
@@ -293,7 +296,7 @@ enum NotePageRenderer {
             )
             rasterContext.drawPDFPage(pageRef)
         }
-        let renderedImage = interfaceStyle == .dark
+        let renderedImage = pdfInterfaceStyle == .dark
             ? PdfRasterAppearance.invertedPreservingHue(raster)
             : raster
 
@@ -302,7 +305,7 @@ enum NotePageRenderer {
         UIGraphicsPushContext(ctx)
         renderedImage.draw(
             in: fittedRect,
-            blendMode: interfaceStyle == .dark ? .screen : .multiply,
+            blendMode: pdfInterfaceStyle == .dark ? .screen : .multiply,
             alpha: 1
         )
         UIGraphicsPopContext()

@@ -434,6 +434,7 @@ private struct ThumbnailRowView: View {
                 colorScheme: colorScheme,
                 paperTint: content.style.paperTint
             )
+            content.pdfInterfaceStyle = colorScheme == .dark ? .dark : .light
             await store.requestImage(for: pageIndex, content: content)
         }
     }

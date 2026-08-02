@@ -4,6 +4,7 @@ import VellumCore
 
 struct FavoritesEditView: View {
     let store: ToolPreferencesStore
+    @Environment(\.inkDisplayStyle) private var inkDisplayStyle
     @State private var colorToAdd: Color = .black
 
     var body: some View {
@@ -25,7 +26,10 @@ struct FavoritesEditView: View {
 
                     HStack(spacing: 12) {
                         Circle()
-                            .fill(color.swiftUIColor)
+                            .fill(Color(InkAppearance.displayColor(
+                                for: color,
+                                style: inkDisplayStyle
+                            )))
                             .frame(width: 24, height: 24)
                             .overlay {
                                 Circle()
@@ -62,7 +66,10 @@ struct FavoritesEditView: View {
                 .accessibilityLabel("Color to add")
 
                 Button("Add") {
-                    store.addFavorite(CodableColor(UIColor(colorToAdd)))
+                    store.addFavorite(InkAppearance.storedColor(
+                        for: UIColor(colorToAdd),
+                        style: inkDisplayStyle
+                    ))
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Add color to favorites")
