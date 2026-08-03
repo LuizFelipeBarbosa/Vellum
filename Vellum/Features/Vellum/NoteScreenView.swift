@@ -2,6 +2,7 @@ import PDFKit
 import PencilKit
 import PhotosUI
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 import VellumCore
 
@@ -31,6 +32,13 @@ struct NoteScreenView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.displayScale) private var displayScale
+
+    private var inkDisplayStyle: UIUserInterfaceStyle {
+        InkAppearance.style(
+            colorScheme: colorScheme,
+            paperTint: model.note?.backgroundStyle.paperTint
+        )
+    }
 
     private var activeCanvasReference: NoteCanvasReference {
         paneContext.pane.canvasReference
@@ -404,6 +412,7 @@ struct NoteScreenView: View {
                 agentLineOverlay(size: geometry.size)
                 pageStatusCluster(size: geometry.size)
             }
+            .environment(\.inkDisplayStyle, inkDisplayStyle)
             .clipped()
             .onAppear {
                 canvasSize = geometry.size
@@ -498,6 +507,7 @@ struct NoteScreenView: View {
             },
             paneUndoManager: paneContext.pane.undoManager,
             isDrawingEnabled: selectedTool.usesDrawingGesture,
+            inkDisplayStyle: inkDisplayStyle,
             contentWidth: pageGeometry.contentWidth,
             contentHeight: pageState.contentHeight,
             topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + 16,

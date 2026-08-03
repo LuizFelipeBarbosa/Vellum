@@ -430,7 +430,11 @@ private struct ThumbnailRowView: View {
             )
         ) {
             var content = contentProvider()
-            content.interfaceStyle = colorScheme == .dark ? .dark : .light
+            content.interfaceStyle = InkAppearance.style(
+                colorScheme: colorScheme,
+                paperTint: content.style.paperTint
+            )
+            content.pdfInterfaceStyle = colorScheme == .dark ? .dark : .light
             await store.requestImage(for: pageIndex, content: content)
         }
     }

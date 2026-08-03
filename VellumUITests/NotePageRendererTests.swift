@@ -1307,6 +1307,7 @@ final class NotePageRendererTests: XCTestCase {
                 content: makeContent(
                     style: .blank,
                     interfaceStyle: .dark,
+                    pdfInterfaceStyle: .dark,
                     pdfPagesByBand: [0: pdfPage]
                 ),
                 pointSize: fullRenderPointSize
@@ -1349,6 +1350,7 @@ final class NotePageRendererTests: XCTestCase {
                 content: makeContent(
                     style: .blank,
                     interfaceStyle: .dark,
+                    pdfInterfaceStyle: .dark,
                     pdfPagesByBand: [0: pdfPage]
                 ),
                 pointSize: fullRenderPointSize
@@ -1365,6 +1367,43 @@ final class NotePageRendererTests: XCTestCase {
 
         XCTAssertGreaterThan(pixel.blue, pixel.red)
         XCTAssertGreaterThan(pixel.blue, pixel.green)
+    }
+
+    func testPdfInterfaceStyleAloneDrivesPdfInversionIndependentOfInterfaceStyle() throws {
+        let sourceSize = CGSize(width: 320, height: 320)
+        let pdfDocument = try PixelComparison.makeSolidPDFDocument(color: .blue, size: sourceSize)
+        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
+        let rendered = try PixelComparison.pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: .blank,
+                    pdfInterfaceStyle: .dark,
+                    pdfPagesByBand: [0: pdfPage]
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let lightReference = try PixelComparison.pixelBuffer(
+            for: render(
+                pageIndex: 0,
+                content: makeContent(
+                    style: .blank,
+                    pdfPagesByBand: [0: pdfPage]
+                ),
+                pointSize: fullRenderPointSize
+            )
+        )
+        let fittedRect = PageGeometry.a4.fittedRect(
+            forSourcePageSize: sourceSize,
+            pageIndex: 0
+        )
+        let samplePoint = CGPoint(x: fittedRect.midX, y: fittedRect.midY)
+        let pixel = rendered.pixel(atContentPoint: samplePoint)
+        let lightPixel = lightReference.pixel(atContentPoint: samplePoint)
+
+        XCTAssertTrue(pixel.differs(from: lightPixel))
+        XCTAssertGreaterThan(pixel.luminance, lightPixel.luminance)
     }
 
     func testVectorTreatmentStillYieldsFullBlueForExport() throws {
@@ -1505,6 +1544,7 @@ final class NotePageRendererTests: XCTestCase {
         geometry: PageGeometry = .a4,
         style: PageBackgroundStyle = .legacyDefault,
         interfaceStyle: UIUserInterfaceStyle = .light,
+        pdfInterfaceStyle: UIUserInterfaceStyle = .light,
         pdfPagesByBand: [Int: PDFPage] = [:]
     ) -> NotePageRenderer.Content {
         NotePageRenderer.Content(
@@ -1515,6 +1555,7 @@ final class NotePageRendererTests: XCTestCase {
             geometry: geometry,
             style: style,
             interfaceStyle: interfaceStyle,
+            pdfInterfaceStyle: pdfInterfaceStyle,
             pdfPagesByBand: pdfPagesByBand
         )
     }

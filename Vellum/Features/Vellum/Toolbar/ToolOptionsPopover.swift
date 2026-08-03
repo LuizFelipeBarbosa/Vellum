@@ -26,6 +26,8 @@ struct InkToolOptionsView: View {
     let tool: ToolID
     let store: ToolPreferencesStore
 
+    @Environment(\.inkDisplayStyle) private var inkDisplayStyle
+
     var body: some View {
         let config = tool.inkConfigKeyPath.map { store.preferences[keyPath: $0] }
             ?? store.preferences.pen
@@ -72,7 +74,7 @@ struct InkToolOptionsView: View {
                     .accessibilityValue("Level \(currentLevel)")
 
                 Capsule()
-                    .fill(config.color.swiftUIColor)
+                    .fill(displayedColor(config.color))
                     .frame(width: 34, height: strokePreviewHeight(for: config))
                     .frame(width: 38, height: 16)
                     .accessibilityHidden(true)
@@ -196,14 +198,24 @@ struct InkToolOptionsView: View {
         Binding(
             get: {
                 guard let keyPath = tool.inkConfigKeyPath else {
-                    return store.preferences.pen.color.swiftUIColor
+                    return displayedColor(store.preferences.pen.color)
                 }
-                return store.preferences[keyPath: keyPath].color.swiftUIColor
+                return displayedColor(store.preferences[keyPath: keyPath].color)
             },
             set: { color in
-                store.setColor(CodableColor(UIColor(color)), for: tool)
+                store.setColor(
+                    InkAppearance.storedColor(
+                        for: UIColor(color),
+                        style: inkDisplayStyle
+                    ),
+                    for: tool
+                )
             }
         )
+    }
+
+    private func displayedColor(_ color: CodableColor) -> Color {
+        Color(InkAppearance.displayColor(for: color, style: inkDisplayStyle))
     }
 
     private func strokePreviewHeight(for config: InkToolConfig) -> CGFloat {
@@ -295,6 +307,8 @@ struct EraserOptionsView: View {
 struct TextOptionsView: View {
     let store: ToolPreferencesStore
 
+    @Environment(\.inkDisplayStyle) private var inkDisplayStyle
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Text Options")
@@ -312,7 +326,14 @@ struct TextOptionsView: View {
 
                 Text("Aa")
                     .font(.system(size: store.preferences.text.fontSize))
-                    .foregroundStyle(store.preferences.text.color.swiftUIColor)
+                    .foregroundStyle(
+                        Color(
+                            InkAppearance.displayColor(
+                                for: store.preferences.text.color,
+                                style: inkDisplayStyle
+                            )
+                        )
+                    )
                     .frame(width: 54, height: 54)
                     .minimumScaleFactor(0.7)
                     .accessibilityHidden(true)
@@ -354,6 +375,8 @@ struct ColorSwatchGrid: View {
     let selectedColor: CodableColor
     let onSelect: (CodableColor) -> Void
 
+    @Environment(\.inkDisplayStyle) private var inkDisplayStyle
+
     private let columns = Array(
         repeating: GridItem(.flexible(), spacing: 10),
         count: 6
@@ -366,7 +389,14 @@ struct ColorSwatchGrid: View {
                     onSelect(swatch)
                 } label: {
                     Circle()
-                        .fill(swatch.swiftUIColor)
+                        .fill(
+                            Color(
+                                InkAppearance.displayColor(
+                                    for: swatch,
+                                    style: inkDisplayStyle
+                                )
+                            )
+                        )
                         .frame(width: 24, height: 24)
                         .overlay {
                             Circle()

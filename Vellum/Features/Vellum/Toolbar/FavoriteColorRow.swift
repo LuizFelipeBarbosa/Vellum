@@ -9,6 +9,8 @@ struct FavoriteColorRow: View {
     var onRequestOptions: () -> Void
     var onRequestFavoritesEditor: () -> Void
 
+    @Environment(\.inkDisplayStyle) private var inkDisplayStyle
+
     // Approximate height of everything in the vertical toolbar other than the
     // favorites strip itself: tools section (undo/redo, 6 tool buttons, insert,
     // paper options, collapse) + dividers + edit/options buttons + paddings.
@@ -73,7 +75,7 @@ struct FavoriteColorRow: View {
                 onRequestOptions()
             } label: {
                 Capsule()
-                    .fill(activeInkConfig.color.swiftUIColor)
+                    .fill(displayColor(activeInkConfig.color))
                     .frame(width: 28, height: strokeIndicatorHeight)
                     .frame(width: 32, height: 24)
                     .contentShape(Rectangle())
@@ -117,7 +119,7 @@ struct FavoriteColorRow: View {
             store.setColor(color, for: resolvedInkTool)
         } label: {
             Circle()
-                .fill(color.swiftUIColor)
+                .fill(displayColor(color))
                 .frame(width: 17, height: 17)
                 .overlay {
                     Circle()
@@ -138,5 +140,9 @@ struct FavoriteColorRow: View {
             }
             .accessibilityLabel("Remove from Favorites")
         }
+    }
+
+    private func displayColor(_ color: CodableColor) -> Color {
+        Color(InkAppearance.displayColor(for: color, style: inkDisplayStyle))
     }
 }

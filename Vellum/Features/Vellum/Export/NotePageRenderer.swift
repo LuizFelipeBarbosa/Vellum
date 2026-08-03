@@ -14,7 +14,10 @@ enum NotePageRenderer {
         var pageCount: Int
         var geometry: PageGeometry = .a4
         var style: PageBackgroundStyle = .legacyDefault
+        /// Effective-paper appearance for ink adaptation and nil-tint paper color.
         var interfaceStyle: UIUserInterfaceStyle = .light
+        /// Surrounding UI appearance for PDF raster inversion, matching `PdfPagesLayer`.
+        var pdfInterfaceStyle: UIUserInterfaceStyle = .light
         var pdfPagesByBand: [Int: PDFPage] = [:]
         var pdfExpectedBands: Set<Int> = []
     }
@@ -72,7 +75,7 @@ enum NotePageRenderer {
                     pageRect: pageRect,
                     pageBounds: pageBounds,
                     geometry: content.geometry,
-                    interfaceStyle: content.interfaceStyle,
+                    pdfInterfaceStyle: content.pdfInterfaceStyle,
                     in: ctx
                 )
             }
@@ -262,7 +265,7 @@ enum NotePageRenderer {
         pageRect: CGRect,
         pageBounds: CGRect,
         geometry: PageGeometry,
-        interfaceStyle: UIUserInterfaceStyle,
+        pdfInterfaceStyle: UIUserInterfaceStyle,
         in ctx: CGContext
     ) {
         guard let pageRef = page.pageRef else { return }
@@ -293,7 +296,7 @@ enum NotePageRenderer {
             )
             rasterContext.drawPDFPage(pageRef)
         }
-        let renderedImage = interfaceStyle == .dark
+        let renderedImage = pdfInterfaceStyle == .dark
             ? PdfRasterAppearance.invertedPreservingHue(raster)
             : raster
 
@@ -302,7 +305,7 @@ enum NotePageRenderer {
         UIGraphicsPushContext(ctx)
         renderedImage.draw(
             in: fittedRect,
-            blendMode: interfaceStyle == .dark ? .screen : .multiply,
+            blendMode: pdfInterfaceStyle == .dark ? .screen : .multiply,
             alpha: 1
         )
         UIGraphicsPopContext()
@@ -395,6 +398,7 @@ enum NotePageRenderer {
                 for: element,
                 pageRect: pageRect,
                 pageBounds: pageBounds,
+                interfaceStyle: interfaceStyle,
                 in: ctx
             )
         case .unknown:
@@ -471,7 +475,7 @@ enum NotePageRenderer {
         ctx.translateBy(x: 0, y: -pageRect.minY)
         ctx.addPath(path)
         ctx.setStrokeColor(
-            ShapeInkAppearance.displayColor(
+            InkAppearance.displayColor(
                 for: shapeContent.strokeColor,
                 style: interfaceStyle
             ).cgColor
@@ -488,16 +492,15 @@ enum NotePageRenderer {
         for element: CanvasElement,
         pageRect: CGRect,
         pageBounds: CGRect,
+        interfaceStyle: UIUserInterfaceStyle,
         in ctx: CGContext
     ) {
         guard element.drawnBoundingBox.intersects(pageRect) else { return }
 
         let grownFrame = growTextFrame(element.frame, textContent: textContent)
-        let color = UIColor(
-            red: CGFloat(textContent.color.red),
-            green: CGFloat(textContent.color.green),
-            blue: CGFloat(textContent.color.blue),
-            alpha: CGFloat(textContent.color.alpha)
+        let color = InkAppearance.displayColor(
+            for: textContent.color,
+            style: interfaceStyle
         )
         let attributedString = NSAttributedString(
             string: textContent.text,
