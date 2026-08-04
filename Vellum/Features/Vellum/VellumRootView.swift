@@ -23,10 +23,14 @@ struct VellumRootView: View {
                     switch model.screen {
                     case .library:
                         VellumLibraryView(model: model)
+                    case .today:
+                        VellumTodayView(model: model)
                     case .note:
                         NoteSplitContainerView(app: model)
                     case .graph:
                         VellumGraphView(model: model)
+                    case .tasks:
+                        VellumTasksView(model: model)
                     case .ask:
                         VellumAskView(model: model)
                     case .trash:
@@ -39,6 +43,8 @@ struct VellumRootView: View {
                     removal: .opacity
                 ))
             }
+
+            VellumGrainOverlay()
 
             if let toast = model.toast {
                 HStack(spacing: 14) {
@@ -64,6 +70,9 @@ struct VellumRootView: View {
             }
         }
         .preferredColorScheme(model.appearanceMode.colorScheme)
+        .environment(\.vellumGrain, model.feelGrain)
+        .environment(\.vellumHandwritingPreviews, model.feelHandwriting)
+        .environment(\.vellumWobble, model.feelWobble)
         .foregroundStyle(VellumTheme.ink)
         .tint(VellumTheme.accentDark)
         .task { await model.bootstrap() }

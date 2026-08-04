@@ -118,9 +118,7 @@ struct FavoriteColorRow: View {
         Button {
             store.setColor(color, for: resolvedInkTool)
         } label: {
-            Circle()
-                .fill(displayColor(color))
-                .frame(width: 17, height: 17)
+            VellumBlobDot(color: displayColor(color), size: 17)
                 .overlay {
                     Circle()
                         .stroke(

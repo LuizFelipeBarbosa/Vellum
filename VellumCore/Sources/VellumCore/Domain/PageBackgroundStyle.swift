@@ -75,7 +75,7 @@ extension PageBackgroundStyle {
 
     public static func patternInk(forTint tint: CodableColor, opacity: Double) -> CodableColor {
         CodableColor(
-            hex: isDarkTint(tint) ? "#E9E3D6" : "#26221B",
+            hex: isDarkTint(tint) ? "#EDE5D3" : "#2A2622",
             alpha: opacity
         )
     }

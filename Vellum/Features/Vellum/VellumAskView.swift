@@ -9,18 +9,29 @@ struct VellumAskView: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("ASKED ACROSS \(model.noteCount) SOURCES")
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(1.32)
-                        .foregroundStyle(VellumTheme.muted)
+                    HStack(spacing: 10) {
+                        Text("ASKED ACROSS \(model.noteCount) SOURCES")
+                            .font(.vellumMono(11))
+                            .tracking(1.5)
+                            .foregroundStyle(VellumTheme.muted)
+
+                        VellumDashedRule()
+                            .stroke(
+                                VellumTheme.ink(0.2),
+                                style: StrokeStyle(lineWidth: 1.5, dash: [5, 5])
+                            )
+                            .frame(height: 1.5)
+                    }
 
                     if model.askScreen.phase == .idle {
                         idleContent
                     } else {
                         Text(model.askScreen.question)
-                            .font(.vellumNewsreader(28, italic: true))
+                            .font(.vellumSans(34, italic: true))
                             .foregroundStyle(VellumTheme.ink)
-                            .padding(.top, 10)
+                            .lineSpacing(8.5)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 14)
 
                         if model.askScreen.phase == .thinking {
                             VellumThinkingView(sourceCount: model.noteCount)
@@ -35,7 +46,7 @@ struct VellumAskView: View {
                     inputArea
                 }
                 .frame(minHeight: 740, alignment: .top)
-                .padding(.top, 44)
+                .padding(.top, 38)
                 .padding(.bottom, 30)
             }
             .scrollIndicators(.hidden)
@@ -48,44 +59,43 @@ struct VellumAskView: View {
     private var idleContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("What would you like to know?")
-                .font(.vellumNewsreader(28, italic: true))
+                .font(.vellumSans(34, italic: true))
                 .foregroundStyle(VellumTheme.ink)
-                .padding(.top, 10)
+                .lineSpacing(8.5)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 14)
             Text("Answers are grounded in your notes, PDFs, decks, and recordings — every claim cites its page.")
-                .font(.system(size: 14))
-                .foregroundStyle(VellumTheme.muted)
-                .padding(.top, 8)
-            VStack(spacing: 10) {
+                .font(.vellumSans(17))
+                .foregroundStyle(VellumTheme.mutedDark)
+                .lineSpacing(8.5)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+            VStack(spacing: 11) {
                 ForEach(Array(model.askScreen.suggested.prefix(3).enumerated()), id: \.offset) { _, suggestion in
-                    Button {
+                    VellumSuggestionCard(suggestion: suggestion) {
                         model.askScreen.ask(suggestion)
-                    } label: {
-                        Text(suggestion)
-                            .font(.system(size: 15))
-                            .foregroundStyle(VellumTheme.bodyInk)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 14)
-                            .background(VellumTheme.card, in: RoundedRectangle(cornerRadius: 14))
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(VellumTheme.ink(0.14), lineWidth: 1))
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .padding(.top, 26)
+            .padding(.top, 24)
         }
     }
 
     private func errorContent(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(message.isEmpty ? "The answer couldn’t be completed. Please try again." : message)
-                .font(.vellumNewsreader(16, italic: true))
+                .font(.vellumSans(19, italic: true))
                 .foregroundStyle(VellumTheme.mutedDark)
-                .lineSpacing(9.6)
-                .padding(.top, 22)
-            VellumFollowUpChip(label: "Try again") {
+                .lineSpacing(10)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 24)
+            Button {
                 model.askScreen.ask(model.askScreen.question)
+            } label: {
+                Text("Try again")
+                    .font(.vellumSans(16.5, weight: .semibold))
             }
+            .buttonStyle(VellumPillButtonStyle(.outline))
             .padding(.top, 18)
         }
     }
@@ -99,30 +109,39 @@ struct VellumAskView: View {
                         get: { model.askScreen.inputText },
                         set: { model.askScreen.inputText = $0 }
                     ),
-                    prompt: Text("Follow up…")
-                        .font(.vellumNewsreader(16, italic: true))
-                        .foregroundStyle(VellumTheme.mutedCount)
+                    prompt: Text("ask anything…")
+                        .font(.vellumSans(19, italic: true))
+                        .foregroundStyle(VellumTheme.muted)
                 )
-                .font(.vellumNewsreader(16, italic: true))
+                .font(.vellumSans(19, italic: true))
                 .foregroundStyle(VellumTheme.ink)
                 .textFieldStyle(.plain)
                 .onSubmit(submitFreeQuestion)
 
                 Button(action: submitFreeQuestion) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(VellumTheme.paper)
-                        .frame(width: 36, height: 36)
-                        .background(VellumTheme.ink, in: Circle())
+                    ZStack {
+                        VellumBlobDot(color: VellumTheme.ink, size: 54)
+                        Text("↑")
+                            .font(.vellumSans(22, weight: .semibold))
+                            .foregroundStyle(VellumTheme.paper)
+                    }
+                    .frame(width: 54, height: 54)
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.leading, 20)
-            .padding(.trailing, 8)
-            .padding(.vertical, 8)
-            .background(VellumTheme.popover, in: Capsule())
-            .overlay(Capsule().stroke(VellumTheme.ink(0.14), lineWidth: 1))
-            .shadow(color: VellumTheme.ink(0.08), radius: 8, y: 4)
+            .padding(.leading, 22)
+            .padding(.trailing, 9)
+            .padding(.vertical, 9)
+            .background(VellumTheme.popover, in: OrganicPillShape(variant: 0))
+            .background {
+                OrganicPillShape(variant: 0)
+                    .fill(VellumTheme.ink(0.12))
+                    .offset(x: 4, y: 5)
+            }
+            .overlay {
+                OrganicPillShape(variant: 0)
+                    .strokeBorder(VellumTheme.ink(0.32), lineWidth: 1.5)
+            }
 
             Text(footerText)
                 .font(.vellumMono(11))
@@ -148,23 +167,76 @@ struct VellumAskView: View {
     }
 }
 
+private struct VellumDashedRule: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
+    }
+}
+
+private struct VellumSuggestionCard: View {
+    let suggestion: String
+    let action: () -> Void
+
+    var body: some View {
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: 26,
+            bottomLeadingRadius: 10,
+            bottomTrailingRadius: 28,
+            topTrailingRadius: 10,
+            style: .continuous
+        )
+
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Text("?")
+                    .font(.vellumCaveat(26))
+                    .foregroundStyle(VellumTheme.accent)
+
+                Text(suggestion)
+                    .font(.vellumSans(18))
+                    .foregroundStyle(VellumTheme.bodyInk)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text("→")
+                    .font(.vellumSans(20))
+                    .foregroundStyle(VellumTheme.accent)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+            .background(VellumTheme.card, in: shape)
+            .background {
+                shape
+                    .fill(VellumTheme.ink(0.1))
+                    .offset(x: 3, y: 4)
+            }
+            .overlay {
+                shape.strokeBorder(VellumTheme.ink(0.3), lineWidth: 1.5)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct VellumThinkingView: View {
     let sourceCount: Int
     @State private var pulsing = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(VellumTheme.accent)
-                .frame(width: 8, height: 8)
-                .opacity(pulsing ? 1 : 0.35)
+        HStack(spacing: 11) {
+            VellumBlobDot(color: VellumTheme.accent, size: 11)
+                .scaleEffect(pulsing ? 1 : 0.82)
+                .opacity(pulsing ? 1 : 0.4)
             Text("reading \(sourceCount) sources…")
         }
-        .font(.vellumNewsreader(15, italic: true))
+        .font(.vellumSans(19, italic: true))
         .foregroundStyle(VellumTheme.muted)
         .padding(.top, 26)
         .onAppear {
-            withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+            withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
                 pulsing = true
             }
         }
@@ -210,7 +282,7 @@ private struct VellumAnswerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VellumFlowLayout(spacing: 0, lineSpacing: 8) {
+            VellumFlowLayout(spacing: 0, lineSpacing: 11) {
                 ForEach(tokens) { token in
                     if let number = token.citationNumber {
                         Button {
@@ -220,60 +292,43 @@ private struct VellumAnswerView: View {
                             openCitation(citation)
                         } label: {
                             Text("\(number)")
-                                .font(.system(size: 10.5, weight: .semibold))
+                                .font(.vellumMono(11, weight: .semibold))
                                 .foregroundStyle(VellumTheme.accentDark)
-                                .frame(width: 17, height: 17)
-                                .background(VellumTheme.accent(0.14), in: Circle())
-                                .padding(.horizontal, 3)
+                                .frame(width: 22, height: 22)
+                                .background(VellumTheme.accent(0.16), in: Circle())
+                                .overlay {
+                                    Circle()
+                                        .stroke(VellumTheme.accent(0.5), lineWidth: 1.5)
+                                }
+                                .padding(.horizontal, 4)
                         }
                         .buttonStyle(.plain)
                     } else {
-                        Text(token.text)
-                            .font(.system(size: 16, weight: token.emphasized ? .semibold : .regular))
-                            .foregroundStyle(VellumTheme.bodyInk)
+                        VellumAnswerTextToken(token: token)
                     }
                 }
             }
             .padding(.top, 22)
 
             if !answer.citations.isEmpty {
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: 11) {
                     ForEach(answer.citations) { citation in
                         Button {
                             openCitation(citation)
                         } label: {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("\(citation.index) · \(citation.noteType.rawValue.uppercased())")
-                                    .font(.vellumMono(10, weight: .semibold))
-                                    .foregroundStyle(VellumTheme.accent)
-                                Text(citation.noteTitle)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(VellumTheme.ink)
-                                    .padding(.top, 5)
-                                    .lineLimit(1)
-                                Text("\"\(citation.excerpt)\"")
-                                    .font(.system(size: 11.5))
-                                    .foregroundStyle(VellumTheme.muted)
-                                    .padding(.top, 2)
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 12)
-                            .background(VellumTheme.card, in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(VellumTheme.ink(0.1), lineWidth: 1))
+                            VellumCitationCard(citation: citation)
                         }
                         .buttonStyle(.plain)
                     }
                     if answer.citations.count == 1 { Spacer() }
                 }
-                .padding(.top, 26)
+                .padding(.top, 24)
             }
 
             if !answer.followUps.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(Array(answer.followUps.enumerated()), id: \.offset) { _, followUp in
-                        VellumFollowUpChip(label: followUp) {
+                VellumFlowLayout(spacing: 9, lineSpacing: 9) {
+                    ForEach(Array(answer.followUps.enumerated()), id: \.offset) { index, followUp in
+                        VellumFollowUpChip(label: followUp, variant: index % 4) {
                             model.askScreen.ask(followUp)
                         }
                     }
@@ -299,18 +354,84 @@ private struct VellumAnswerToken: Identifiable {
     let citationNumber: Int?
 }
 
+private struct VellumAnswerTextToken: View {
+    let token: VellumAnswerToken
+
+    var body: some View {
+        Text(token.text)
+            .font(.vellumSans(19.5, weight: token.emphasized ? .semibold : .regular))
+            .foregroundStyle(VellumTheme.bodyInk)
+            .background(alignment: .bottom) {
+                if token.emphasized {
+                    Rectangle()
+                        .fill(VellumTheme.highlight.opacity(0.55))
+                        .frame(height: 8)
+                }
+            }
+    }
+}
+
+private struct VellumCitationCard: View {
+    let citation: Citation
+
+    var body: some View {
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: 18,
+            bottomLeadingRadius: 8,
+            bottomTrailingRadius: 20,
+            topTrailingRadius: 8,
+            style: .continuous
+        )
+
+        VStack(alignment: .leading, spacing: 0) {
+            Text("\(citation.index) · \(citation.noteType.rawValue.uppercased())")
+                .font(.vellumMono(10, weight: .semibold))
+                .tracking(0.8)
+                .foregroundStyle(VellumTheme.accentDark)
+            Text(citation.noteTitle)
+                .font(.vellumSans(16, weight: .semibold))
+                .foregroundStyle(VellumTheme.ink)
+                .padding(.top, 5)
+                .lineLimit(1)
+            Text("\"\(citation.excerpt)\"")
+                .font(.vellumCaveat(17))
+                .foregroundStyle(VellumTheme.muted)
+                .padding(.top, 2)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 13)
+        .background(VellumTheme.card, in: shape)
+        .background {
+            shape
+                .fill(VellumTheme.ink(0.1))
+                .offset(x: 2, y: 3)
+        }
+        .overlay {
+            shape.strokeBorder(VellumTheme.ink(0.28), lineWidth: 1.5)
+        }
+    }
+}
+
 private struct VellumFollowUpChip: View {
     let label: String
+    let variant: Int
     let action: () -> Void
 
     var body: some View {
+        let shape = OrganicPillShape(variant: variant)
+
         Button(action: action) {
             Text(label)
-                .font(.system(size: 13))
+                .font(.vellumSans(16.5))
                 .foregroundStyle(VellumTheme.bodyMuted)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .overlay(Capsule().stroke(VellumTheme.ink(0.16), lineWidth: 1))
+                .padding(.horizontal, 19)
+                .frame(minHeight: 48)
+                .background(VellumTheme.field, in: shape)
+                .overlay {
+                    shape.strokeBorder(VellumTheme.ink(0.32), lineWidth: 1.5)
+                }
         }
         .buttonStyle(.plain)
     }

@@ -67,7 +67,7 @@ struct PaneGhostView: View {
             )
         case .refused:
             Text("No room to split")
-                .font(.vellumNewsreader(15, weight: .semibold))
+                .font(.vellumSans(15, weight: .semibold))
                 .foregroundStyle(VellumTheme.muted)
         }
     }

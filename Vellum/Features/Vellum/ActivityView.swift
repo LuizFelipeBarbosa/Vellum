@@ -13,44 +13,18 @@ struct ActivityView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        List {
-            if events.isEmpty && !isLoading {
-                ContentUnavailableView(
-                    "No Activity",
-                    systemImage: "clock",
-                    description: Text("Changes and analysis actions will appear here.")
-                )
-                .listRowBackground(Color.clear)
-            } else {
-                ForEach(events) { event in
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: symbol(for: event.kind))
-                            .foregroundStyle(.tint)
-                            .frame(width: 24)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(event.message)
-                            Text(event.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
+        ZStack {
+            sheetCard
+                .padding(28)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             if isLoading {
                 ProgressView()
             }
         }
-        .navigationTitle("Activity")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Done") { dismiss() }
-            }
-        }
+        .toolbar(.hidden, for: .navigationBar)
+        .presentationBackground(.clear)
         .task {
             await loadActivity()
         }
@@ -64,6 +38,100 @@ struct ActivityView: View {
                 Text(errorMessage ?? "An unknown error occurred.")
             }
         )
+    }
+
+    private var sheetCard: some View {
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: 30,
+            bottomLeadingRadius: 12,
+            bottomTrailingRadius: 32,
+            topTrailingRadius: 12,
+            style: .continuous
+        )
+
+        return VStack(spacing: 0) {
+            header
+            ActivityDashedLine(color: VellumTheme.ink(0.2))
+                .frame(height: 1.5)
+            activityContent
+        }
+        .frame(maxWidth: 560, maxHeight: 660)
+        .background(VellumTheme.card, in: shape)
+        .background {
+            shape
+                .fill(VellumTheme.ink(0.28))
+                .offset(x: 8, y: 10)
+        }
+        .overlay {
+            shape.strokeBorder(VellumTheme.ink(0.4), lineWidth: 1.5)
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            Text("What Vellum did")
+                .font(.vellumSans(28, weight: .semibold))
+
+            Spacer(minLength: 14)
+
+            Button {
+                dismiss()
+            } label: {
+                Text("done")
+                    .font(.vellumSans(16.5, weight: .semibold))
+                    .foregroundStyle(Color(hex: "#FDF8EE"))
+                    .padding(.horizontal, 20)
+                    .frame(minHeight: 46)
+                    .background {
+                        ActivityPillChrome()
+                    }
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 20)
+        .padding(.bottom, 14)
+    }
+
+    @ViewBuilder
+    private var activityContent: some View {
+        if events.isEmpty && !isLoading {
+            Text("No marks yet — Vellum’s activity will appear here.")
+                .font(.vellumCaveat(20))
+                .foregroundStyle(VellumTheme.muted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+        } else {
+            ScrollView {
+                if !events.isEmpty {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                            ActivityEventRow(
+                                event: event,
+                                color: color(for: event.kind)
+                            )
+
+                            if index < events.count - 1 {
+                                ActivityDashedLine(color: VellumTheme.ink(0.14))
+                                    .frame(height: 1.5)
+                            }
+                        }
+
+                        Text("nothing happens without leaving a mark")
+                            .font(.vellumCaveat(20))
+                            .foregroundStyle(VellumTheme.mutedCount)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 16)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 14)
+                    .padding(.bottom, 24)
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
     }
 
     private func loadActivity() async {
@@ -82,28 +150,19 @@ struct ActivityView: View {
         }
     }
 
-    private func symbol(for kind: ActivityKind) -> String {
+    private func color(for kind: ActivityKind) -> Color {
         switch kind {
-        case .noteCreated: "doc.badge.plus"
-        case .noteUpdated: "square.and.pencil"
-        case .noteDeleted: "trash"
-        case .noteTrashed: "trash"
-        case .noteRestored: "arrow.uturn.backward.circle"
-        case .notePurged: "trash.slash"
-        case .analysisRequested: "sparkles"
-        case .proposalAccepted: "checkmark.circle"
-        case .proposalRejected: "xmark.circle"
-        case .proposalMarkedStale: "clock.badge.exclamationmark"
-        case .noteFiledToSpace: "folder"
-        case .notesLinked: "link"
-        case .taskExtracted: "checklist"
-        case .taskCompleted: "checkmark.square"
-        case .entityExtracted: "person.text.rectangle"
-        case .spaceCreated: "folder.badge.plus"
-        case .spaceDeleted: "folder.badge.minus"
-        case .questionAnswered: "questionmark.bubble"
-        case .workspaceSeeded: "shippingbox"
-        case .unknown: "questionmark.circle"
+        case .noteFiledToSpace, .spaceCreated, .spaceDeleted:
+            VellumTheme.spaceTeal
+        case .notesLinked, .questionAnswered:
+            VellumTheme.highlight
+        case .entityExtracted, .noteCreated, .noteUpdated, .noteRestored, .workspaceSeeded:
+            VellumTheme.spaceGreen
+        case .taskExtracted, .taskCompleted, .proposalAccepted, .proposalRejected,
+             .proposalMarkedStale, .analysisRequested:
+            VellumTheme.accent
+        case .noteDeleted, .noteTrashed, .notePurged, .unknown:
+            VellumTheme.muted
         }
     }
 
@@ -114,5 +173,67 @@ struct ActivityView: View {
                 if !isPresented { errorMessage = nil }
             }
         )
+    }
+}
+
+private struct ActivityEventRow: View {
+    let event: ActivityEvent
+    let color: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VellumBlobDot(color: color, size: 10)
+                .padding(.top, 7)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(event.message)
+                    .font(.vellumSans(17))
+                    .foregroundStyle(VellumTheme.ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(event.createdAt, style: .relative)
+                    .font(.vellumMono(11))
+                    .foregroundStyle(VellumTheme.muted)
+            }
+        }
+        .padding(.vertical, 13)
+    }
+}
+
+private struct ActivityPillChrome: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
+    @ViewBuilder
+    var body: some View {
+        if vellumWobble {
+            layers(for: OrganicPillShape(variant: 0))
+        } else {
+            layers(for: Capsule())
+        }
+    }
+
+    private func layers<S: InsettableShape>(for shape: S) -> some View {
+        ZStack {
+            shape.fill(VellumTheme.ink)
+            shape.strokeBorder(VellumTheme.ink, lineWidth: 1.5)
+        }
+    }
+}
+
+private struct ActivityDashedLine: View {
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            Path { path in
+                let y = geometry.size.height / 2
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addLine(to: CGPoint(x: geometry.size.width, y: y))
+            }
+            .stroke(
+                color,
+                style: StrokeStyle(lineWidth: 1.5, dash: [5, 5])
+            )
+        }
     }
 }

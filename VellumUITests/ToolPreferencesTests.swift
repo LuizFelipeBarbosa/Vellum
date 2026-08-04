@@ -27,9 +27,9 @@ final class ToolPreferencesTests: XCTestCase {
         original.selection = SelectionConfig(mode: .boxed)
         original.text = TextConfig(fontSize: 22, color: CodableColor(hex: "#AABBCC"))
         original.favorites = [
-            CodableColor(hex: "#D07B3A"),
-            CodableColor(hex: "#4E6E58"),
-            CodableColor(hex: "#26221B"),
+            CodableColor(hex: "#A6392C"),
+            CodableColor(hex: "#5E6B23"),
+            CodableColor(hex: "#2A2622"),
         ]
         original.lastSelectedTool = .pencil
         original.isToolbarCollapsed = true

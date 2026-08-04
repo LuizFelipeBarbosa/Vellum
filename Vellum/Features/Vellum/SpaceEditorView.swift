@@ -26,7 +26,7 @@ struct SpaceEditorView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 24) {
                 Text(title)
-                    .font(.vellumNewsreader(24, weight: .semibold))
+                    .font(.vellumSans(24, weight: .semibold))
                     .foregroundStyle(VellumTheme.ink)
 
                 TextField("Name", text: $name)

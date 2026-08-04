@@ -54,9 +54,7 @@ struct NoteHeaderChips: View {
 
     private var leftCluster: some View {
         chip(
-            strokeColor: isTitleFocused
-                ? VellumTheme.accent(0.4)
-                : VellumTheme.ink(0.12)
+            strokeColor: isTitleFocused ? VellumTheme.accent(0.4) : nil
         ) {
             HStack(spacing: 10) {
                 Button {
@@ -77,7 +75,7 @@ struct NoteHeaderChips: View {
 
                 TextField("Untitled", text: $model.title)
                     .textFieldStyle(.plain)
-                    .font(.vellumNewsreader(18, weight: .medium))
+                    .font(.vellumSans(18.5, weight: .medium))
                     .foregroundStyle(VellumTheme.ink)
                     .frame(minWidth: 90, idealWidth: 160, maxWidth: 200)
                     .frame(minHeight: 44)
@@ -129,7 +127,7 @@ struct NoteHeaderChips: View {
 
     private var rightCluster: some View {
         chip {
-            HStack(spacing: 14) {
+            HStack(spacing: 10) {
                 Button {
                     Task { await model.organize() }
                 } label: {
@@ -142,6 +140,18 @@ struct NoteHeaderChips: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .font(.vellumSans(16.5, weight: .medium))
+                .foregroundStyle(VellumTheme.ink)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    VellumTheme.highlight.opacity(0.24),
+                    in: OrganicPillShape(variant: 1, smallRadius: 8)
+                )
+                .overlay {
+                    OrganicPillShape(variant: 1, smallRadius: 8)
+                        .strokeBorder(VellumTheme.ink(0.24), lineWidth: 1)
+                }
                 .frame(minHeight: 44)
                 .disabled(model.isAnalyzing || model.note == nil)
 
@@ -155,6 +165,9 @@ struct NoteHeaderChips: View {
                     Text("Share")
                 }
                 .buttonStyle(.plain)
+                .font(.vellumSans(16.5, weight: .medium))
+                .foregroundStyle(VellumTheme.mutedDark)
+                .padding(.horizontal, 4)
                 .frame(minHeight: 44)
                 .disabled(model.isLoading || model.note == nil)
 
@@ -183,7 +196,6 @@ struct NoteHeaderChips: View {
                 .accessibilityLabel("More options")
                 .frame(minHeight: 44)
             }
-            .font(.system(size: 13))
             .foregroundStyle(VellumTheme.mutedDark)
         }
     }
@@ -191,31 +203,29 @@ struct NoteHeaderChips: View {
     @ViewBuilder
     private var spaceChip: some View {
         if let space = model.space {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(VellumTheme.color(for: space.color))
-                    .frame(width: 6, height: 6)
-                Text(space.name)
-                    .lineLimit(1)
-            }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(VellumTheme.accentDark)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(VellumTheme.accent(0.12), in: Capsule())
+            spaceBadge(
+                space.name,
+                color: VellumTheme.color(for: space.color)
+            )
         } else {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(VellumTheme.muted)
-                    .frame(width: 6, height: 6)
-                Text("Unfiled")
-                    .lineLimit(1)
-            }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(VellumTheme.mutedDark)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(VellumTheme.muted.opacity(0.12), in: Capsule())
+            spaceBadge("Unfiled", color: VellumTheme.spaceGray)
+        }
+    }
+
+    private func spaceBadge(_ name: String, color: Color) -> some View {
+        let shape = OrganicPillShape(variant: 2, smallRadius: 10)
+        return HStack(spacing: 6) {
+            VellumBlobDot(color: color, size: 7)
+            Text(name)
+                .lineLimit(1)
+        }
+        .font(.vellumSans(14, weight: .medium))
+        .foregroundStyle(VellumTheme.ink)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.16), in: shape)
+        .overlay {
+            shape.strokeBorder(color.opacity(0.4), lineWidth: 1)
         }
     }
 
@@ -237,21 +247,16 @@ struct NoteHeaderChips: View {
     }
 
     private func chip<Content: View>(
-        strokeColor: Color = VellumTheme.ink(0.12),
+        strokeColor: Color? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
             .padding(.horizontal, 14)
             .padding(.vertical, 2)
-            .background(
-                VellumTheme.popover,
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .vellumFloatingChrome(
+                .pill(variant: 0),
+                strokeColor: strokeColor
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(strokeColor, lineWidth: 1)
-            }
-            .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
     }
 
     private func notifyClusterFramesIfNeeded() {

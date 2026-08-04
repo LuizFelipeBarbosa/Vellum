@@ -19,7 +19,7 @@ struct NoteAgentLine: View {
                             .offset(y: 1)
                     }
             }
-            .font(.vellumNewsreader(13.5, italic: true))
+            .font(.vellumSans(13.5, italic: true))
             .foregroundStyle(VellumTheme.muted)
         }
         .buttonStyle(.plain)
@@ -50,7 +50,7 @@ struct NoteSuggestionsOverlay: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Suggestions")
-                        .font(.vellumNewsreader(22, weight: .semibold))
+                        .font(.vellumSans(22, weight: .semibold))
                     Text("\(model.pendingProposals.count) ready to review")
                         .font(.vellumMono(10.5))
                         .foregroundStyle(VellumTheme.mutedCount)
@@ -87,7 +87,7 @@ struct NoteSuggestionsOverlay: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(proposal.title)
-                    .font(.vellumNewsreader(16, weight: .semibold))
+                    .font(.vellumSans(16, weight: .semibold))
                     .foregroundStyle(VellumTheme.ink)
                 Spacer()
                 Text("\(Int((proposal.confidence * 100).rounded()))%")

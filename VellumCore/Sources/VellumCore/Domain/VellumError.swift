@@ -3,6 +3,7 @@ import Foundation
 public enum VellumError: Error, Equatable, Sendable, LocalizedError {
     case noteNotFound(UUID)
     case spaceNotFound(UUID)
+    case taskNotFound(UUID)
     case invalidSubspaceNesting
     case corruptManifest(UUID)
     case unsupportedSchemaVersion(found: Int, supported: Int)
@@ -17,6 +18,8 @@ public enum VellumError: Error, Equatable, Sendable, LocalizedError {
             "Note \(id.uuidString) was not found."
         case .spaceNotFound(let id):
             "Space \(id.uuidString) was not found."
+        case .taskNotFound(let id):
+            "Task \(id.uuidString) was not found."
         case .invalidSubspaceNesting:
             "Subspaces cannot contain their own subspaces."
         case .corruptManifest(let id):

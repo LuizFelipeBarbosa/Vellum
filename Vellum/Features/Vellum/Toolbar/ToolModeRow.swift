@@ -40,7 +40,7 @@ struct ModeToggleRow<Mode: Hashable>: View {
                     HStack(spacing: 6) {
                         Image(systemName: option.systemImage)
                         Text(option.label)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.vellumSans(13, weight: .medium))
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -49,7 +49,10 @@ struct ModeToggleRow<Mode: Hashable>: View {
             .foregroundStyle(isSelected ? VellumTheme.accentDark : VellumTheme.mutedDark)
             .background(
                 isSelected ? VellumTheme.accent(0.11) : .clear,
-                in: RoundedRectangle(cornerRadius: axis == .vertical ? 6 : 8)
+                in: OrganicPillShape(
+                    variant: 0,
+                    smallRadius: axis == .vertical ? 6 : 8
+                )
             )
         }
         .buttonStyle(.plain)

@@ -255,6 +255,26 @@ public actor WorkspaceService {
         }
     }
 
+    @discardableResult
+    public func setTaskDone(_ taskID: UUID, isDone: Bool) async throws -> TaskItem {
+        guard var task = try await tasks.list().first(where: { $0.id == taskID }) else {
+            throw VellumError.taskNotFound(taskID)
+        }
+        guard task.isDone != isDone else { return task }
+
+        task.isDone = isDone
+        task.completedAt = isDone ? Date() : nil
+        try await tasks.save(task)
+        if isDone {
+            try await log(
+                noteID: task.noteID,
+                kind: .taskCompleted,
+                message: "Completed task '\(task.text)'."
+            )
+        }
+        return task
+    }
+
     public func activityDigest(since: Date) async throws -> ActivityDigest {
         let events = try await activityRepository.list(noteID: nil)
             .filter { $0.createdAt >= since }

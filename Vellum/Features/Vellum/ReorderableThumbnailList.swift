@@ -484,8 +484,12 @@ private struct ThumbnailRowView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay {
             if pageIndex == currentPageIndex {
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(VellumTheme.accent, lineWidth: 2)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(VellumTheme.accent(0.14))
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(VellumTheme.ink, lineWidth: 2)
+                }
             } else {
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(VellumTheme.ink(0.10), lineWidth: 1)

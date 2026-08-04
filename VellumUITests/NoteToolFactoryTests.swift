@@ -64,7 +64,7 @@ final class NoteToolFactoryTests: XCTestCase {
             let keyPath = try XCTUnwrap(toolID.inkConfigKeyPath)
             preferences[keyPath: keyPath] = InkToolConfig(
                 style: style,
-                color: CodableColor(hex: "#26221B"),
+                color: CodableColor(hex: "#2A2622"),
                 width: 999
             )
             let tool = try XCTUnwrap(
@@ -92,9 +92,9 @@ final class NoteToolFactoryTests: XCTestCase {
         XCTAssertEqual(try rgbaComponents(of: pen.color.cgColor).alpha, 1, accuracy: 0.001)
     }
 
-    func testDefaultFavoritesContainsTwelveUniqueEntries() {
-        XCTAssertEqual(ToolPreferences.defaultFavorites.count, 12)
-        XCTAssertEqual(Set(ToolPreferences.defaultFavorites).count, 12)
+    func testDefaultFavoritesContainsThreeUniqueEntries() {
+        XCTAssertEqual(ToolPreferences.defaultFavorites.count, 3)
+        XCTAssertEqual(Set(ToolPreferences.defaultFavorites).count, 3)
     }
 
     func testValidStylesReturnsDocumentedLists() {

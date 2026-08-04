@@ -96,7 +96,7 @@ struct NoteScreenView: View {
                     )
                 ]
             )
-            .background(VellumTheme.paper)
+            .background(VellumTheme.canvasBackdrop)
             .task { await establishCanvasWiring() }
             .onDisappear {
                 // The only thing breaking the model -> closure -> model cycle.

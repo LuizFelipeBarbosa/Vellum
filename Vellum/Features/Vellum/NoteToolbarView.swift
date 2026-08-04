@@ -50,15 +50,7 @@ struct NoteToolbarView: View {
         .buttonStyle(.plain)
         .font(.system(size: 18, weight: .medium))
         .foregroundStyle(VellumTheme.mutedDark)
-        .background(
-            VellumTheme.popover,
-            in: RoundedRectangle(cornerRadius: 22)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(VellumTheme.ink(0.12), lineWidth: 1)
-        }
-        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+        .vellumFloatingChrome(.pill(variant: 1))
         .popover(item: $activeOptionsTool, arrowEdge: arrowEdge) { tool in
             ToolOptionsPopover(tool: tool, store: store)
         }
@@ -143,14 +135,22 @@ struct NoteToolbarView: View {
             Button {
                 canvasReference.canvasView?.undoManager?.undo()
             } label: {
-                Image(systemName: "arrow.uturn.backward")
+                toolbarItemLabel(
+                    systemImage: "arrow.uturn.backward",
+                    title: "Undo",
+                    captionFont: .vellumMono(9)
+                )
             }
             .accessibilityLabel("Undo")
 
             Button {
                 canvasReference.canvasView?.undoManager?.redo()
             } label: {
-                Image(systemName: "arrow.uturn.forward")
+                toolbarItemLabel(
+                    systemImage: "arrow.uturn.forward",
+                    title: "Redo",
+                    captionFont: .vellumMono(9)
+                )
             }
             .accessibilityLabel("Redo")
 
@@ -180,8 +180,7 @@ struct NoteToolbarView: View {
                 }
                 .disabled(onInsertFile == nil)
             } label: {
-                Image(systemName: "plus.circle")
-                    .frame(width: 24, height: 24)
+                quietActionLabel(systemImage: "plus.circle")
             }
             .accessibilityLabel("Insert")
 
@@ -265,8 +264,7 @@ struct NoteToolbarView: View {
                 }
             }
         } label: {
-            Image(systemName: collapseSystemImage)
-                .frame(width: 24, height: 24)
+            quietActionLabel(systemImage: collapseSystemImage)
         }
         .accessibilityLabel(
             store.preferences.isToolbarCollapsed ? "Expand toolbar" : "Collapse toolbar"
@@ -284,6 +282,38 @@ struct NoteToolbarView: View {
         case .right:
             store.preferences.isToolbarCollapsed ? "chevron.left" : "chevron.right"
         }
+    }
+
+    @ViewBuilder
+    private func toolbarItemLabel(
+        systemImage: String,
+        title: String,
+        captionFont: Font
+    ) -> some View {
+        if isVertical {
+            Image(systemName: systemImage)
+                .frame(width: 24, height: 24)
+        } else {
+            VStack(spacing: 2) {
+                Image(systemName: systemImage)
+                    .frame(width: 24, height: 20)
+                Text(title)
+                    .font(captionFont)
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 32)
+        }
+    }
+
+    private func quietActionLabel(systemImage: String) -> some View {
+        let shape = OrganicPillShape(variant: 3, smallRadius: 8)
+        return Image(systemName: systemImage)
+            .frame(width: 24, height: 24)
+            .padding(3)
+            .background(VellumTheme.paper(0.45), in: shape)
+            .overlay {
+                shape.strokeBorder(VellumTheme.ink(0.18), lineWidth: 1)
+            }
     }
 
     private func systemImage(for tool: ToolID) -> String {

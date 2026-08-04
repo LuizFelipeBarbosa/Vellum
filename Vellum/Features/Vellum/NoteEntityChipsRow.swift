@@ -24,11 +24,7 @@ struct NoteEntityChipsRow: View {
                         .foregroundStyle(VellumTheme.bodyMuted)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 5)
-                        .background(VellumTheme.popover, in: Capsule())
-                        .overlay {
-                            Capsule().stroke(VellumTheme.ink(0.13), lineWidth: 1)
-                        }
-                        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+                        .vellumFloatingChrome(.pill(variant: 0))
                     }
                     .buttonStyle(.plain)
                 }

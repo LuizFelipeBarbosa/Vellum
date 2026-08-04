@@ -505,7 +505,7 @@ enum NotePageRenderer {
         let attributedString = NSAttributedString(
             string: textContent.text,
             attributes: [
-                .font: newsreaderFont(size: CGFloat(textContent.fontSize)),
+                .font: vellumSansFont(size: CGFloat(textContent.fontSize)),
                 .foregroundColor: color,
             ]
         )
@@ -535,7 +535,7 @@ enum NotePageRenderer {
         let attributedString = NSAttributedString(
             string: textContent.text,
             attributes: [
-                .font: newsreaderFont(size: CGFloat(textContent.fontSize)),
+                .font: vellumSansFont(size: CGFloat(textContent.fontSize)),
             ]
         )
         let insetWidth = max(CGFloat(frame.width) - 12, 0)
@@ -553,17 +553,12 @@ enum NotePageRenderer {
         )
     }
 
-    private static func newsreaderFont(size: CGFloat) -> UIFont {
-        let candidates = ["Newsreader", "Newsreader16pt-Regular", "Newsreader-Regular"]
+    private static func vellumSansFont(size: CGFloat) -> UIFont {
+        let candidates = ["Karla", "Karla-Regular"]
         if let font = candidates.lazy.compactMap({ UIFont(name: $0, size: size) }).first {
             return font
         }
-
-        let systemFont = UIFont.systemFont(ofSize: size, weight: .regular)
-        guard let descriptor = systemFont.fontDescriptor.withDesign(.serif) else {
-            return systemFont
-        }
-        return UIFont(descriptor: descriptor, size: size)
+        return UIFont.systemFont(ofSize: size, weight: .regular)
     }
 
     private static func cgRect(_ rect: CanvasRect) -> CGRect {

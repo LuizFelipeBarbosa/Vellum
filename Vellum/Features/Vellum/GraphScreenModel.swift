@@ -26,6 +26,7 @@ final class GraphScreenModel {
 
     var snapshot: GraphSnapshot?
     var positions: [GraphNodeID: CGPoint] = [:]
+    var spaceColors: [UUID: SpaceColor] = [:]
     var selectedNodeID: GraphNodeID?
 
     init(container: AppContainer) {
@@ -33,13 +34,18 @@ final class GraphScreenModel {
     }
 
     func refresh() async {
-        guard let refreshedSnapshot = try? await container.graph.snapshot() else { return }
+        async let snapshotResult = try? container.graph.snapshot()
+        async let spacesResult = try? container.spaces.list()
+
+        guard let refreshedSnapshot = await snapshotResult else { return }
         snapshot = refreshedSnapshot
         positions = GraphLayout.positions(
             nodes: refreshedSnapshot.nodes,
             edges: refreshedSnapshot.edges,
             in: CGSize(width: 1194, height: 700)
         )
+        let spaces = await spacesResult ?? []
+        spaceColors = Dictionary(uniqueKeysWithValues: spaces.map { ($0.id, $0.color) })
 
         let availableIDs = Set(refreshedSnapshot.nodes.map(\.id))
         if selectedNodeID.map({ availableIDs.contains($0) }) != true {

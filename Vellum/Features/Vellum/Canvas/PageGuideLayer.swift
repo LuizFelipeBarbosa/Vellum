@@ -221,12 +221,7 @@ struct PageTrackerBadge: View {
                 .padding(.vertical, 8)
         }
         .buttonStyle(.plain)
-        .background(VellumTheme.popover, in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(VellumTheme.ink(0.12), lineWidth: 1)
-        }
-        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+        .vellumFloatingChrome(.pill(variant: 3))
     }
 }
 
@@ -244,11 +239,6 @@ struct ZoomResetPill: View {
                 .padding(.vertical, 8)
         }
         .buttonStyle(.plain)
-        .background(VellumTheme.popover, in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(VellumTheme.ink(0.12), lineWidth: 1)
-        }
-        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+        .vellumFloatingChrome(.pill(variant: 0))
     }
 }
