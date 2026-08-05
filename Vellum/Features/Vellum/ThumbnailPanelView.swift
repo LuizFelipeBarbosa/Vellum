@@ -3,6 +3,7 @@ import VellumCore
 
 struct ThumbnailPanelView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.vellumWobble) private var vellumWobble
     @State private var pendingDeleteIndex: Int?
 
     let store: PageThumbnailStore
@@ -68,7 +69,7 @@ struct ThumbnailPanelView: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
                 .background {
-                    OrganicPillShape(variant: 1, smallRadius: 10)
+                    OrganicPillShape(variant: 1, smallRadius: 10, isOrganic: vellumWobble)
                         .stroke(
                             VellumTheme.ink(0.35),
                             style: StrokeStyle(

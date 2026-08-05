@@ -136,50 +136,231 @@ extension EnvironmentValues {
 struct OrganicPillShape: InsettableShape {
     let variant: Int
     let smallRadius: CGFloat
+    let isOrganic: Bool
     private var insetAmount: CGFloat = 0
 
-    init(variant: Int = 0, smallRadius: CGFloat = 20) {
+    init(variant: Int = 0, smallRadius: CGFloat = 20, isOrganic: Bool = true) {
         self.variant = variant
         self.smallRadius = smallRadius
+        self.isOrganic = isOrganic
     }
 
     func path(in rect: CGRect) -> Path {
         let bounds = rect.insetBy(dx: insetAmount, dy: insetAmount)
         guard bounds.width > 0, bounds.height > 0 else { return Path() }
 
-        let small = max(
-            0,
-            [smallRadius - insetAmount, bounds.width / 2, bounds.height / 2].min() ?? 0
-        )
-        let firstLarge = CGSize(width: bounds.height * 0.52, height: bounds.height * 0.44)
-        let secondLarge = CGSize(width: bounds.height * 0.48, height: bounds.height * 0.50)
-        let smallCorner = CGSize(width: small, height: small)
+        if isOrganic {
+            let small = max(
+                0,
+                [smallRadius - insetAmount, bounds.width / 2, bounds.height / 2].min() ?? 0
+            )
+            let firstLarge = CGSize(width: bounds.height * 0.52, height: bounds.height * 0.44)
+            let secondLarge = CGSize(width: bounds.height * 0.48, height: bounds.height * 0.50)
+            let smallCorner = CGSize(width: small, height: small)
 
-        let corners: (CGSize, CGSize, CGSize, CGSize)
-        switch ((variant % 4) + 4) % 4 {
-        case 0:
-            corners = (firstLarge, smallCorner, secondLarge, smallCorner)
-        case 1:
-            corners = (smallCorner, firstLarge, smallCorner, secondLarge)
-        case 2:
-            corners = (secondLarge, smallCorner, firstLarge, smallCorner)
-        default:
-            corners = (smallCorner, secondLarge, smallCorner, firstLarge)
+            let corners: (CGSize, CGSize, CGSize, CGSize)
+            switch ((variant % 4) + 4) % 4 {
+            case 0:
+                corners = (firstLarge, smallCorner, secondLarge, smallCorner)
+            case 1:
+                corners = (smallCorner, firstLarge, smallCorner, secondLarge)
+            case 2:
+                corners = (secondLarge, smallCorner, firstLarge, smallCorner)
+            default:
+                corners = (smallCorner, secondLarge, smallCorner, firstLarge)
+            }
+
+            return vellumRoundedPath(
+                in: bounds,
+                topLeft: corners.0,
+                topRight: corners.1,
+                bottomRight: corners.2,
+                bottomLeft: corners.3
+            )
+        } else {
+            let r = min(smallRadius, bounds.height / 2, bounds.width / 2)
+            return RoundedRectangle(cornerRadius: r, style: .continuous)
+                .path(in: bounds)
         }
-
-        return vellumRoundedPath(
-            in: bounds,
-            topLeft: corners.0,
-            topRight: corners.1,
-            bottomRight: corners.2,
-            bottomLeft: corners.3
-        )
     }
 
     func inset(by amount: CGFloat) -> some InsettableShape {
         var shape = self
         shape.insetAmount += amount
         return shape
+    }
+}
+
+struct VellumOrganicRectangle: InsettableShape {
+    let topLeading: CGFloat
+    let bottomLeading: CGFloat
+    let bottomTrailing: CGFloat
+    let topTrailing: CGFloat
+    let straightRadius: CGFloat
+    let isOrganic: Bool
+    private var insetAmount: CGFloat = 0
+
+    init(
+        topLeading: CGFloat,
+        bottomLeading: CGFloat,
+        bottomTrailing: CGFloat,
+        topTrailing: CGFloat,
+        straightRadius: CGFloat,
+        isOrganic: Bool
+    ) {
+        self.topLeading = topLeading
+        self.bottomLeading = bottomLeading
+        self.bottomTrailing = bottomTrailing
+        self.topTrailing = topTrailing
+        self.straightRadius = straightRadius
+        self.isOrganic = isOrganic
+    }
+
+    func path(in rect: CGRect) -> Path {
+        if isOrganic {
+            return UnevenRoundedRectangle(
+                topLeadingRadius: topLeading,
+                bottomLeadingRadius: bottomLeading,
+                bottomTrailingRadius: bottomTrailing,
+                topTrailingRadius: topTrailing,
+                style: .continuous
+            )
+            .inset(by: insetAmount)
+            .path(in: rect)
+        }
+        return RoundedRectangle(cornerRadius: straightRadius, style: .continuous)
+            .inset(by: insetAmount)
+            .path(in: rect)
+    }
+
+    func inset(by amount: CGFloat) -> some InsettableShape {
+        var shape = self
+        shape.insetAmount += amount
+        return shape
+    }
+}
+
+struct VellumDashedRule: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        }
+    }
+}
+
+struct VellumPillChrome: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
+    let fill: Color
+    let border: Color
+    let shadow: Color
+    let shadowOffset: CGSize
+    let variant: Int
+
+    init(
+        fill: Color,
+        border: Color,
+        shadow: Color = .clear,
+        shadowOffset: CGSize = .zero,
+        variant: Int = 0
+    ) {
+        self.fill = fill
+        self.border = border
+        self.shadow = shadow
+        self.shadowOffset = shadowOffset
+        self.variant = variant
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if vellumWobble {
+            layers(for: OrganicPillShape(variant: variant))
+        } else {
+            layers(for: Capsule())
+        }
+    }
+
+    private func layers<S: InsettableShape>(for shape: S) -> some View {
+        ZStack {
+            shape
+                .fill(shadow)
+                .offset(x: shadowOffset.width, y: shadowOffset.height)
+            shape.fill(fill)
+            shape.strokeBorder(border, lineWidth: 1.5)
+        }
+    }
+}
+
+struct VellumSheetCard<Content: View>: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
+    let title: String
+    let onDone: () -> Void
+    let content: Content
+
+    init(title: String, onDone: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.onDone = onDone
+        self.content = content()
+    }
+
+    var body: some View {
+        let shape = VellumOrganicRectangle(
+            topLeading: 30,
+            bottomLeading: 12,
+            bottomTrailing: 32,
+            topTrailing: 12,
+            straightRadius: 22,
+            isOrganic: vellumWobble
+        )
+
+        return VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                Text(title)
+                    .font(.vellumSans(28, weight: .semibold))
+
+                Spacer(minLength: 14)
+
+                Button(action: onDone) {
+                    Text("done")
+                        .font(.vellumSans(16.5, weight: .semibold))
+                        .foregroundStyle(VellumTheme.paper)
+                        .padding(.horizontal, 20)
+                        .frame(minHeight: 46)
+                        .background {
+                            VellumPillChrome(
+                                fill: VellumTheme.ink,
+                                border: VellumTheme.ink
+                            )
+                        }
+                        .contentShape(OrganicPillShape(variant: 0, isOrganic: vellumWobble))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 14)
+
+            VellumDashedRule()
+                .stroke(
+                    VellumTheme.ink(0.2),
+                    style: StrokeStyle(lineWidth: 1.5, dash: [5, 5])
+                )
+                .frame(height: 1.5)
+
+            content
+        }
+        .frame(maxWidth: 560, maxHeight: 660)
+        .background(VellumTheme.card, in: shape)
+        .background {
+            shape
+                .fill(VellumTheme.ink(0.28))
+                .offset(x: 8, y: 10)
+        }
+        .overlay {
+            shape.strokeBorder(VellumTheme.ink(0.4), lineWidth: 1.5)
+        }
     }
 }
 

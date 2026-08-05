@@ -27,6 +27,21 @@ struct VellumTodayView: View {
         .padding(.horizontal, 30)
         .padding(.top, 26)
         .background(VellumTheme.paper)
+        .alert(
+            "Vellum",
+            isPresented: Binding(
+                get: { model.today.errorMessage != nil },
+                set: { isPresented in
+                    if !isPresented { model.today.errorMessage = nil }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                model.today.errorMessage = nil
+            }
+        } message: {
+            Text(model.today.errorMessage ?? "An unknown error occurred.")
+        }
         .task { await model.today.refresh() }
     }
 
@@ -217,11 +232,13 @@ private struct TodayRecentNoteCard: View {
 }
 
 private struct TodayEntityChip: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let entity: TodayLooseThread
     let select: () -> Void
 
     var body: some View {
-        let shape = OrganicPillShape(variant: 0)
+        let shape = OrganicPillShape(variant: 0, isOrganic: vellumWobble)
 
         Button(action: select) {
             HStack(spacing: 8) {
@@ -344,25 +361,23 @@ private struct TodayTaskRow: View {
 }
 
 private struct TodayTaskCheckbox: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let isDone: Bool
 
     var body: some View {
-        ZStack {
-            TodayAsymmetricRoundedRectangle(
-                topLeading: 9,
-                topTrailing: 5,
-                bottomTrailing: 10,
-                bottomLeading: 4
-            )
-            .fill(VellumTheme.card)
+        let shape = VellumOrganicRectangle(
+            topLeading: 9,
+            bottomLeading: 4,
+            bottomTrailing: 10,
+            topTrailing: 5,
+            straightRadius: 6,
+            isOrganic: vellumWobble
+        )
 
-            TodayAsymmetricRoundedRectangle(
-                topLeading: 9,
-                topTrailing: 5,
-                bottomTrailing: 10,
-                bottomLeading: 4
-            )
-            .stroke(VellumTheme.ink, lineWidth: 2)
+        ZStack {
+            shape.fill(VellumTheme.card)
+            shape.stroke(VellumTheme.ink, lineWidth: 2)
 
             if isDone {
                 Text("✓")
@@ -377,15 +392,19 @@ private struct TodayTaskCheckbox: View {
 }
 
 private struct TodayFromNotesCard: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let excerpt: TodayNoteExcerpt
     let open: () -> Void
 
     var body: some View {
-        let shape = TodayAsymmetricRoundedRectangle(
+        let shape = VellumOrganicRectangle(
             topLeading: 10,
-            topTrailing: 26,
+            bottomLeading: 28,
             bottomTrailing: 10,
-            bottomLeading: 28
+            topTrailing: 26,
+            straightRadius: 14,
+            isOrganic: vellumWobble
         )
 
         VStack(alignment: .leading, spacing: 0) {
@@ -465,45 +484,5 @@ private struct TodayTwoColumnLayout: Layout {
             anchor: .topLeading,
             proposal: ProposedViewSize(width: rightWidth, height: bounds.height)
         )
-    }
-}
-
-private struct TodayAsymmetricRoundedRectangle: Shape {
-    let topLeading: CGFloat
-    let topTrailing: CGFloat
-    let bottomTrailing: CGFloat
-    let bottomLeading: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let maximumRadius = min(rect.width, rect.height) / 2
-        let topLeading = min(topLeading, maximumRadius)
-        let topTrailing = min(topTrailing, maximumRadius)
-        let bottomTrailing = min(bottomTrailing, maximumRadius)
-        let bottomLeading = min(bottomLeading, maximumRadius)
-
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX + topLeading, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX - topTrailing, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + topTrailing),
-            control: CGPoint(x: rect.maxX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - bottomTrailing))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX - bottomTrailing, y: rect.maxY),
-            control: CGPoint(x: rect.maxX, y: rect.maxY)
-        )
-        path.addLine(to: CGPoint(x: rect.minX + bottomLeading, y: rect.maxY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX, y: rect.maxY - bottomLeading),
-            control: CGPoint(x: rect.minX, y: rect.maxY)
-        )
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeading))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + topLeading, y: rect.minY),
-            control: CGPoint(x: rect.minX, y: rect.minY)
-        )
-        path.closeSubpath()
-        return path
     }
 }

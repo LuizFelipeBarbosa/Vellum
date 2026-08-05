@@ -2,6 +2,7 @@ import SwiftUI
 import VellumCore
 
 struct VellumSidebarView: View {
+    @Environment(\.vellumWobble) private var vellumWobble
     @Bindable var model: VellumAppModel
     @State private var showingActivity = false
     @State private var showingSettings = false
@@ -102,7 +103,7 @@ struct VellumSidebarView: View {
     }
 
     private var askButton: some View {
-        let shape = OrganicPillShape(variant: 1)
+        let shape = OrganicPillShape(variant: 1, isOrganic: vellumWobble)
 
         return Button(action: model.goAskIdle) {
             HStack(spacing: 10) {
@@ -183,10 +184,12 @@ struct VellumSidebarView: View {
                     .foregroundStyle(VellumTheme.mutedDark)
                     .frame(width: 26, height: 26)
                     .overlay {
-                        OrganicPillShape(variant: 2, smallRadius: 9)
+                        OrganicPillShape(variant: 2, smallRadius: 9, isOrganic: vellumWobble)
                             .strokeBorder(VellumTheme.ink(0.3), lineWidth: 1.5)
                     }
-                    .contentShape(OrganicPillShape(variant: 2, smallRadius: 9))
+                    .contentShape(
+                        OrganicPillShape(variant: 2, smallRadius: 9, isOrganic: vellumWobble)
+                    )
             }
             .buttonStyle(.plain)
             .accessibilityLabel("New Space")
@@ -233,10 +236,12 @@ struct VellumSidebarView: View {
                 .foregroundStyle(VellumTheme.mutedDark)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .overlay {
-                    OrganicPillShape(variant: 0, smallRadius: 16)
+                    OrganicPillShape(variant: 0, smallRadius: 16, isOrganic: vellumWobble)
                         .strokeBorder(VellumTheme.ink(0.26), lineWidth: 1.5)
                 }
-                .contentShape(OrganicPillShape(variant: 0, smallRadius: 16))
+                .contentShape(
+                    OrganicPillShape(variant: 0, smallRadius: 16, isOrganic: vellumWobble)
+                )
                 .buttonStyle(.plain)
                 .accessibilityLabel("Settings")
 
@@ -248,10 +253,12 @@ struct VellumSidebarView: View {
                 .foregroundStyle(VellumTheme.mutedDark)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .overlay {
-                    OrganicPillShape(variant: 1, smallRadius: 16)
+                    OrganicPillShape(variant: 1, smallRadius: 16, isOrganic: vellumWobble)
                         .strokeBorder(VellumTheme.ink(0.26), lineWidth: 1.5)
                 }
-                .contentShape(OrganicPillShape(variant: 1, smallRadius: 16))
+                .contentShape(
+                    OrganicPillShape(variant: 1, smallRadius: 16, isOrganic: vellumWobble)
+                )
                 .buttonStyle(.plain)
             }
         }
@@ -286,7 +293,7 @@ struct VellumSidebarView: View {
 
     private func spaceRow(_ listing: SpaceListing, variant: Int) -> some View {
         let selected = model.library.selectedSpaceID == listing.space.id
-        let shape = OrganicPillShape(variant: variant)
+        let shape = OrganicPillShape(variant: variant, isOrganic: vellumWobble)
 
         return Button {
             model.library.selectedSpaceID = selected ? nil : listing.space.id
@@ -340,6 +347,8 @@ struct VellumSidebarView: View {
 }
 
 private struct VellumSidebarNavRow: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let id: String
     let label: String
     let count: String
@@ -355,7 +364,7 @@ private struct VellumSidebarNavRow: View {
     }
 
     var body: some View {
-        let shape = OrganicPillShape(variant: variant)
+        let shape = OrganicPillShape(variant: variant, isOrganic: vellumWobble)
 
         Button(action: activate) {
             HStack {

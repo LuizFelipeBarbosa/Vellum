@@ -3,12 +3,23 @@ import VellumCore
 
 /// Tabs down the trailing edge of the canvas, one per note that links here.
 struct NoteBacklinksRail: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let backlinks: [Backlink]
     let onOpen: (UUID) -> Void
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 10) {
             ForEach(backlinks, id: \.sourceNoteID) { backlink in
+                let shape = VellumOrganicRectangle(
+                    topLeading: 10,
+                    bottomLeading: 10,
+                    bottomTrailing: 0,
+                    topTrailing: 0,
+                    straightRadius: 10,
+                    isOrganic: vellumWobble
+                )
+
                 Button {
                     onOpen(backlink.sourceNoteID)
                 } label: {
@@ -26,17 +37,10 @@ struct NoteBacklinksRail: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         VellumTheme.card,
-                        in: UnevenRoundedRectangle(
-                            topLeadingRadius: 10,
-                            bottomLeadingRadius: 10
-                        )
+                        in: shape
                     )
                     .overlay {
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: 10,
-                            bottomLeadingRadius: 10
-                        )
-                        .stroke(VellumTheme.ink(0.14), lineWidth: 1)
+                        shape.stroke(VellumTheme.ink(0.14), lineWidth: 1)
                     }
                     .shadow(color: VellumTheme.ink(0.06), radius: 3, x: -2, y: 2)
                 }

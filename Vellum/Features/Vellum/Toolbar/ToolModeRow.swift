@@ -2,6 +2,8 @@ import SwiftUI
 import VellumCore
 
 struct ModeToggleRow<Mode: Hashable>: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     struct Option {
         let mode: Mode
         let label: String
@@ -49,10 +51,7 @@ struct ModeToggleRow<Mode: Hashable>: View {
             .foregroundStyle(isSelected ? VellumTheme.accentDark : VellumTheme.mutedDark)
             .background(
                 isSelected ? VellumTheme.accent(0.11) : .clear,
-                in: OrganicPillShape(
-                    variant: 0,
-                    smallRadius: axis == .vertical ? 6 : 8
-                )
+                in: OrganicPillShape(variant: 0, smallRadius: axis == .vertical ? 6 : 8, isOrganic: vellumWobble)
             )
         }
         .buttonStyle(.plain)

@@ -301,20 +301,21 @@ final class VellumAppModel {
             await split.closeAll()
         }
 
+        let wasAlreadyOnScreen = screen == newScreen
         if screen != newScreen {
             screen = newScreen
         }
         if newScreen == .graph {
             await graphScreen.refresh()
         }
-        if newScreen == .today {
-            await today.refresh()
-        }
-        if newScreen == .tasks {
-            await tasksScreen.refresh()
-        }
         if newScreen == .trash {
             await trashScreen.refresh()
+        }
+        if wasAlreadyOnScreen && newScreen == .today {
+            await today.refresh()
+        }
+        if wasAlreadyOnScreen && newScreen == .tasks {
+            await tasksScreen.refresh()
         }
     }
 

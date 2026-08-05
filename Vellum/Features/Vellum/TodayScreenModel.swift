@@ -39,6 +39,7 @@ final class TodayScreenModel {
     private var noteTitlesByID: [UUID: String] = [:]
     private var workspaceNoteCount = 0
 
+    var errorMessage: String?
     private(set) var digestSubline: String?
     private(set) var recentNotes: [TodayRecentNote] = []
     private(set) var looseThreads: [TodayLooseThread] = []
@@ -105,8 +106,15 @@ final class TodayScreenModel {
     }
 
     func toggleTask(id: UUID, isDone: Bool) async {
-        _ = try? await container.workspace.setTaskDone(id, isDone: isDone)
-        await refresh()
+        do {
+            try await container.workspace.setTaskDone(id, isDone: isDone)
+            errorMessage = nil
+            await refresh()
+        } catch {
+            let toggleErrorMessage = error.localizedDescription
+            await refresh()
+            errorMessage = toggleErrorMessage
+        }
     }
 
     private func updateNotes(_ summaries: [NoteSummary], relativeTo now: Date) {

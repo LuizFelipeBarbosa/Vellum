@@ -6,71 +6,14 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            sheetCard
-                .padding(28)
+            VellumSheetCard(title: "Settings", onDone: { dismiss() }) {
+                settingsContent
+            }
+            .padding(28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .toolbar(.hidden, for: .navigationBar)
         .presentationBackground(.clear)
-    }
-
-    private var sheetCard: some View {
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 30,
-            bottomLeadingRadius: 12,
-            bottomTrailingRadius: 32,
-            topTrailingRadius: 12,
-            style: .continuous
-        )
-
-        return VStack(spacing: 0) {
-            header
-            SettingsDashedLine(color: VellumTheme.ink(0.2))
-                .frame(height: 1.5)
-            settingsContent
-        }
-        .frame(maxWidth: 560, maxHeight: 660)
-        .background(VellumTheme.card, in: shape)
-        .background {
-            shape
-                .fill(VellumTheme.ink(0.28))
-                .offset(x: 8, y: 10)
-        }
-        .overlay {
-            shape.strokeBorder(VellumTheme.ink(0.4), lineWidth: 1.5)
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 14) {
-            Text("Settings")
-                .font(.vellumSans(28, weight: .semibold))
-
-            Spacer(minLength: 14)
-
-            Button {
-                dismiss()
-            } label: {
-                Text("done")
-                    .font(.vellumSans(16.5, weight: .semibold))
-                    .foregroundStyle(Color(hex: "#FDF8EE"))
-                    .padding(.horizontal, 20)
-                    .frame(minHeight: 46)
-                    .background {
-                        SettingsPillChrome(
-                            fillColor: VellumTheme.ink,
-                            borderColor: VellumTheme.ink,
-                            shadowColor: .clear,
-                            variant: 0
-                        )
-                    }
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 20)
-        .padding(.bottom, 14)
     }
 
     private var settingsContent: some View {
@@ -129,13 +72,13 @@ struct SettingsView: View {
         } label: {
             Text(mode.label)
                 .font(.vellumSans(17, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? Color(hex: "#FDF8EE") : VellumTheme.ink)
+                .foregroundStyle(isSelected ? VellumTheme.paper : VellumTheme.ink)
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .background {
-                    SettingsPillChrome(
-                        fillColor: isSelected ? VellumTheme.ink : .clear,
-                        borderColor: isSelected ? VellumTheme.ink : VellumTheme.ink(0.28),
-                        shadowColor: isSelected ? VellumTheme.ink(0.3) : .clear,
+                    VellumPillChrome(
+                        fill: isSelected ? VellumTheme.ink : .clear,
+                        border: isSelected ? VellumTheme.ink : VellumTheme.ink(0.28),
+                        shadow: isSelected ? VellumTheme.ink(0.3) : .clear,
                         shadowOffset: CGSize(width: 3, height: 4),
                         variant: mode == .light ? 1 : mode == .dark ? 2 : 0
                     )
@@ -147,17 +90,20 @@ struct SettingsView: View {
 }
 
 private struct SettingsFeelRow: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let label: String
     let hint: String
     @Binding var isOn: Bool
 
     var body: some View {
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 20,
-            bottomLeadingRadius: 8,
-            bottomTrailingRadius: 22,
-            topTrailingRadius: 8,
-            style: .continuous
+        let shape = VellumOrganicRectangle(
+            topLeading: 20,
+            bottomLeading: 8,
+            bottomTrailing: 22,
+            topTrailing: 8,
+            straightRadius: 14,
+            isOrganic: vellumWobble
         )
 
         return Button {
@@ -212,52 +158,5 @@ private struct SettingsOrganicToggle: View {
         }
         .animation(.easeInOut(duration: 0.18), value: isOn)
         .accessibilityHidden(true)
-    }
-}
-
-private struct SettingsPillChrome: View {
-    @Environment(\.vellumWobble) private var vellumWobble
-
-    let fillColor: Color
-    let borderColor: Color
-    let shadowColor: Color
-    var shadowOffset: CGSize = .zero
-    let variant: Int
-
-    @ViewBuilder
-    var body: some View {
-        if vellumWobble {
-            layers(for: OrganicPillShape(variant: variant))
-        } else {
-            layers(for: Capsule())
-        }
-    }
-
-    private func layers<S: InsettableShape>(for shape: S) -> some View {
-        ZStack {
-            shape
-                .fill(shadowColor)
-                .offset(x: shadowOffset.width, y: shadowOffset.height)
-            shape.fill(fillColor)
-            shape.strokeBorder(borderColor, lineWidth: 1.5)
-        }
-    }
-}
-
-private struct SettingsDashedLine: View {
-    let color: Color
-
-    var body: some View {
-        GeometryReader { geometry in
-            Path { path in
-                let y = geometry.size.height / 2
-                path.move(to: CGPoint(x: 0, y: y))
-                path.addLine(to: CGPoint(x: geometry.size.width, y: y))
-            }
-            .stroke(
-                color,
-                style: StrokeStyle(lineWidth: 1.5, dash: [5, 5])
-            )
-        }
     }
 }

@@ -12,6 +12,8 @@ final class NoteCanvasReference {
 }
 
 struct NoteToolbarView: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let store: ToolPreferencesStore
     @Binding var selectedTool: ToolID
     @Binding var activeOptionsTool: ToolID?
@@ -306,7 +308,7 @@ struct NoteToolbarView: View {
     }
 
     private func quietActionLabel(systemImage: String) -> some View {
-        let shape = OrganicPillShape(variant: 3, smallRadius: 8)
+        let shape = OrganicPillShape(variant: 3, smallRadius: 8, isOrganic: vellumWobble)
         return Image(systemName: systemImage)
             .frame(width: 24, height: 24)
             .padding(3)

@@ -111,7 +111,7 @@ private struct TaskGroupView: View {
                     .font(.vellumCaveat(26))
                     .foregroundStyle(VellumTheme.ink)
                     .lineLimit(1)
-                TasksDashedRule()
+                VellumDashedRule()
                     .stroke(
                         VellumTheme.ink(0.22),
                         style: StrokeStyle(lineWidth: 1.5, dash: [5, 5])
@@ -165,15 +165,18 @@ private struct TaskRowView: View {
 }
 
 private struct TaskCheckbox: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let isDone: Bool
 
     var body: some View {
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 10,
-            bottomLeadingRadius: 4,
-            bottomTrailingRadius: 11,
-            topTrailingRadius: 5,
-            style: .continuous
+        let shape = VellumOrganicRectangle(
+            topLeading: 10,
+            bottomLeading: 4,
+            bottomTrailing: 11,
+            topTrailing: 5,
+            straightRadius: 6,
+            isOrganic: vellumWobble
         )
 
         ZStack {
@@ -209,10 +212,12 @@ private struct TasksEmptyState: View {
 }
 
 private struct TasksDoneToggleButtonStyle: ButtonStyle {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let isShowingDone: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        let shape = OrganicPillShape(variant: 1)
+        let shape = OrganicPillShape(variant: 1, isOrganic: vellumWobble)
 
         configuration.label
             .font(.vellumSans(16.5))
@@ -230,15 +235,18 @@ private struct TasksDoneToggleButtonStyle: ButtonStyle {
 }
 
 private struct TaskRowButtonStyle: ButtonStyle {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let isDone: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 20,
-            bottomLeadingRadius: 8,
-            bottomTrailingRadius: 22,
-            topTrailingRadius: 8,
-            style: .continuous
+        let shape = VellumOrganicRectangle(
+            topLeading: 20,
+            bottomLeading: 8,
+            bottomTrailing: 22,
+            topTrailing: 8,
+            straightRadius: 14,
+            isOrganic: vellumWobble
         )
 
         configuration.label
@@ -255,14 +263,5 @@ private struct TaskRowButtonStyle: ButtonStyle {
             }
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
             .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
-    }
-}
-
-private struct TasksDashedRule: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-        return path
     }
 }

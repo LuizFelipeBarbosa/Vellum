@@ -104,6 +104,7 @@ final class LibraryScreenModel {
     }
 
     var cards: [LibraryCardData] {
+        let spacesByID = self.spacesByID
         let allowedSpaceIDs: Set<UUID>? = selectedSpaceID.map { selected in
             Set([selected] + spaces.filter { $0.space.parentID == selected }.map(\.space.id))
         }
@@ -149,6 +150,7 @@ final class LibraryScreenModel {
     }
 
     var cardGroups: [LibraryCardGroup] {
+        let spacesByID = self.spacesByID
         var cardsBySpaceID: [UUID: [LibraryCardData]] = [:]
         var orderedSpaceIDs: [UUID] = []
         var unfiledCards: [LibraryCardData] = []

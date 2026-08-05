@@ -3,6 +3,7 @@ import SwiftUI
 import VellumCore
 
 struct VellumAskView: View {
+    @Environment(\.vellumWobble) private var vellumWobble
     @Bindable var model: VellumAppModel
 
     var body: some View {
@@ -101,7 +102,9 @@ struct VellumAskView: View {
     }
 
     private var inputArea: some View {
-        VStack(spacing: 10) {
+        let shape = OrganicPillShape(variant: 0, isOrganic: vellumWobble)
+
+        return VStack(spacing: 10) {
             HStack(spacing: 12) {
                 TextField(
                     "",
@@ -132,15 +135,14 @@ struct VellumAskView: View {
             .padding(.leading, 22)
             .padding(.trailing, 9)
             .padding(.vertical, 9)
-            .background(VellumTheme.popover, in: OrganicPillShape(variant: 0))
+            .background(VellumTheme.popover, in: shape)
             .background {
-                OrganicPillShape(variant: 0)
+                shape
                     .fill(VellumTheme.ink(0.12))
                     .offset(x: 4, y: 5)
             }
             .overlay {
-                OrganicPillShape(variant: 0)
-                    .strokeBorder(VellumTheme.ink(0.32), lineWidth: 1.5)
+                shape.strokeBorder(VellumTheme.ink(0.32), lineWidth: 1.5)
             }
 
             Text(footerText)
@@ -167,26 +169,20 @@ struct VellumAskView: View {
     }
 }
 
-private struct VellumDashedRule: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
-        return path
-    }
-}
-
 private struct VellumSuggestionCard: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let suggestion: String
     let action: () -> Void
 
     var body: some View {
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 26,
-            bottomLeadingRadius: 10,
-            bottomTrailingRadius: 28,
-            topTrailingRadius: 10,
-            style: .continuous
+        let shape = VellumOrganicRectangle(
+            topLeading: 26,
+            bottomLeading: 10,
+            bottomTrailing: 28,
+            topTrailing: 10,
+            straightRadius: 14,
+            isOrganic: vellumWobble
         )
 
         Button(action: action) {
@@ -372,15 +368,18 @@ private struct VellumAnswerTextToken: View {
 }
 
 private struct VellumCitationCard: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let citation: Citation
 
     var body: some View {
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 18,
-            bottomLeadingRadius: 8,
-            bottomTrailingRadius: 20,
-            topTrailingRadius: 8,
-            style: .continuous
+        let shape = VellumOrganicRectangle(
+            topLeading: 18,
+            bottomLeading: 8,
+            bottomTrailing: 20,
+            topTrailing: 8,
+            straightRadius: 12,
+            isOrganic: vellumWobble
         )
 
         VStack(alignment: .leading, spacing: 0) {
@@ -415,12 +414,14 @@ private struct VellumCitationCard: View {
 }
 
 private struct VellumFollowUpChip: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let label: String
     let variant: Int
     let action: () -> Void
 
     var body: some View {
-        let shape = OrganicPillShape(variant: variant)
+        let shape = OrganicPillShape(variant: variant, isOrganic: vellumWobble)
 
         Button(action: action) {
             Text(label)

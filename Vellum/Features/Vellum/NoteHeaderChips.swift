@@ -2,6 +2,7 @@ import SwiftUI
 import VellumCore
 
 struct NoteHeaderChips: View {
+    @Environment(\.vellumWobble) private var vellumWobble
     @Bindable var model: NoteScreenModel
     let app: VellumAppModel
     var onShowActivity: () -> Void
@@ -146,10 +147,10 @@ struct NoteHeaderChips: View {
                 .padding(.vertical, 5)
                 .background(
                     VellumTheme.highlight.opacity(0.24),
-                    in: OrganicPillShape(variant: 1, smallRadius: 8)
+                    in: OrganicPillShape(variant: 1, smallRadius: 8, isOrganic: vellumWobble)
                 )
                 .overlay {
-                    OrganicPillShape(variant: 1, smallRadius: 8)
+                    OrganicPillShape(variant: 1, smallRadius: 8, isOrganic: vellumWobble)
                         .strokeBorder(VellumTheme.ink(0.24), lineWidth: 1)
                 }
                 .frame(minHeight: 44)
@@ -213,7 +214,7 @@ struct NoteHeaderChips: View {
     }
 
     private func spaceBadge(_ name: String, color: Color) -> some View {
-        let shape = OrganicPillShape(variant: 2, smallRadius: 10)
+        let shape = OrganicPillShape(variant: 2, smallRadius: 10, isOrganic: vellumWobble)
         return HStack(spacing: 6) {
             VellumBlobDot(color: color, size: 7)
             Text(name)

@@ -14,8 +14,10 @@ struct ActivityView: View {
 
     var body: some View {
         ZStack {
-            sheetCard
-                .padding(28)
+            VellumSheetCard(title: "What Vellum did", onDone: { dismiss() }) {
+                activityContent
+            }
+            .padding(28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
@@ -40,60 +42,6 @@ struct ActivityView: View {
         )
     }
 
-    private var sheetCard: some View {
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 30,
-            bottomLeadingRadius: 12,
-            bottomTrailingRadius: 32,
-            topTrailingRadius: 12,
-            style: .continuous
-        )
-
-        return VStack(spacing: 0) {
-            header
-            ActivityDashedLine(color: VellumTheme.ink(0.2))
-                .frame(height: 1.5)
-            activityContent
-        }
-        .frame(maxWidth: 560, maxHeight: 660)
-        .background(VellumTheme.card, in: shape)
-        .background {
-            shape
-                .fill(VellumTheme.ink(0.28))
-                .offset(x: 8, y: 10)
-        }
-        .overlay {
-            shape.strokeBorder(VellumTheme.ink(0.4), lineWidth: 1.5)
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 14) {
-            Text("What Vellum did")
-                .font(.vellumSans(28, weight: .semibold))
-
-            Spacer(minLength: 14)
-
-            Button {
-                dismiss()
-            } label: {
-                Text("done")
-                    .font(.vellumSans(16.5, weight: .semibold))
-                    .foregroundStyle(Color(hex: "#FDF8EE"))
-                    .padding(.horizontal, 20)
-                    .frame(minHeight: 46)
-                    .background {
-                        ActivityPillChrome()
-                    }
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 20)
-        .padding(.bottom, 14)
-    }
-
     @ViewBuilder
     private var activityContent: some View {
         if events.isEmpty && !isLoading {
@@ -114,7 +62,11 @@ struct ActivityView: View {
                             )
 
                             if index < events.count - 1 {
-                                ActivityDashedLine(color: VellumTheme.ink(0.14))
+                                VellumDashedRule()
+                                    .stroke(
+                                        VellumTheme.ink(0.14),
+                                        style: StrokeStyle(lineWidth: 1.5, dash: [5, 5])
+                                    )
                                     .frame(height: 1.5)
                             }
                         }
@@ -197,43 +149,5 @@ private struct ActivityEventRow: View {
             }
         }
         .padding(.vertical, 13)
-    }
-}
-
-private struct ActivityPillChrome: View {
-    @Environment(\.vellumWobble) private var vellumWobble
-
-    @ViewBuilder
-    var body: some View {
-        if vellumWobble {
-            layers(for: OrganicPillShape(variant: 0))
-        } else {
-            layers(for: Capsule())
-        }
-    }
-
-    private func layers<S: InsettableShape>(for shape: S) -> some View {
-        ZStack {
-            shape.fill(VellumTheme.ink)
-            shape.strokeBorder(VellumTheme.ink, lineWidth: 1.5)
-        }
-    }
-}
-
-private struct ActivityDashedLine: View {
-    let color: Color
-
-    var body: some View {
-        GeometryReader { geometry in
-            Path { path in
-                let y = geometry.size.height / 2
-                path.move(to: CGPoint(x: 0, y: y))
-                path.addLine(to: CGPoint(x: geometry.size.width, y: y))
-            }
-            .stroke(
-                color,
-                style: StrokeStyle(lineWidth: 1.5, dash: [5, 5])
-            )
-        }
     }
 }
