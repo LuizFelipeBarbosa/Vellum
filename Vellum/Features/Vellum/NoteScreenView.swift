@@ -510,7 +510,7 @@ struct NoteScreenView: View {
             inkDisplayStyle: inkDisplayStyle,
             contentWidth: pageGeometry.contentWidth,
             contentHeight: pageState.contentHeight,
-            topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + 16,
+            topContentInset: topOverlayGlobalFrame.maxY - canvasGlobalOrigin.y + VellumOverlayMetrics.belowTopOverlayInset,
             onViewportChanged: { canvasViewport = $0 },
             onExternalDrawingChange: {
                 selectionController.externalDrawingDidChange()
@@ -640,7 +640,7 @@ struct NoteScreenView: View {
                     avoiding: canvasViewport.viewRect(fromContent: avoidanceRect),
                     stripSize: stripSize,
                     in: canvasSize,
-                    topInset: topOverlayHeight + 12
+                    topInset: topOverlayHeight + VellumOverlayMetrics.belowTopOverlayInset
                 ))
                 .zIndex(4.5)
         }
@@ -677,7 +677,7 @@ struct NoteScreenView: View {
             )
             .frame(width: 184)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.top, topOverlayHeight + 12)
+            .padding(.top, topOverlayHeight + VellumOverlayMetrics.belowTopOverlayInset)
             .zIndex(2)
         }
     }
@@ -688,7 +688,7 @@ struct NoteScreenView: View {
             EntityPopoverView(entity: entity, model: model, app: app)
                 .frame(width: 270)
                 .padding(.leading, 80)
-                .padding(.top, topOverlayHeight + 12)
+                .padding(.top, topOverlayHeight + VellumOverlayMetrics.belowTopOverlayInset)
                 .transition(.offset(y: 6).combined(with: .opacity))
                 .zIndex(5)
         }

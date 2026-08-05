@@ -417,7 +417,9 @@ struct VellumPencilGlyph: View {
             var accent = Path()
             accent.move(to: CGPoint(x: 16.5 * scale, y: 5.5 * scale))
             accent.addLine(to: CGPoint(x: 18 * scale, y: 4 * scale))
-            context.stroke(accent, with: .color(VellumTheme.accent), style: StrokeStyle(lineWidth: 3 * scale, lineCap: .round))
+            // Ink, not accent: the library's floating button fills its circle with
+            // VellumTheme.accent, and an accent eraser tip disappears against it.
+            context.stroke(accent, with: .color(VellumTheme.ink), style: StrokeStyle(lineWidth: 3 * scale, lineCap: .round))
         }
         .frame(width: size, height: size)
     }

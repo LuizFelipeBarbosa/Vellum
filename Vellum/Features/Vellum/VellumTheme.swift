@@ -154,8 +154,19 @@ struct OrganicPillShape: InsettableShape {
                 0,
                 [smallRadius - insetAmount, bounds.width / 2, bounds.height / 2].min() ?? 0
             )
-            let firstLarge = CGSize(width: bounds.height * 0.52, height: bounds.height * 0.44)
-            let secondLarge = CGSize(width: bounds.height * 0.48, height: bounds.height * 0.50)
+            // Cap the organic corners so tall narrow pills (the vertical
+            // toolbar) don't grow ~130pt sweeps that swallow their end items.
+            // Wide short pills (chips, strips, the horizontal toolbar at
+            // ~121pt tall) stay below the cap and are unaffected.
+            let cap: CGFloat = 64
+            let firstLarge = CGSize(
+                width: min(bounds.height * 0.52, cap),
+                height: min(bounds.height * 0.44, cap)
+            )
+            let secondLarge = CGSize(
+                width: min(bounds.height * 0.48, cap),
+                height: min(bounds.height * 0.50, cap)
+            )
             let smallCorner = CGSize(width: small, height: small)
 
             let corners: (CGSize, CGSize, CGSize, CGSize)
@@ -241,10 +252,18 @@ struct VellumOrganicRectangle: InsettableShape {
 }
 
 struct VellumDashedRule: Shape {
+    var axis: Axis = .horizontal
+
     func path(in rect: CGRect) -> Path {
         Path { path in
-            path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            switch axis {
+            case .horizontal:
+                path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+                path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            case .vertical:
+                path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+                path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+            }
         }
     }
 }

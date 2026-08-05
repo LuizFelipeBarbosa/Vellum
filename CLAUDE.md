@@ -29,7 +29,7 @@ same for `VellumUITests` / `VellumFlowUITests`), and `.gitignore:5` ignores
 | Target | XcodeGen type | What it actually is |
 |---|---|---|
 | `VellumUITests` | `bundle.unit-test` (+ `TEST_HOST`) | **Unit tests.** 368 XCTest functions (2026-08 count) across 36+ files, **zero** `XCUIApplication`. Runs in-process against the app. |
-| `VellumFlowUITests` | `bundle.ui-testing` | The real XCUITest target. 43 tests across 11 files, drives the simulator, owns every launch-argument contract. |
+| `VellumFlowUITests` | `bundle.ui-testing` | The real XCUITest target. 44 tests across 12 files, drives the simulator, owns every launch-argument contract. |
 
 Asked to "add a UI test", the name alone points at the wrong target. Decide by what
 the test does: touching a model or a pure function → `VellumUITests`; needing a real
