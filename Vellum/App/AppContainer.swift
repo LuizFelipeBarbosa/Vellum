@@ -13,7 +13,41 @@ struct AppContainer: Sendable {
     let workspace: WorkspaceService
     let graph: KnowledgeGraphService
     let askService: AskService
+    let textRecognition: NoteTextRecognitionCoordinator
 
+    @MainActor
+    init(
+        rootDirectory: URL,
+        notes: any NoteRepository,
+        proposals: any AgentProposalRepository,
+        activity: any ActivityRepository,
+        agent: any VellumAgent,
+        spaces: any SpaceRepository,
+        entities: any EntityRepository,
+        tasks: any TaskRepository,
+        workspace: WorkspaceService,
+        graph: KnowledgeGraphService,
+        askService: AskService
+    ) {
+        self.rootDirectory = rootDirectory
+        self.notes = notes
+        self.proposals = proposals
+        self.activity = activity
+        self.agent = agent
+        self.spaces = spaces
+        self.entities = entities
+        self.tasks = tasks
+        self.workspace = workspace
+        self.graph = graph
+        self.askService = askService
+        textRecognition = NoteTextRecognitionCoordinator(
+            service: TextRecognitionService(recognizer: InkTextRecognizer()),
+            workspace: workspace,
+            notes: notes
+        )
+    }
+
+    @MainActor
     static func live(rootDirectory: URL) -> AppContainer {
         let notes = FileNoteRepository(rootDirectory: rootDirectory)
         let proposals = FileProposalRepository(rootDirectory: rootDirectory)
