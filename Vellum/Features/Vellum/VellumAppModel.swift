@@ -162,6 +162,9 @@ final class VellumAppModel {
         } else {
             screen = .library
         }
+        split.onPaneRemoved = { [weak self] noteID in
+            self?.container.textRecognition.unregister(noteID: noteID)
+        }
     }
 
     func bootstrap() async {
@@ -358,6 +361,7 @@ final class VellumAppModel {
                 }
             }
         )
+        container.textRecognition.register(noteModel, noteID: id)
         let newPane = NotePane(noteModel: noteModel)
 
         switch placement {

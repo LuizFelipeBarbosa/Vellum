@@ -46,6 +46,7 @@ final class SplitColumn: Identifiable {
 final class NoteSplitState {
     private(set) var columns: [SplitColumn] = []
     var focusedPaneID: UUID?
+    var onPaneRemoved: ((UUID) -> Void)?
     var selectedTool: ToolID = .pen
     /// The tool an element selection set aside, restored when that selection ends.
     var toolBorrowedByElementSelection: ToolID?
@@ -211,13 +212,16 @@ final class NoteSplitState {
     func replacePane(id: UUID, with pane: NotePane) {
         guard let index = paneIndex(of: id) else { return }
         let oldPane = columns[index.column].panes[index.row]
+        let oldNoteID = oldPane.noteID
         pane.heightFraction = oldPane.heightFraction
         columns[index.column].panes[index.row] = pane
         focus(pane.id)
+        onPaneRemoved?(oldNoteID)
     }
 
     func removePane(id: UUID) {
         guard let index = paneIndex(of: id) else { return }
+        let removedNoteID = columns[index.column].panes[index.row].noteID
         let removedPaneWasFocused = focusedPaneID == id
         // Only the focused pane can own a live element-selection tool borrow.
         if removedPaneWasFocused {
@@ -249,19 +253,21 @@ final class NoteSplitState {
             }
         }
 
-        guard removedPaneWasFocused else { return }
-        if columns.indices.contains(index.column),
-           columns[index.column].panes.indices.contains(index.row) {
-            focusedPaneID = columns[index.column].panes[index.row].id
-        } else if columns.indices.contains(index.column),
-                  let lastPane = columns[index.column].panes.last {
-            focusedPaneID = lastPane.id
-        } else if !columns.isEmpty {
-            let nearestColumn = min(index.column, columns.count - 1)
-            focusedPaneID = columns[nearestColumn].panes.first?.id
-        } else {
-            focusedPaneID = nil
+        if removedPaneWasFocused {
+            if columns.indices.contains(index.column),
+               columns[index.column].panes.indices.contains(index.row) {
+                focusedPaneID = columns[index.column].panes[index.row].id
+            } else if columns.indices.contains(index.column),
+                      let lastPane = columns[index.column].panes.last {
+                focusedPaneID = lastPane.id
+            } else if !columns.isEmpty {
+                let nearestColumn = min(index.column, columns.count - 1)
+                focusedPaneID = columns[nearestColumn].panes.first?.id
+            } else {
+                focusedPaneID = nil
+            }
         }
+        onPaneRemoved?(removedNoteID)
     }
 
     private func detachPane(
@@ -327,6 +333,9 @@ final class NoteSplitState {
 
     func closeAll() async {
         await flushAll()
+        for noteID in panes.map(\.noteID) {
+            onPaneRemoved?(noteID)
+        }
         columns.removeAll()
         focusedPaneID = nil
     }
