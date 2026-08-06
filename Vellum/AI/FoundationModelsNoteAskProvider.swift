@@ -40,7 +40,7 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
 
     private let source: AskSource
     private let contextPacker = NoteAskContextPacker()
-    private let wholeNoteContext: NoteAskContextPacker.PackedContext?
+    private var wholeNoteContext: NoteAskContextPacker.PackedContext?
     private let baseInstructions: String
     private var session: LanguageModelSession
     private var lastCompletedTurn: CompletedTurn?
@@ -147,11 +147,16 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
         } catch let error as LanguageModelSession.GenerationError {
             switch error {
             case .exceededContextWindowSize:
+                if wholeNoteContext != nil {
+                    wholeNoteContext = nil
+                }
                 rebuildSession()
+                // Keep the halved retry budget after demotion to maximize recovery headroom.
                 let retryContext = makeTurnContext(
                     question: question,
                     retrievalCharacterBudget: Self.retrievalCharacterBudget / 2
                 )
+                continuation.yield(.citations(citations(for: retryContext.includedPages)))
                 do {
                     return try await streamAnswer(
                         prompt: retryContext.prompt,
@@ -221,7 +226,9 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
     }
 
     private func rebuildSession() {
-        var instructions = baseInstructions
+        var instructions = wholeNoteContext == nil
+            ? Self.roleInstructions(for: source.title)
+            : baseInstructions
         if let lastCompletedTurn {
             let recentConversation = TokenBudget.truncateHeadAndTail(
                 "Question: \(lastCompletedTurn.question)\nAnswer: \(lastCompletedTurn.answer)",

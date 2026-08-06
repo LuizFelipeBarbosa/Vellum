@@ -65,6 +65,27 @@ func questionPackingHonorsExactBoundary() {
     #expect(packed.wasTruncated)
 }
 
+@Test("Question packing truncates the first relevant paragraph to fit")
+func questionPackingTruncatesOversizedFirstParagraph() {
+    let pageID = UUID()
+    let paragraph = "quasar " + String(repeating: "filler ", count: 40)
+    let source = makeAskSource(pages: [
+        AskPage(pageID: pageID, plainText: paragraph)
+    ])
+    let charBudget = 100
+
+    let packed = NoteAskContextPacker().packForQuestion(
+        "quasar",
+        source: source,
+        charBudget: charBudget
+    )
+
+    #expect(!packed.text.isEmpty)
+    #expect(packed.text.count <= charBudget)
+    #expect(packed.wasTruncated)
+    #expect(packed.includedPages.map(\.pageID).contains(pageID))
+}
+
 @Test("Equal-scoring paragraphs use page order deterministically")
 func questionPackingTieBreakIsDeterministic() throws {
     let laterLexicalID = try #require(UUID(uuidString: "ffffffff-ffff-ffff-ffff-ffffffffffff"))

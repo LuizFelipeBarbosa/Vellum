@@ -77,12 +77,22 @@ public struct NoteAskContextPacker: Sendable {
         var chunks: [String] = []
         var includedPageIndices: Set<Int> = []
         var packedCharacterCount = 0
+        var packedChunkWasTruncated = false
         for paragraph in rankedParagraphs {
             let chunk = "[Page \(paragraph.pageIndex + 1)]\n\(paragraph.text)"
             let separatorCount = chunks.isEmpty ? 0 : 2
             let proposedCount = packedCharacterCount + separatorCount + chunk.count
 
             if proposedCount > charBudget {
+                if chunks.isEmpty {
+                    let truncatedChunk = TokenBudget.truncateHeadAndTail(
+                        chunk,
+                        charBudget: charBudget - separatorCount
+                    )
+                    chunks.append(truncatedChunk)
+                    includedPageIndices.insert(paragraph.pageIndex)
+                    packedChunkWasTruncated = true
+                }
                 break
             }
 
@@ -97,7 +107,7 @@ public struct NoteAskContextPacker: Sendable {
         return PackedContext(
             text: chunks.joined(separator: "\n\n"),
             includedPages: includedPages,
-            wasTruncated: chunks.count < rankedParagraphs.count
+            wasTruncated: packedChunkWasTruncated || chunks.count < rankedParagraphs.count
         )
     }
 
