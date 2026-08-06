@@ -12,6 +12,8 @@ struct NoteScreenView: View {
     let paneContext: PaneContext
 
     @State private var isShowingActivity = false
+    @State private var isShowingAskSheet = false
+    @State private var askScreenModel: NoteAskScreenModel?
     @State private var isConfirmingDelete = false
     @State private var lastNonNilTool: (any PKTool)?
     @State private var selectionController = CanvasSelectionController()
@@ -215,6 +217,18 @@ struct NoteScreenView: View {
                     )
                 }
             }
+            .sheet(isPresented: $isShowingAskSheet, onDismiss: { askScreenModel = nil }) {
+                if let askScreenModel, let note = model.note {
+                    NoteAskSheet(
+                        model: askScreenModel,
+                        note: note,
+                        onScrollToPage: { index in
+                            isShowingAskSheet = false
+                            scrollCanvas(toPageIndex: index)
+                        }
+                    )
+                }
+            }
             .sheet(item: $exportOutput, onDismiss: cleanUpExportDirectory) { output in
                 ShareSheetView(items: output.urls)
             }
@@ -317,6 +331,7 @@ struct NoteScreenView: View {
                     model: model,
                     app: app,
                     onShowActivity: { isShowingActivity = true },
+                    onAskNote: { Task { await presentAskSheet() } },
                     onConfirmDelete: { isConfirmingDelete = true },
                     onExport: exportNote,
                     onClusterFrames: {
@@ -995,6 +1010,13 @@ struct NoteScreenView: View {
                 model.errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func presentAskSheet() async {
+        await model.flushPendingSave()
+        guard let note = model.note else { return }
+        askScreenModel = NoteAskScreenModel(note: note, provider: model.noteAsk)
+        isShowingAskSheet = true
     }
 
     private func scrollCanvas(toPageIndex index: Int) {
