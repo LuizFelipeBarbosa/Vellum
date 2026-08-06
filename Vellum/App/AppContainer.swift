@@ -74,7 +74,20 @@ struct AppContainer: Sendable {
             answerer: HeuristicAskAnswerer(),
             activity: activity
         )
-        let noteAsk = KeywordNoteAskProvider()
+        // NoteAskFlowUITests passes this argument to force deterministic keyword answers.
+        // Release builds compile out the hook and always use Foundation Models with fallback.
+        #if DEBUG
+        let noteAsk: any NoteAskProviding
+        if ProcessInfo.processInfo.arguments.contains("-vellum-heuristic-ai") {
+            noteAsk = KeywordNoteAskProvider()
+        } else {
+            noteAsk = FoundationModelsNoteAskProvider(fallback: KeywordNoteAskProvider())
+        }
+        #else
+        let noteAsk: any NoteAskProviding = FoundationModelsNoteAskProvider(
+            fallback: KeywordNoteAskProvider()
+        )
+        #endif
 
         return AppContainer(
             rootDirectory: rootDirectory,
