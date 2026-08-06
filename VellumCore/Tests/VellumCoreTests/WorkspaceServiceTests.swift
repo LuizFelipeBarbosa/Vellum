@@ -37,6 +37,7 @@ func acceptTitleProposal() async throws {
     let accepted = try await fixture.service.acceptProposal(id: titleProposal.id)
 
     #expect(accepted.title == "A focused new title")
+    #expect(accepted.titleOrigin == .manual)
     #expect(accepted.revision == note.revision + 1)
     #expect(try await fixture.service.loadNote(id: note.id).title == "A focused new title")
     let activity = try await fixture.service.activity(noteID: note.id)
