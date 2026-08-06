@@ -32,7 +32,7 @@ public struct HeuristicVellumAgent: VellumAgent, Sendable {
                     title: "Suggest a title",
                     explanation: "The note does not yet have a descriptive title.",
                     confidence: 0.7,
-                    operation: .suggestTitle(suggestedTitle(from: text))
+                    operation: .suggestTitle(TitleSuggestion.firstSentence(from: text))
                 )
             )
         }
@@ -161,12 +161,5 @@ public struct HeuristicVellumAgent: VellumAgent, Sendable {
             operation: operation,
             status: .pending
         )
-    }
-
-    private func suggestedTitle(from text: String) -> String {
-        let delimiters: Set<Character> = [".", "!", "?", "\n"]
-        let sentence = text.prefix { !delimiters.contains($0) }
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return String(sentence.prefix(60))
     }
 }

@@ -8,8 +8,14 @@ public enum NoteType: String, Codable, Sendable, CaseIterable {
     case audio
 }
 
+public enum TitleOrigin: String, Codable, Sendable {
+    case `default`
+    case auto
+    case manual
+}
+
 public struct Note: Identifiable, Codable, Sendable {
-    public static let currentSchemaVersion = 6
+    public static let currentSchemaVersion = 7
     public static let currentLayoutVersion = 2
 
     public let id: UUID
@@ -17,6 +23,7 @@ public struct Note: Identifiable, Codable, Sendable {
     public var revision: Int
     public var layoutVersion: Int
     public var title: String
+    public var titleOrigin: TitleOrigin
     public var tags: [String]
     public let createdAt: Date
     public var updatedAt: Date
@@ -47,6 +54,7 @@ public struct Note: Identifiable, Codable, Sendable {
         revision: Int,
         layoutVersion: Int = Note.currentLayoutVersion,
         title: String,
+        titleOrigin: TitleOrigin = .default,
         tags: [String],
         createdAt: Date,
         updatedAt: Date,
@@ -64,6 +72,7 @@ public struct Note: Identifiable, Codable, Sendable {
         self.revision = revision
         self.layoutVersion = layoutVersion
         self.title = title
+        self.titleOrigin = titleOrigin
         self.tags = tags
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -84,6 +93,12 @@ public struct Note: Identifiable, Codable, Sendable {
         revision = try container.decode(Int.self, forKey: .revision)
         layoutVersion = try container.decodeIfPresent(Int.self, forKey: .layoutVersion) ?? 1
         title = try container.decode(String.self, forKey: .title)
+        if container.contains(.titleOrigin) {
+            titleOrigin = try container.decode(TitleOrigin.self, forKey: .titleOrigin)
+        } else {
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            titleOrigin = trimmedTitle.isEmpty || trimmedTitle == "Untitled" ? .default : .manual
+        }
         tags = try container.decode([String].self, forKey: .tags)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
@@ -106,6 +121,13 @@ public struct Note: Identifiable, Codable, Sendable {
             forKey: .pageOrientation
         )).flatMap(PageOrientation.init(rawValue:)) ?? .portrait
         deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+    }
+}
+
+extension Note {
+    public var isEligibleForAutoTitle: Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed.isEmpty || trimmed == "Untitled") && titleOrigin == .default
     }
 }
 

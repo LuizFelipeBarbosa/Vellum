@@ -82,6 +82,66 @@ func currentNoteLayoutVersionRoundTrip() throws {
     #expect(decoded.layoutVersion == Note.currentLayoutVersion)
 }
 
+@Test("A v6 manifest with an untitled title defaults to an auto-title eligible origin")
+func v6UntitledManifestDefaultsToDefaultTitleOrigin() throws {
+    var note = migrationNote(schemaVersion: 6)
+    note.title = "Untitled"
+    let encoded = try FilePersistence.encoder().encode(note)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "titleOrigin")
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    #expect(decoded.titleOrigin == .default)
+}
+
+@Test("A v6 manifest with a real title defaults to a manual title origin")
+func v6TitledManifestDefaultsToManualTitleOrigin() throws {
+    var note = migrationNote(schemaVersion: 6)
+    note.title = "Groceries"
+    let encoded = try FilePersistence.encoder().encode(note)
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "titleOrigin")
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try FilePersistence.decoder().decode(Note.self, from: data)
+
+    #expect(decoded.titleOrigin == .manual)
+}
+
+@Test("Frozen title origins round trip through persistence")
+func frozenTitleOriginsRoundTrip() throws {
+    for origin in [TitleOrigin.auto, .manual] {
+        var note = migrationNote(schemaVersion: Note.currentSchemaVersion)
+        note.titleOrigin = origin
+
+        let decoded = try FilePersistence.decoder().decode(
+            Note.self,
+            from: FilePersistence.encoder().encode(note)
+        )
+
+        #expect(decoded.titleOrigin == origin)
+    }
+}
+
+@Test("Only default placeholder titles are eligible for auto-titling")
+func autoTitleEligibilityTruthTable() {
+    let cases: [(title: String, origin: TitleOrigin, expected: Bool)] = [
+        ("Untitled", .default, true),
+        ("Untitled", .manual, false),
+        ("Groceries", .default, false),
+    ]
+
+    for testCase in cases {
+        var note = migrationNote(schemaVersion: Note.currentSchemaVersion)
+        note.title = testCase.title
+        note.titleOrigin = testCase.origin
+
+        #expect(note.isEligibleForAutoTitle == testCase.expected)
+    }
+}
+
 @Test("A manifest without page orientation defaults to portrait")
 func manifestWithoutPageOrientationDefaultsToPortrait() throws {
     let encoded = try FilePersistence.encoder().encode(
