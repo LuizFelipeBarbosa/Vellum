@@ -12,7 +12,6 @@ struct NoteScreenView: View {
     let paneContext: PaneContext
 
     @State private var isShowingActivity = false
-    @State private var isShowingAskSheet = false
     @State private var askScreenModel: NoteAskScreenModel?
     @State private var isConfirmingDelete = false
     @State private var lastNonNilTool: (any PKTool)?
@@ -217,18 +216,24 @@ struct NoteScreenView: View {
                     )
                 }
             }
-            .sheet(isPresented: $isShowingAskSheet, onDismiss: { askScreenModel = nil }) {
-                if let askScreenModel, let note = model.note {
-                    NoteAskSheet(
-                        model: askScreenModel,
-                        note: note,
-                        onScrollToPage: { index in
-                            isShowingAskSheet = false
-                            scrollCanvas(toPageIndex: index)
-                        }
-                    )
+            // On its own node: a third .sheet chained onto the same view is
+            // silently ignored (Color.clear, not EmptyView — EmptyView never
+            // renders, so its modifiers are discarded). item:, not isPresented:,
+            // so the first presentation can't capture a stale nil model.
+            .background(
+                Color.clear.sheet(item: $askScreenModel) { askModel in
+                    if let note = model.note {
+                        NoteAskSheet(
+                            model: askModel,
+                            note: note,
+                            onScrollToPage: { index in
+                                askScreenModel = nil
+                                scrollCanvas(toPageIndex: index)
+                            }
+                        )
+                    }
                 }
-            }
+            )
             .sheet(item: $exportOutput, onDismiss: cleanUpExportDirectory) { output in
                 ShareSheetView(items: output.urls)
             }
@@ -1016,7 +1021,6 @@ struct NoteScreenView: View {
         await model.flushPendingSave()
         guard let note = model.note else { return }
         askScreenModel = NoteAskScreenModel(note: note, provider: model.noteAsk)
-        isShowingAskSheet = true
     }
 
     private func scrollCanvas(toPageIndex index: Int) {

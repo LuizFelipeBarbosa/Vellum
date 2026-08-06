@@ -210,6 +210,7 @@ struct NoteHeaderChips: View {
         } label: {
             Label("Ask", systemImage: "questionmark.bubble")
         }
+        .accessibilityIdentifier("note-ask-button")
         .buttonStyle(.plain)
         .font(.vellumSans(16.5, weight: .medium))
         .foregroundStyle(VellumTheme.ink)

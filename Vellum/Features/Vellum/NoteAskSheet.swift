@@ -369,6 +369,7 @@ private struct NoteAskInputBar: View {
 
         HStack(spacing: 10) {
             TextField("Ask about this note…", text: $text, axis: .vertical)
+                .accessibilityIdentifier("note-ask-input")
                 .font(.vellumSans(17.5))
                 .foregroundStyle(VellumTheme.ink)
                 .lineLimit(1...3)

@@ -4,10 +4,13 @@ import VellumCore
 
 @MainActor
 @Observable
-final class NoteAskScreenModel {
+final class NoteAskScreenModel: Identifiable {
     enum Phase: Equatable {
         case idle, streaming, error(String)
     }
+
+    // Identity for .sheet(item:) presentation.
+    let id = UUID()
 
     private let note: Note
     private let provider: any NoteAskProviding
@@ -111,15 +114,5 @@ final class NoteAskScreenModel {
     func cancel() {
         inFlightTask?.cancel()
         inFlightTask = nil
-    }
-}
-
-private extension NotePage {
-    /// App-target mirror of VellumCore's package-internal reading order comparator.
-    static func byOrder(_ lhs: NotePage, _ rhs: NotePage) -> Bool {
-        if lhs.order == rhs.order {
-            return lhs.id.uuidString < rhs.id.uuidString
-        }
-        return lhs.order < rhs.order
     }
 }
