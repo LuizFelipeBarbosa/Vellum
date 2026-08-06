@@ -1,21 +1,10 @@
 import Foundation
 
 public struct HeuristicAskAnswerer: AskAnswering, Sendable {
-    private static let stopwords: Set<String> = [
-        "the", "a", "an", "is", "are", "was", "were", "do", "does", "did",
-        "what", "who", "when", "where", "how", "why", "this", "in", "on", "of",
-        "to", "for", "and", "or", "my", "notes", "note", "about", "tell", "me",
-    ]
-
     public init() {}
 
     public func answer(question: String, context: AskContext) async throws -> AskAnswer {
-        let queryTerms = Set(
-            question.lowercased()
-                .split { !$0.isLetter && !$0.isNumber }
-                .map(String.init)
-                .filter { $0.count >= 3 && !Self.stopwords.contains($0) }
-        )
+        let queryTerms = TermScoring.queryTerms(from: question)
         guard !queryTerms.isEmpty else {
             return Self.noMatchAnswer(question: question)
         }
@@ -24,7 +13,7 @@ public struct HeuristicAskAnswerer: AskAnswering, Sendable {
         for source in context.sources {
             for page in source.pages {
                 let pageText = page.plainText.lowercased()
-                let score = Self.occurrenceCount(in: pageText, terms: queryTerms)
+                let score = TermScoring.occurrenceCount(in: pageText, terms: queryTerms)
                 if score > 0 {
                     hits.append(AskHit(source: source, page: page, score: score))
                 }
@@ -51,7 +40,7 @@ public struct HeuristicAskAnswerer: AskAnswering, Sendable {
         var citations: [Citation] = []
         for (offset, hit) in hits.enumerated() {
             let index = offset + 1
-            let excerpt = Self.excerpt(from: hit.page.plainText, terms: queryTerms)
+            let excerpt = TermScoring.excerpt(from: hit.page.plainText, terms: queryTerms)
             segments.append(.text(excerpt, emphasized: false))
             segments.append(.citation(index: index))
             citations.append(
@@ -99,31 +88,6 @@ public struct HeuristicAskAnswerer: AskAnswering, Sendable {
         )
     }
 
-    private static func occurrenceCount(in text: String, terms: Set<String>) -> Int {
-        terms.reduce(into: 0) { total, term in
-            var searchStart = text.startIndex
-            while searchStart < text.endIndex,
-                  let range = text.range(of: term, range: searchStart..<text.endIndex) {
-                total += 1
-                searchStart = range.upperBound
-            }
-        }
-    }
-
-    private static func excerpt(from text: String, terms: Set<String>) -> String {
-        let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
-        var bestSentence = ""
-        var bestScore = -1
-        for sentence in sentences {
-            let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
-            let score = occurrenceCount(in: trimmed.lowercased(), terms: terms)
-            if score > bestScore {
-                bestSentence = trimmed
-                bestScore = score
-            }
-        }
-        return String(bestSentence.prefix(200))
-    }
 }
 
 private struct AskHit {
