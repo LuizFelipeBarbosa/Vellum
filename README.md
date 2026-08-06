@@ -84,6 +84,7 @@ the read is behind `#if DEBUG` and compiles out of release builds.
 | `-vellum-split-grid <r1,r2,…>` | DEBUG | `VellumAppModel.swift` | `SplitPaneFlowUITests` — opens a pane grid with the given rows per column |
 | `-vellum-pdf-fixture-note` | DEBUG | `VellumAppModel.swift` | `PageOrientationFlowUITests` — opens a note seeded with an imported PDF page |
 | `-vellum-auto-open-note` | DEBUG | `VellumAppModel.swift` | no test; manual convenience — opens the most recent note at launch |
+| `-vellum-autotitle-seed-note` | DEBUG | `VellumAppModel.swift` | `AutoTitleFlowUITests` — purges and reseeds an untitled note holding one typed text element for the recognition auto-title flow |
 | `-askQuestion "<text>"` | DEBUG | `VellumAppModel.swift` | no test; combine with `-prototypeStartView ask` to land on a submitted answer |
 | `-vellum-force-pencil-only` | DEBUG + simulator | `PencilCanvasView.swift`, `SelectionCaptureSurface.swift`, `ShapeEraserSurface.swift`, `ShapeSnapSurface.swift` | `ShapeRecognitionFlowUITests`, `ShapeFlowTestHelpers`, `PhotoInteractionFlowUITests` — makes the simulator treat finger input as touch, not ink, so a synthesized drag is a drag |
 | `-thumbnail-slow-render` | DEBUG | `PageThumbnailStore.swift` | `PagesPanelDragUITests` — stretches thumbnail debounce from 500ms to 3000ms so the loading placeholder can be asserted against |
