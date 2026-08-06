@@ -41,7 +41,7 @@ struct InkToolOptionsView: View {
 
         VStack(alignment: .leading, spacing: 14) {
             Text("\(tool.displayName) Options")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.vellumSans(17, weight: .semibold))
                 .foregroundStyle(VellumTheme.ink)
 
             OptionsSectionCaption("Style")
@@ -64,7 +64,7 @@ struct InkToolOptionsView: View {
                 OptionsSectionCaption("Width")
 
                 Text("Level \(currentLevel)")
-                    .font(.system(size: 12))
+                    .font(.vellumMono(11))
                     .foregroundStyle(VellumTheme.mutedDark)
             }
 
@@ -241,7 +241,7 @@ struct EraserOptionsView: View {
 
         VStack(alignment: .leading, spacing: 14) {
             Text("Eraser Options")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.vellumSans(17, weight: .semibold))
                 .foregroundStyle(VellumTheme.ink)
 
             if store.preferences.eraser.mode == .partial {
@@ -249,7 +249,7 @@ struct EraserOptionsView: View {
                     OptionsSectionCaption("Width")
 
                     Text("Level \(currentLevel)")
-                        .font(.system(size: 12))
+                        .font(.vellumMono(11))
                         .foregroundStyle(VellumTheme.mutedDark)
                 }
 
@@ -266,7 +266,7 @@ struct EraserOptionsView: View {
                 }
             } else {
                 Text("Whole-stroke eraser removes entire strokes.")
-                    .font(.system(size: 12))
+                    .font(.vellumSans(12))
                     .foregroundStyle(VellumTheme.mutedDark)
             }
         }
@@ -312,7 +312,7 @@ struct TextOptionsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Text Options")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.vellumSans(17, weight: .semibold))
                 .foregroundStyle(VellumTheme.ink)
 
             OptionsSectionCaption("Size")
@@ -325,7 +325,7 @@ struct TextOptionsView: View {
                     )
 
                 Text("Aa")
-                    .font(.system(size: store.preferences.text.fontSize))
+                    .font(.vellumSans(store.preferences.text.fontSize))
                     .foregroundStyle(
                         Color(
                             InkAppearance.displayColor(
@@ -388,26 +388,25 @@ struct ColorSwatchGrid: View {
                 Button {
                     onSelect(swatch)
                 } label: {
-                    Circle()
-                        .fill(
-                            Color(
-                                InkAppearance.displayColor(
-                                    for: swatch,
-                                    style: inkDisplayStyle
-                                )
+                    VellumBlobDot(
+                        color: Color(
+                            InkAppearance.displayColor(
+                                for: swatch,
+                                style: inkDisplayStyle
                             )
-                        )
-                        .frame(width: 24, height: 24)
-                        .overlay {
-                            Circle()
-                                .stroke(
-                                    swatch == selectedColor ? VellumTheme.accent : .clear,
-                                    lineWidth: 2
-                                )
-                                .padding(-4)
-                        }
-                        .frame(width: 34, height: 34)
-                        .contentShape(Rectangle())
+                        ),
+                        size: 24
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(
+                                swatch == selectedColor ? VellumTheme.accent : .clear,
+                                lineWidth: 2
+                            )
+                            .padding(-4)
+                    }
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Color \(swatch.hexString)")
@@ -433,7 +432,7 @@ struct OptionsSectionCaption: View {
 
     var body: some View {
         Text(title.uppercased())
-            .font(.system(size: 12, weight: .medium))
+            .font(.vellumMono(10.5, weight: .medium))
             .foregroundStyle(VellumTheme.mutedDark)
     }
 }

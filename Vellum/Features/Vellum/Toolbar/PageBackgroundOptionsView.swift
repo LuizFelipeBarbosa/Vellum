@@ -14,7 +14,7 @@ struct PageBackgroundOptionsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Paper")
-                .font(.system(size: 17, weight: .semibold))
+                .font(.vellumSans(17, weight: .semibold))
                 .foregroundStyle(VellumTheme.ink)
 
             if isPageOrientationAvailable {
@@ -30,7 +30,7 @@ struct PageBackgroundOptionsView: View {
                 .accessibilityLabel("Page orientation")
             } else {
                 Text("Page size follows the imported PDF.")
-                    .font(.system(size: 12))
+                    .font(.vellumSans(12))
                     .foregroundStyle(VellumTheme.mutedDark)
             }
 
@@ -163,25 +163,26 @@ struct PageBackgroundOptionsView: View {
         Button {
             style.paperTint = tint
         } label: {
-            Circle()
-                .fill(tint?.swiftUIColor ?? VellumTheme.card)
-                .frame(width: 24, height: 24)
-                .overlay {
-                    if tint == nil {
-                        Circle()
-                            .stroke(VellumTheme.ink(0.18), lineWidth: 1)
-                    }
-                }
-                .overlay {
+            VellumBlobDot(
+                color: tint?.swiftUIColor ?? VellumTheme.card,
+                size: 24
+            )
+            .overlay {
+                if tint == nil {
                     Circle()
-                        .stroke(
-                            style.paperTint == tint ? VellumTheme.accent : .clear,
-                            lineWidth: 2
-                        )
-                        .padding(-4)
+                        .stroke(VellumTheme.ink(0.18), lineWidth: 1)
                 }
-                .frame(width: 34, height: 34)
-                .contentShape(Rectangle())
+            }
+            .overlay {
+                Circle()
+                    .stroke(
+                        style.paperTint == tint ? VellumTheme.accent : .clear,
+                        lineWidth: 2
+                    )
+                    .padding(-4)
+            }
+            .frame(width: 34, height: 34)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(paperColorAccessibilityLabel(for: tint))

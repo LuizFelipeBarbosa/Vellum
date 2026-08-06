@@ -11,19 +11,14 @@ struct FavoriteColorRow: View {
 
     @Environment(\.inkDisplayStyle) private var inkDisplayStyle
 
-    // Approximate height of everything in the vertical toolbar other than the
-    // favorites strip itself: tools section (undo/redo, 6 tool buttons, insert,
-    // paper options, collapse) + dividers + edit/options buttons + paddings.
-    private static let verticalChromeAllowance: CGFloat = 580
-
     var body: some View {
         let stack = axis == .vertical
-            ? AnyLayout(VStackLayout(spacing: 14))
-            : AnyLayout(HStackLayout(spacing: 14))
+            ? AnyLayout(VStackLayout(spacing: ToolbarMetrics.itemSpacing))
+            : AnyLayout(HStackLayout(spacing: ToolbarMetrics.itemSpacing))
         stack {
             if axis == .vertical {
                 ScrollView(.vertical) {
-                    VStack(spacing: 12) {
+                    VStack(spacing: ToolbarMetrics.favoritesDotSpacing) {
                         ForEach(
                             Array(store.preferences.favorites.enumerated()),
                             id: \.offset
@@ -31,13 +26,13 @@ struct FavoriteColorRow: View {
                             colorDot(color)
                         }
                     }
-                    .padding(4)
+                    .padding(ToolbarMetrics.favoritesInnerPadding)
                 }
                 .scrollIndicators(.hidden)
                 .frame(height: stripHeight)
             } else {
                 ScrollView(.horizontal) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: ToolbarMetrics.favoritesDotSpacing) {
                         ForEach(
                             Array(store.preferences.favorites.enumerated()),
                             id: \.offset
@@ -45,10 +40,10 @@ struct FavoriteColorRow: View {
                             colorDot(color)
                         }
                     }
-                    .padding(4)
+                    .padding(ToolbarMetrics.favoritesInnerPadding)
                 }
                 .scrollIndicators(.hidden)
-                .frame(width: 292)
+                .frame(width: ToolbarMetrics.favoritesStripCap)
             }
 
             Button {
@@ -64,11 +59,14 @@ struct FavoriteColorRow: View {
             }
             .accessibilityLabel("Add favorite color")
 
-            Rectangle()
-                .fill(VellumTheme.ink(0.12))
+            VellumDashedRule(axis: axis == .vertical ? .horizontal : .vertical)
+                .stroke(
+                    VellumTheme.ink(0.2),
+                    style: StrokeStyle(lineWidth: 1, dash: [3, 4])
+                )
                 .frame(
-                    width: axis == .vertical ? 22 : 1,
-                    height: axis == .vertical ? 1 : 22
+                    width: axis == .vertical ? ToolbarMetrics.dividerLength : ToolbarMetrics.dividerThickness,
+                    height: axis == .vertical ? ToolbarMetrics.dividerThickness : ToolbarMetrics.dividerLength
                 )
 
             Button {
@@ -85,12 +83,19 @@ struct FavoriteColorRow: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(VellumTheme.mutedDark)
-        .padding(.horizontal, axis == .vertical ? 10 : 22)
-        .padding(.vertical, axis == .vertical ? 22 : 10)
+        .padding(.horizontal, axis == .vertical ? ToolbarMetrics.crossPadding : ToolbarMetrics.endPadding)
+        .padding(.vertical, axis == .vertical ? ToolbarMetrics.endPadding : ToolbarMetrics.crossPadding)
     }
 
+    // Non-strip chrome extent is derived in ToolbarMetrics.verticalNonStripAllowance.
     private var stripHeight: CGFloat {
-        min(292, max(120, (availableLength ?? .infinity) - Self.verticalChromeAllowance))
+        min(
+            ToolbarMetrics.favoritesStripCap,
+            max(
+                ToolbarMetrics.favoritesStripMin,
+                (availableLength ?? .infinity) - ToolbarMetrics.verticalNonStripAllowance
+            )
+        )
     }
 
     private var resolvedInkTool: ToolID {
@@ -118,9 +123,7 @@ struct FavoriteColorRow: View {
         Button {
             store.setColor(color, for: resolvedInkTool)
         } label: {
-            Circle()
-                .fill(displayColor(color))
-                .frame(width: 17, height: 17)
+            VellumBlobDot(color: displayColor(color), size: 17)
                 .overlay {
                     Circle()
                         .stroke(

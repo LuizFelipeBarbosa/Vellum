@@ -88,7 +88,7 @@ the read is behind `#if DEBUG` and compiles out of release builds.
 | `-vellum-force-pencil-only` | DEBUG + simulator | `PencilCanvasView.swift`, `SelectionCaptureSurface.swift`, `ShapeEraserSurface.swift`, `ShapeSnapSurface.swift` | `ShapeRecognitionFlowUITests`, `ShapeFlowTestHelpers`, `PhotoInteractionFlowUITests` — makes the simulator treat finger input as touch, not ink, so a synthesized drag is a drag |
 | `-thumbnail-slow-render` | DEBUG | `PageThumbnailStore.swift` | `PagesPanelDragUITests` — stretches thumbnail debounce from 500ms to 3000ms so the loading placeholder can be asserted against |
 | `-vellum-shape-snap-on-lift` | DEBUG | `ShapeSnapController.swift` | no test; shape-snap tests inject `policy:` directly |
-| `-prototypeStartView library\|canvas\|graph\|ask` | ungated | `VellumAppModel.swift` | no test; selects the screen shown at launch |
+| `-prototypeStartView library\|canvas\|graph\|ask\|today\|tasks` | ungated | `VellumAppModel.swift` | no test; selects the screen shown at launch |
 
 Separately, `UserDefaults` key `vellum.shapeSnapOnLift` is a **release kill switch**,
 not a test hook: mid-stroke shape snapping depends on undocumented PencilKit cancel

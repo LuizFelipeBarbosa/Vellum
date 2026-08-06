@@ -243,7 +243,7 @@ struct ToolPreferences: Codable, Equatable, Sendable {
 
     static let `default` = ToolPreferences(
         schemaVersion: 1,
-        pen: InkToolConfig(style: .pen, color: CodableColor(hex: "#26221B"), width: 4),
+        pen: InkToolConfig(style: .pen, color: CodableColor(hex: "#2A2622"), width: 4),
         pencil: InkToolConfig(
             style: .pencil,
             color: CodableColor(hex: "#5B564C"),
@@ -256,7 +256,7 @@ struct ToolPreferences: Codable, Equatable, Sendable {
         ),
         eraser: EraserConfig(mode: .partial, width: 24),
         selection: SelectionConfig(mode: .freeform),
-        text: TextConfig(fontSize: 17, color: CodableColor(hex: "#26221B")),
+        text: TextConfig(fontSize: 17, color: CodableColor(hex: "#2A2622")),
         favorites: defaultFavorites,
         lastSelectedTool: .pen,
         isToolbarCollapsed: false,
@@ -264,18 +264,9 @@ struct ToolPreferences: Codable, Equatable, Sendable {
     )
 
     static let defaultFavorites = [
-        CodableColor(hex: "#26221B"),
-        CodableColor(hex: "#5B564C"),
-        CodableColor(hex: "#9A6B35"),
-        CodableColor(hex: "#B98A4E"),
-        CodableColor(hex: "#4E6E58"),
-        CodableColor(hex: "#4F7470"),
-        CodableColor(hex: "#586E82"),
-        CodableColor(hex: "#6E5E7A"),
-        CodableColor(hex: "#955B52"),
-        CodableColor(hex: "#936B76"),
-        CodableColor(hex: "#E3B341"),
-        CodableColor(hex: "#D07B3A"),
+        CodableColor(hex: "#A6392C"),
+        CodableColor(hex: "#5E6B23"),
+        CodableColor(hex: "#2A2622"),
     ]
 
     private static func decodeInkConfig(

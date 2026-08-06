@@ -2,6 +2,8 @@ import SwiftUI
 import VellumCore
 
 struct ModeToggleRow<Mode: Hashable>: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     struct Option {
         let mode: Mode
         let label: String
@@ -15,15 +17,15 @@ struct ModeToggleRow<Mode: Hashable>: View {
 
     var body: some View {
         let stack = axis == .vertical
-            ? AnyLayout(VStackLayout(spacing: 10))
-            : AnyLayout(HStackLayout(spacing: 10))
+            ? AnyLayout(VStackLayout(spacing: ToolbarMetrics.itemSpacing))
+            : AnyLayout(HStackLayout(spacing: ToolbarMetrics.itemSpacing))
         stack {
             ForEach(Array(options.enumerated()), id: \.offset) { _, option in
                 button(for: option)
             }
         }
-        .padding(.horizontal, axis == .vertical ? 10 : 22)
-        .padding(.vertical, axis == .vertical ? 22 : 10)
+        .padding(.horizontal, axis == .vertical ? ToolbarMetrics.crossPadding : ToolbarMetrics.endPadding)
+        .padding(.vertical, axis == .vertical ? ToolbarMetrics.endPadding : ToolbarMetrics.crossPadding)
     }
 
     @ViewBuilder
@@ -35,21 +37,23 @@ struct ModeToggleRow<Mode: Hashable>: View {
             Group {
                 if axis == .vertical {
                     Image(systemName: option.systemImage)
-                        .frame(width: 24, height: 24)
+                        .frame(width: ToolbarMetrics.itemHitSize, height: ToolbarMetrics.itemHitSize)
+                        .contentShape(Rectangle())
                 } else {
                     HStack(spacing: 6) {
                         Image(systemName: option.systemImage)
                         Text(option.label)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.vellumSans(13, weight: .medium))
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(minHeight: 36)
                 }
             }
             .foregroundStyle(isSelected ? VellumTheme.accentDark : VellumTheme.mutedDark)
             .background(
                 isSelected ? VellumTheme.accent(0.11) : .clear,
-                in: RoundedRectangle(cornerRadius: axis == .vertical ? 6 : 8)
+                in: OrganicPillShape(variant: 0, smallRadius: ToolbarMetrics.selectedPillRadius, isOrganic: vellumWobble)
             )
         }
         .buttonStyle(.plain)

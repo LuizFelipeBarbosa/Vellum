@@ -3,6 +3,7 @@ import VellumCore
 
 struct ThumbnailPanelView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.vellumWobble) private var vellumWobble
     @State private var pendingDeleteIndex: Int?
 
     let store: PageThumbnailStore
@@ -22,7 +23,7 @@ struct ThumbnailPanelView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Pages")
-                        .font(.vellumNewsreader(22, weight: .semibold))
+                        .font(.vellumSans(22, weight: .semibold))
 
                     Text(pageCount == 1 ? "1 page" : "\(pageCount) pages")
                         .font(.vellumMono(10.5))
@@ -63,14 +64,14 @@ struct ThumbnailPanelView: View {
                     Image(systemName: "plus")
                     Text("Add page")
                 }
-                .font(.system(size: 13, weight: .medium))
+                .font(.vellumSans(13, weight: .semibold))
                 .foregroundStyle(VellumTheme.accentDark)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
                 .background {
-                    RoundedRectangle(cornerRadius: 8)
+                    OrganicPillShape(variant: 1, smallRadius: 10, isOrganic: vellumWobble)
                         .stroke(
-                            VellumTheme.ink(0.2),
+                            VellumTheme.ink(0.35),
                             style: StrokeStyle(
                                 lineWidth: 1,
                                 dash: [4, 3]
@@ -82,12 +83,7 @@ struct ThumbnailPanelView: View {
         }
         .padding(18)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(VellumTheme.popover, in: RoundedRectangle(cornerRadius: 16))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(VellumTheme.ink(0.14), lineWidth: 1)
-        }
-        .shadow(color: VellumTheme.ink(0.18), radius: 18, x: -4, y: 12)
+        .vellumFloatingChrome(.panel)
         .onChange(of: colorScheme) { _, _ in
             store.markDirty()
         }

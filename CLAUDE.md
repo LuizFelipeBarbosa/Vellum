@@ -28,8 +28,8 @@ same for `VellumUITests` / `VellumFlowUITests`), and `.gitignore:5` ignores
 
 | Target | XcodeGen type | What it actually is |
 |---|---|---|
-| `VellumUITests` | `bundle.unit-test` (+ `TEST_HOST`) | **Unit tests.** 364 XCTest functions across 36 files, **zero** `XCUIApplication`. Runs in-process against the app. |
-| `VellumFlowUITests` | `bundle.ui-testing` | The real XCUITest target. 43 tests across 11 files, drives the simulator, owns every launch-argument contract. |
+| `VellumUITests` | `bundle.unit-test` (+ `TEST_HOST`) | **Unit tests.** 368 XCTest functions (2026-08 count) across 36+ files, **zero** `XCUIApplication`. Runs in-process against the app. |
+| `VellumFlowUITests` | `bundle.ui-testing` | The real XCUITest target. 44 tests across 12 files, drives the simulator, owns every launch-argument contract. |
 
 Asked to "add a UI test", the name alone points at the wrong target. Decide by what
 the test does: touching a model or a pure function → `VellumUITests`; needing a real
@@ -140,10 +140,10 @@ The full table — argument, DEBUG gating, read site, and the test that depends 
 ## Tests: commands and expected counts
 
 ```sh
-# 353 tests, 14 suites, ~0.4s, no simulator — the fast loop
+# 375 tests, 14 suites, ~0.4s, no simulator — the fast loop
 cd VellumCore && swift test
 
-# 364 tests, ~19s
+# 368 tests, ~19s
 xcodegen generate
 xcodebuild test -project Vellum.xcodeproj -scheme Vellum \
   -destination 'platform=iOS Simulator,id=9FB0400F-D7AE-4101-8543-AD49E58B09A4' \
@@ -193,8 +193,10 @@ shipping app.
 
 ## Type-checker budget
 
-Nine expressions currently exceed 150ms; the worst is `NoteSplitContainerView.body` at
-1090ms. Re-measure after any large view change:
+After the 2026-08 redesign, three expressions exceed 150ms; the worst is
+`NoteHeaderChips.leftCluster` at ~290ms (previously nine, worst
+`NoteSplitContainerView.body` at 1090ms — the shared `vellumFloatingChrome`
+modifier extraction removed the old hot spots). Re-measure after any large view change:
 
 ```sh
 xcodebuild build -project Vellum.xcodeproj -scheme Vellum \
@@ -205,7 +207,7 @@ xcodebuild build -project Vellum.xcodeproj -scheme Vellum \
 
 The per-site baseline table is in `docs/quality-baseline.md`. Anything above its
 number there is a regression. (That file's *test counts* are pre-cleanup — 370/379 —
-and are superseded by the 353/364 above.)
+and are superseded by the 375/368 above.)
 
 ## Toolchain
 

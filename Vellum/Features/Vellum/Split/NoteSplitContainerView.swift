@@ -459,15 +459,7 @@ struct NoteSplitContainerView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(VellumTheme.accentDark)
                 .frame(width: 44, height: 44)
-                .background(
-                    VellumTheme.popover,
-                    in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(VellumTheme.ink(0.12), lineWidth: 1)
-                }
-                .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+                .vellumFloatingChrome(.pill(variant: 2))
                 .contentShape(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                 )

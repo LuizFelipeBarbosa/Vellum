@@ -178,7 +178,7 @@ private struct TextBoxElementView: View {
     var body: some View {
         if case .text(let content) = element.content {
             TextField("", text: $text, axis: .vertical)
-                .font(.vellumNewsreader(CGFloat(content.fontSize)))
+                .font(.vellumSans(CGFloat(content.fontSize)))
                 .foregroundStyle(
                     Color(
                         InkAppearance.displayColor(

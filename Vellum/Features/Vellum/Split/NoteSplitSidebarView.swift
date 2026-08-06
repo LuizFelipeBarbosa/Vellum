@@ -20,7 +20,7 @@ struct NoteSplitSidebarView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Notes")
-                        .font(.vellumNewsreader(22, weight: .semibold))
+                        .font(.vellumSans(22, weight: .semibold))
 
                     Text(summaries.count == 1 ? "1 note" : "\(summaries.count) notes")
                         .font(.vellumMono(10.5))

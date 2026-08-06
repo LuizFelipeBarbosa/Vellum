@@ -9,6 +9,11 @@ enum LibraryCardTreatment {
     case audio
 }
 
+enum LibraryDisplayMode: String {
+    case pinboard
+    case fieldGuide
+}
+
 struct LibraryCardData: Identifiable {
     let id: UUID
     let title: String
@@ -16,6 +21,15 @@ struct LibraryCardData: Identifiable {
     let treatment: LibraryCardTreatment
     let metaLine: String
     let dotColor: Color
+    let spaceID: UUID?
+}
+
+struct LibraryCardGroup: Identifiable {
+    let id: String
+    let name: String
+    let color: Color
+    let cards: [LibraryCardData]
+    let cardCount: Int
 }
 
 extension NoteType {
@@ -40,6 +54,14 @@ final class LibraryScreenModel {
     var unsupportedNoteCount = 0
     var filter: NoteType?
     var selectedSpaceID: UUID?
+    var displayMode: LibraryDisplayMode {
+        didSet {
+            UserDefaults.standard.set(
+                displayMode.rawValue,
+                forKey: "vellum.libraryDisplayMode"
+            )
+        }
+    }
     var isLoading = false
     var errorMessage: String?
     var isSelecting = false
@@ -52,6 +74,11 @@ final class LibraryScreenModel {
 
     init(workspace: WorkspaceService) {
         self.workspace = workspace
+        displayMode = LibraryDisplayMode(
+            rawValue: UserDefaults.standard.string(
+                forKey: "vellum.libraryDisplayMode"
+            ) ?? ""
+        ) ?? .pinboard
     }
 
     func refresh() async {
@@ -77,7 +104,7 @@ final class LibraryScreenModel {
     }
 
     var cards: [LibraryCardData] {
-        let spacesByID = Dictionary(uniqueKeysWithValues: spaces.map { ($0.space.id, $0.space) })
+        let spacesByID = self.spacesByID
         let allowedSpaceIDs: Set<UUID>? = selectedSpaceID.map { selected in
             Set([selected] + spaces.filter { $0.space.parentID == selected }.map(\.space.id))
         }
@@ -115,9 +142,62 @@ final class LibraryScreenModel {
                 previewText: previewText,
                 treatment: treatment,
                 metaLine: metaParts.joined(separator: " · "),
-                dotColor: space.map { VellumTheme.color(for: $0.color) } ?? VellumTheme.color(for: .gray)
+                dotColor: space.map { VellumTheme.color(for: $0.color) }
+                    ?? VellumTheme.color(for: .gray),
+                spaceID: space?.id
             )
         }
+    }
+
+    var cardGroups: [LibraryCardGroup] {
+        let spacesByID = self.spacesByID
+        var cardsBySpaceID: [UUID: [LibraryCardData]] = [:]
+        var orderedSpaceIDs: [UUID] = []
+        var unfiledCards: [LibraryCardData] = []
+
+        for card in cards {
+            guard let spaceID = card.spaceID,
+                  spacesByID[spaceID] != nil else {
+                unfiledCards.append(card)
+                continue
+            }
+            if cardsBySpaceID[spaceID] == nil {
+                orderedSpaceIDs.append(spaceID)
+            }
+            cardsBySpaceID[spaceID, default: []].append(card)
+        }
+
+        var groups = orderedSpaceIDs.compactMap { spaceID -> LibraryCardGroup? in
+            guard let space = spacesByID[spaceID],
+                  let cards = cardsBySpaceID[spaceID],
+                  !cards.isEmpty else { return nil }
+            return LibraryCardGroup(
+                id: spaceID.uuidString,
+                name: space.name,
+                color: VellumTheme.color(for: space.color),
+                cards: cards,
+                cardCount: cards.count
+            )
+        }
+
+        if !unfiledCards.isEmpty {
+            groups.append(
+                LibraryCardGroup(
+                    id: "unfiled",
+                    name: "Unfiled",
+                    color: VellumTheme.color(for: .gray),
+                    cards: unfiledCards,
+                    cardCount: unfiledCards.count
+                )
+            )
+        }
+        return groups
+    }
+
+    var libraryTitle: String {
+        guard let selectedSpaceID,
+              let space = spacesByID[selectedSpaceID] else { return "Library" }
+        return space.name
     }
 
     var countLine: String {
@@ -306,5 +386,9 @@ final class LibraryScreenModel {
         formatter.dateTimeStyle = .numeric
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private var spacesByID: [UUID: Space] {
+        Dictionary(uniqueKeysWithValues: spaces.map { ($0.space.id, $0.space) })
     }
 }

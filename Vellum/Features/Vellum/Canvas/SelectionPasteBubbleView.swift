@@ -41,11 +41,7 @@ struct SelectionPasteBubbleView: View {
         .font(.system(size: 12.5, weight: .medium))
         .foregroundStyle(VellumTheme.mutedDark)
         .frame(width: Self.bubbleSize.width, height: Self.bubbleSize.height)
-        .background(VellumTheme.popover, in: Capsule())
-        .overlay {
-            Capsule().stroke(VellumTheme.ink(0.12), lineWidth: 1)
-        }
-        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+        .vellumFloatingChrome(.pill(variant: 0))
         .accessibilityLabel("Paste here")
     }
 }

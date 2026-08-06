@@ -109,7 +109,7 @@ struct PageBackgroundChooserOverlay: View {
 
             VStack(spacing: 18) {
                 Text("Choose your paper")
-                    .font(.vellumNewsreader(20, weight: .semibold))
+                    .font(.vellumSans(20, weight: .semibold))
                     .foregroundStyle(VellumTheme.ink)
 
                 HStack(spacing: 18) {
@@ -124,15 +124,7 @@ struct PageBackgroundChooserOverlay: View {
                     .buttonStyle(.plain)
             }
             .padding(24)
-            .background {
-                RoundedRectangle(cornerRadius: 22)
-                    .fill(VellumTheme.popover)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 22)
-                    .stroke(VellumTheme.ink(0.12), lineWidth: 1)
-            }
-            .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+            .vellumFloatingChrome(.panel)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

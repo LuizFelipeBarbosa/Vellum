@@ -22,8 +22,11 @@
 	<string>1</string>
 	<key>UIAppFonts</key>
 	<array>
-		<string>Newsreader[opsz,wght].ttf</string>
-		<string>Newsreader-Italic[opsz,wght].ttf</string>
+		<string>Karla[wght].ttf</string>
+		<string>Karla-Italic[wght].ttf</string>
+		<string>IBMPlexMono-Regular.ttf</string>
+		<string>IBMPlexMono-Medium.ttf</string>
+		<string>IBMPlexMono-SemiBold.ttf</string>
 		<string>Caveat[wght].ttf</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>

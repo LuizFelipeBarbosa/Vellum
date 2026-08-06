@@ -26,8 +26,11 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen: {}
         UIAppFonts:
-          - "Newsreader[opsz,wght].ttf"
-          - "Newsreader-Italic[opsz,wght].ttf"
+          - "Karla[wght].ttf"
+          - "Karla-Italic[wght].ttf"
+          - "IBMPlexMono-Regular.ttf"
+          - "IBMPlexMono-Medium.ttf"
+          - "IBMPlexMono-SemiBold.ttf"
           - "Caveat[wght].ttf"
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait

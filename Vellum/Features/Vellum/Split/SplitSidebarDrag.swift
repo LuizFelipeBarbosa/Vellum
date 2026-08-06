@@ -226,7 +226,7 @@ struct NoteGhostLabel: View {
             }
 
             Text(title)
-                .font(.vellumNewsreader(15, weight: .semibold))
+                .font(.vellumSans(15, weight: .semibold))
                 .foregroundStyle(VellumTheme.ink)
                 .lineLimit(2)
 

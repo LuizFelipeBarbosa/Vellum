@@ -33,7 +33,7 @@ final class InkAppearanceTests: XCTestCase {
 
     func testDarkDisplayConversionRoundTripsToStoredColors() {
         let colors = [
-            CodableColor(hex: "#26221B"),
+            CodableColor(hex: "#2A2622"),
             CodableColor(hex: "#E53935"),
             CodableColor(red: 0.18, green: 0.47, blue: 0.82, alpha: 0.55),
         ]

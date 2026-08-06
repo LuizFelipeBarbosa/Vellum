@@ -12,6 +12,8 @@ final class NoteCanvasReference {
 }
 
 struct NoteToolbarView: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+
     let store: ToolPreferencesStore
     @Binding var selectedTool: ToolID
     @Binding var activeOptionsTool: ToolID?
@@ -50,15 +52,7 @@ struct NoteToolbarView: View {
         .buttonStyle(.plain)
         .font(.system(size: 18, weight: .medium))
         .foregroundStyle(VellumTheme.mutedDark)
-        .background(
-            VellumTheme.popover,
-            in: RoundedRectangle(cornerRadius: 22)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(VellumTheme.ink(0.12), lineWidth: 1)
-        }
-        .shadow(color: VellumTheme.ink(0.14), radius: 12, y: 6)
+        .vellumFloatingChrome(.pill(variant: 1))
         .popover(item: $activeOptionsTool, arrowEdge: arrowEdge) { tool in
             ToolOptionsPopover(tool: tool, store: store)
         }
@@ -127,30 +121,41 @@ struct NoteToolbarView: View {
     }
 
     private var sectionDivider: some View {
-        Rectangle()
-            .fill(VellumTheme.ink(0.12))
+        VellumDashedRule(axis: isVertical ? .vertical : .horizontal)
+            .stroke(
+                VellumTheme.ink(0.2),
+                style: StrokeStyle(lineWidth: 1, dash: [3, 4])
+            )
             .frame(
-                width: isVertical ? 1 : nil,
-                height: isVertical ? nil : 1
+                width: isVertical ? ToolbarMetrics.dividerThickness : nil,
+                height: isVertical ? nil : ToolbarMetrics.dividerThickness
             )
     }
 
     private var toolsSection: some View {
         let stack = isVertical
-            ? AnyLayout(VStackLayout(spacing: 14))
-            : AnyLayout(HStackLayout(spacing: 14))
+            ? AnyLayout(VStackLayout(spacing: ToolbarMetrics.itemSpacing))
+            : AnyLayout(HStackLayout(spacing: ToolbarMetrics.itemSpacing))
         return stack {
             Button {
                 canvasReference.canvasView?.undoManager?.undo()
             } label: {
-                Image(systemName: "arrow.uturn.backward")
+                toolbarItemLabel(
+                    systemImage: "arrow.uturn.backward",
+                    title: "Undo",
+                    captionFont: .vellumMono(9)
+                )
             }
             .accessibilityLabel("Undo")
 
             Button {
                 canvasReference.canvasView?.undoManager?.redo()
             } label: {
-                Image(systemName: "arrow.uturn.forward")
+                toolbarItemLabel(
+                    systemImage: "arrow.uturn.forward",
+                    title: "Redo",
+                    captionFont: .vellumMono(9)
+                )
             }
             .accessibilityLabel("Redo")
 
@@ -180,8 +185,7 @@ struct NoteToolbarView: View {
                 }
                 .disabled(onInsertFile == nil)
             } label: {
-                Image(systemName: "plus.circle")
-                    .frame(width: 24, height: 24)
+                quietActionLabel(systemImage: "plus.circle")
             }
             .accessibilityLabel("Insert")
 
@@ -190,39 +194,73 @@ struct NoteToolbarView: View {
                     isShowingPaperOptions.toggle()
                 } label: {
                     Image(systemName: "doc.text.image")
-                        .frame(width: 24, height: 24)
+                        .frame(
+                            width: ToolbarMetrics.itemHitSize,
+                            height: ToolbarMetrics.itemHitSize
+                        )
+                        .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Paper options")
             }
 
             collapseButton
+                .padding(
+                    isVertical ? .bottom : .trailing,
+                    ToolbarMetrics.collapseCornerClearance
+                )
         }
-        .padding(.horizontal, isVertical ? 10 : 22)
-        .padding(.vertical, isVertical ? 22 : 10)
+        .padding(
+            .horizontal,
+            isVertical ? ToolbarMetrics.crossPadding : ToolbarMetrics.endPadding
+        )
+        .padding(
+            .vertical,
+            isVertical ? ToolbarMetrics.endPadding : ToolbarMetrics.crossPadding
+        )
     }
 
     private var collapsedToolbar: some View {
         let stack = isVertical
-            ? AnyLayout(VStackLayout(spacing: 10))
-            : AnyLayout(HStackLayout(spacing: 10))
+            ? AnyLayout(VStackLayout(spacing: ToolbarMetrics.collapsedSpacing))
+            : AnyLayout(HStackLayout(spacing: ToolbarMetrics.collapsedSpacing))
         return stack {
             Image(systemName: systemImage(for: selectedTool))
-                .frame(width: 24, height: 24)
+                .frame(
+                    width: ToolbarMetrics.itemHitSize,
+                    height: ToolbarMetrics.itemHitSize
+                )
                 .foregroundStyle(VellumTheme.accentDark)
                 .accessibilityHidden(true)
 
             collapseButton
+                .padding(
+                    isVertical ? .bottom : .trailing,
+                    ToolbarMetrics.collapseCornerClearance
+                )
         }
-        .padding(.horizontal, isVertical ? 10 : 14)
-        .padding(.vertical, isVertical ? 14 : 10)
+        .padding(
+            .horizontal,
+            isVertical ? ToolbarMetrics.crossPadding : ToolbarMetrics.collapsedEndPadding
+        )
+        .padding(
+            .vertical,
+            isVertical ? ToolbarMetrics.collapsedEndPadding : ToolbarMetrics.crossPadding
+        )
     }
 
     private var itemDivider: some View {
-        Rectangle()
-            .fill(VellumTheme.ink(0.12))
+        VellumDashedRule(axis: isVertical ? .horizontal : .vertical)
+            .stroke(
+                VellumTheme.ink(0.2),
+                style: StrokeStyle(lineWidth: 1, dash: [3, 4])
+            )
             .frame(
-                width: isVertical ? 20 : 1,
-                height: isVertical ? 1 : 20
+                width: isVertical
+                    ? ToolbarMetrics.dividerLength
+                    : ToolbarMetrics.dividerThickness,
+                height: isVertical
+                    ? ToolbarMetrics.dividerThickness
+                    : ToolbarMetrics.dividerLength
             )
     }
 
@@ -240,7 +278,10 @@ struct NoteToolbarView: View {
             }
         } label: {
             Image(systemName: systemImage)
-                .frame(width: 24, height: 24)
+                .frame(
+                    width: ToolbarMetrics.itemHitSize,
+                    height: ToolbarMetrics.itemHitSize
+                )
                 .foregroundStyle(
                     selectedTool == tool
                         ? VellumTheme.accentDark
@@ -248,9 +289,14 @@ struct NoteToolbarView: View {
                             ? VellumTheme.toolbarMarker
                             : VellumTheme.mutedDark
                 )
+                .contentShape(Rectangle())
                 .background(
                     selectedTool == tool ? VellumTheme.accent(0.11) : .clear,
-                    in: RoundedRectangle(cornerRadius: 6)
+                    in: OrganicPillShape(
+                        variant: 1,
+                        smallRadius: ToolbarMetrics.selectedPillRadius,
+                        isOrganic: vellumWobble
+                    )
                 )
         }
         .accessibilityLabel(tool.displayName)
@@ -265,8 +311,7 @@ struct NoteToolbarView: View {
                 }
             }
         } label: {
-            Image(systemName: collapseSystemImage)
-                .frame(width: 24, height: 24)
+            quietActionLabel(systemImage: collapseSystemImage)
         }
         .accessibilityLabel(
             store.preferences.isToolbarCollapsed ? "Expand toolbar" : "Collapse toolbar"
@@ -284,6 +329,39 @@ struct NoteToolbarView: View {
         case .right:
             store.preferences.isToolbarCollapsed ? "chevron.left" : "chevron.right"
         }
+    }
+
+    @ViewBuilder
+    private func toolbarItemLabel(
+        systemImage: String,
+        title: String,
+        captionFont: Font
+    ) -> some View {
+        VStack(spacing: ToolbarMetrics.captionSpacing) {
+            Image(systemName: systemImage)
+                .frame(width: 28, height: 22)
+            Text(title)
+                .font(captionFont)
+                .lineLimit(1)
+        }
+        .frame(
+            minWidth: ToolbarMetrics.captionedItemMinWidth,
+            minHeight: ToolbarMetrics.itemHitSize
+        )
+    }
+
+    private func quietActionLabel(systemImage: String) -> some View {
+        let shape = OrganicPillShape(variant: 3, smallRadius: 8, isOrganic: vellumWobble)
+        return Image(systemName: systemImage)
+            .frame(
+                width: ToolbarMetrics.quietIconFrame,
+                height: ToolbarMetrics.quietIconFrame
+            )
+            .padding(ToolbarMetrics.quietPadding)
+            .background(VellumTheme.paper(0.45), in: shape)
+            .overlay {
+                shape.strokeBorder(VellumTheme.ink(0.18), lineWidth: 1)
+            }
     }
 
     private func systemImage(for tool: ToolID) -> String {

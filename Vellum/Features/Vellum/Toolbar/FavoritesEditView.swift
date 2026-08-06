@@ -11,7 +11,7 @@ struct FavoritesEditView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Favorites")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.vellumSans(17, weight: .semibold))
                     .foregroundStyle(VellumTheme.ink)
 
                 Spacer()
@@ -25,20 +25,21 @@ struct FavoritesEditView: View {
                     let color = store.preferences.favorites[index]
 
                     HStack(spacing: 12) {
-                        Circle()
-                            .fill(Color(InkAppearance.displayColor(
+                        VellumBlobDot(
+                            color: Color(InkAppearance.displayColor(
                                 for: color,
                                 style: inkDisplayStyle
-                            )))
-                            .frame(width: 24, height: 24)
-                            .overlay {
-                                Circle()
-                                    .stroke(VellumTheme.ink(0.12), lineWidth: 1)
-                            }
-                            .accessibilityHidden(true)
+                            )),
+                            size: 24
+                        )
+                        .overlay {
+                            Circle()
+                                .stroke(VellumTheme.ink(0.12), lineWidth: 1)
+                        }
+                        .accessibilityHidden(true)
 
                         Text(color.hexString)
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .font(.vellumMono(12, weight: .medium))
                             .foregroundStyle(VellumTheme.mutedDark)
                     }
                     .accessibilityElement(children: .combine)

@@ -10,7 +10,7 @@ struct EntityPopoverView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 Text(entity.name)
-                    .font(.vellumNewsreader(17, weight: .semibold))
+                    .font(.vellumSans(17, weight: .semibold))
                 Spacer()
                 Button("×") {
                     model.selectedEntity = nil

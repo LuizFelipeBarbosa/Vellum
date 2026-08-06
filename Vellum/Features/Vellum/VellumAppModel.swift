@@ -5,7 +5,7 @@ import UIKit
 import VellumCore
 
 enum AppScreen: Hashable {
-    case library, graph, ask, trash
+    case library, today, graph, tasks, ask, trash
     case note
 }
 
@@ -30,6 +30,8 @@ final class VellumAppModel {
     let container: AppContainer
     let library: LibraryScreenModel
     let graphScreen: GraphScreenModel
+    let today: TodayScreenModel
+    let tasksScreen: TasksScreenModel
     let askScreen: AskScreenModel
     let trashScreen: TrashScreenModel
     let toolPreferences: ToolPreferencesStore
@@ -37,6 +39,21 @@ final class VellumAppModel {
     var appearanceMode: AppearanceMode {
         didSet {
             UserDefaults.standard.set(appearanceMode.rawValue, forKey: "vellum.appearanceMode")
+        }
+    }
+    var feelGrain: Bool {
+        didSet {
+            UserDefaults.standard.set(feelGrain, forKey: "vellum.feel.grain")
+        }
+    }
+    var feelHandwriting: Bool {
+        didSet {
+            UserDefaults.standard.set(feelHandwriting, forKey: "vellum.feel.handwriting")
+        }
+    }
+    var feelWobble: Bool {
+        didSet {
+            UserDefaults.standard.set(feelWobble, forKey: "vellum.feel.wobble")
         }
     }
     var screen: AppScreen {
@@ -84,8 +101,20 @@ final class VellumAppModel {
         appearanceMode = AppearanceMode(
             rawValue: UserDefaults.standard.string(forKey: "vellum.appearanceMode") ?? ""
         ) ?? .system
+        let defaults = UserDefaults.standard
+        feelGrain = defaults.object(forKey: "vellum.feel.grain") == nil
+            ? true
+            : defaults.bool(forKey: "vellum.feel.grain")
+        feelHandwriting = defaults.object(forKey: "vellum.feel.handwriting") == nil
+            ? true
+            : defaults.bool(forKey: "vellum.feel.handwriting")
+        feelWobble = defaults.object(forKey: "vellum.feel.wobble") == nil
+            ? true
+            : defaults.bool(forKey: "vellum.feel.wobble")
         library = LibraryScreenModel(workspace: container.workspace)
         graphScreen = GraphScreenModel(container: container)
+        today = TodayScreenModel(container: container)
+        tasksScreen = TasksScreenModel(container: container)
         askScreen = AskScreenModel(container: container)
         trashScreen = TrashScreenModel(workspace: container.workspace)
         #if DEBUG
@@ -126,6 +155,8 @@ final class VellumAppModel {
             case "canvas": .note
             case "graph": .graph
             case "ask": .ask
+            case "today": .today
+            case "tasks": .tasks
             default: .library
             }
         } else {
@@ -270,6 +301,7 @@ final class VellumAppModel {
             await split.closeAll()
         }
 
+        let wasAlreadyOnScreen = screen == newScreen
         if screen != newScreen {
             screen = newScreen
         }
@@ -278,6 +310,12 @@ final class VellumAppModel {
         }
         if newScreen == .trash {
             await trashScreen.refresh()
+        }
+        if wasAlreadyOnScreen && newScreen == .today {
+            await today.refresh()
+        }
+        if wasAlreadyOnScreen && newScreen == .tasks {
+            await tasksScreen.refresh()
         }
     }
 

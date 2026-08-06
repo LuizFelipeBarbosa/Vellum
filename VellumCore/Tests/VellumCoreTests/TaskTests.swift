@@ -87,6 +87,69 @@ func listTasksOrdering() async throws {
     #expect(try await fixture.service.listTasks().map(\.text) == ["Open early", "Open late", "Done early"])
 }
 
+@Test("Completing a task persists completion and logs activity")
+func completeTask() async throws {
+    let fixture = try TaskFixture()
+    defer { fixture.cleanup() }
+    let task = TaskItem(id: UUID(), noteID: UUID(), pageID: nil, text: "Call client", isDone: false, createdAt: Date(), completedAt: nil)
+    try await fixture.tasks.save(task)
+
+    let completed = try await fixture.service.setTaskDone(task.id, isDone: true)
+    let persisted = try #require(try await fixture.tasks.list().first { $0.id == task.id })
+    let event = try #require(try await fixture.service.activity(noteID: task.noteID).first)
+
+    #expect(completed.isDone)
+    #expect(completed.completedAt != nil)
+    #expect(persisted.isDone)
+    #expect(persisted.completedAt != nil)
+    #expect(abs(try #require(persisted.completedAt).timeIntervalSince(try #require(completed.completedAt))) < 1)
+    #expect(event.noteID == task.noteID)
+    #expect(event.kind == .taskCompleted)
+    #expect(event.message == "Completed task 'Call client'.")
+}
+
+@Test("Reopening a task clears completion without logging activity")
+func reopenTask() async throws {
+    let fixture = try TaskFixture()
+    defer { fixture.cleanup() }
+    let task = TaskItem(id: UUID(), noteID: UUID(), pageID: nil, text: "Call client", isDone: true, createdAt: Date(), completedAt: Date())
+    try await fixture.tasks.save(task)
+
+    let reopened = try await fixture.service.setTaskDone(task.id, isDone: false)
+    let persisted = try #require(try await fixture.tasks.list().first { $0.id == task.id })
+
+    #expect(!reopened.isDone)
+    #expect(reopened.completedAt == nil)
+    #expect(persisted == reopened)
+    #expect(try await fixture.service.activity(noteID: task.noteID).isEmpty)
+}
+
+@Test("Setting a task to its current state is a no-op")
+func taskCompletionNoOp() async throws {
+    let fixture = try TaskFixture()
+    defer { fixture.cleanup() }
+    let task = TaskItem(id: UUID(), noteID: UUID(), pageID: nil, text: "Call client", isDone: true, createdAt: Date(), completedAt: Date())
+    try await fixture.tasks.save(task)
+    let stored = try #require(try await fixture.tasks.list().first)
+
+    let unchanged = try await fixture.service.setTaskDone(task.id, isDone: true)
+
+    #expect(unchanged == stored)
+    #expect(try await fixture.tasks.list() == [stored])
+    #expect(try await fixture.service.activity(noteID: task.noteID).isEmpty)
+}
+
+@Test("Setting a missing task done throws task not found")
+func missingTaskCompletion() async throws {
+    let fixture = try TaskFixture()
+    defer { fixture.cleanup() }
+    let taskID = UUID()
+
+    await #expect(throws: VellumError.taskNotFound(taskID)) {
+        try await fixture.service.setTaskDone(taskID, isDone: true)
+    }
+}
+
 private struct TaskFixture {
     let root: URL
     let proposals: FileProposalRepository

@@ -92,10 +92,10 @@ func tintLuminanceSelectsContrastingPatternInk() {
     #expect(!PageBackgroundStyle.isDarkTint(aboveThreshold))
     #expect(
         PageBackgroundStyle.patternInk(forTint: aboveThreshold, opacity: opacity)
-            == CodableColor(hex: "#26221B", alpha: opacity)
+            == CodableColor(hex: "#2A2622", alpha: opacity)
     )
     #expect(
         PageBackgroundStyle.patternInk(forTint: belowThreshold, opacity: opacity)
-            == CodableColor(hex: "#E9E3D6", alpha: opacity)
+            == CodableColor(hex: "#EDE5D3", alpha: opacity)
     )
 }
