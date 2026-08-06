@@ -88,6 +88,28 @@ func textRecognitionFingerprintIncludesTypedFrame() {
     )
 }
 
+@Test("Fingerprint changes when typed text moves between pages")
+func textRecognitionFingerprintIncludesTypedPage() {
+    let firstPageID = UUID()
+    let secondPageID = UUID()
+    let element = serviceTextElement(
+        "Text",
+        frame: CanvasRect(x: 1, y: 2, width: 100, height: 20)
+    )
+    let firstNote = serviceNote(pages: [
+        servicePage(id: firstPageID, order: 0, elements: [element]),
+        servicePage(id: secondPageID, order: 1),
+    ])
+    let secondNote = serviceNote(pages: [
+        servicePage(id: firstPageID, order: 0),
+        servicePage(id: secondPageID, order: 1, elements: [element]),
+    ])
+
+    #expect(
+        fingerprint(firstNote) != fingerprint(secondNote)
+    )
+}
+
 @Test("Fingerprint changes when page count changes")
 func textRecognitionFingerprintIncludesPageCount() {
     let firstNote = serviceNote(pages: [servicePage(order: 0)])

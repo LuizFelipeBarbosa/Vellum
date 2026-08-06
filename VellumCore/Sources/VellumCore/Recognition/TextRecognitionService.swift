@@ -52,7 +52,8 @@ public actor TextRecognitionService {
             update("nil-drawing")
         }
 
-        for page in input.pages {
+        for (pageIndex, page) in input.pages.enumerated() {
+            update("page-\(pageIndex)")
             for element in page.elements {
                 guard case .text(let box) = element.content else { continue }
                 update("typed-text")

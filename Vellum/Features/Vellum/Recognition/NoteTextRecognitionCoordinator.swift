@@ -1,7 +1,7 @@
 import Foundation
 import VellumCore
 
-/// Conformed to by the open note editor's model (wired in a follow-up task).
+/// Applies text recognition results to an open note editor's model.
 @MainActor
 protocol RecognitionApplying: AnyObject {
     func currentRecognitionInput() -> TextRecognitionInput?
@@ -71,9 +71,23 @@ final class NoteTextRecognitionCoordinator {
                     noteID: noteID,
                     relativePath: RecognitionSidecar.relativePath
                 ) {
-                    fingerprint = try VellumJSONCoding.decoder()
+                    let recognizedText = try VellumJSONCoding.decoder()
                         .decode(RecognizedNoteText.self, from: data)
-                        .inputFingerprint
+                    let sidecarPageTexts = Dictionary(
+                        uniqueKeysWithValues: recognizedText.pages.map { ($0.pageID, $0.plainText) }
+                    )
+                    let pendingPageTexts = Dictionary(
+                        uniqueKeysWithValues: pendingSeedInputs[noteID]?.0.pages.map {
+                            ($0.id, $0.plainText)
+                        } ?? []
+                    )
+                    let pageIDs = Set(sidecarPageTexts.keys).union(pendingPageTexts.keys)
+                    // The sidecar can land before an open editor's scheduled autosave, so
+                    // skip seeding stale page text after a crash and let recognition self-heal.
+                    let pageTextsMatch = pageIDs.allSatisfy {
+                        sidecarPageTexts[$0, default: ""] == pendingPageTexts[$0, default: ""]
+                    }
+                    fingerprint = pageTextsMatch ? recognizedText.inputFingerprint : nil
                 } else {
                     fingerprint = nil
                 }

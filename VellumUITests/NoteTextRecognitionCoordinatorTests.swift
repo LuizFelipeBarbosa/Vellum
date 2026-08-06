@@ -173,6 +173,55 @@ final class NoteTextRecognitionCoordinatorTests: XCTestCase {
         )
     }
 
+    func testSidecarWithUnpersistedPageTextRerunsRecognition() async throws {
+        let recognizedText = "Recovered recognition"
+        let typedText = "Original source"
+        let expectedPageText = "\(recognizedText)\n\(typedText)"
+        let recognizer = ScriptedInkRecognizer(lines: [line(recognizedText)])
+        let coordinator = makeCoordinator(recognizer: recognizer)
+        let note = try await saveNote(
+            title: "Untitled",
+            titleOrigin: .default,
+            typedTexts: [typedText]
+        )
+
+        coordinator.noteDidSave(TextRecognitionInput(note: note, drawingData: nil))
+
+        let didInitiallyApply = try await waitUntil {
+            let reloaded = try await self.container.workspace.loadNote(id: note.id)
+            let sidecar = try await self.container.notes.loadAsset(
+                noteID: note.id,
+                relativePath: RecognitionSidecar.relativePath
+            )
+            return reloaded.pages[0].plainText == expectedPageText && sidecar != nil
+        }
+        XCTAssertTrue(didInitiallyApply)
+        let initialCallCount = await recognizer.numberOfCalls()
+        let initialCompletionCount = await recognizer.numberOfCompletions()
+        XCTAssertEqual(initialCallCount, 1)
+        XCTAssertEqual(initialCompletionCount, 1)
+
+        var resetNote = try await container.workspace.loadNote(id: note.id)
+        resetNote.pages[0].plainText = ""
+        _ = try await container.workspace.saveNote(resetNote)
+        let blankedNote = try await container.workspace.loadNote(id: note.id)
+
+        let freshCoordinator = makeCoordinator(recognizer: recognizer)
+        freshCoordinator.noteDidSave(
+            TextRecognitionInput(note: blankedNote, drawingData: nil)
+        )
+
+        let didRecognizeAgain = try await waitUntil {
+            await recognizer.numberOfCalls() == 2
+        }
+        let didSelfHeal = try await waitUntil {
+            let reloaded = try await self.container.workspace.loadNote(id: note.id)
+            return reloaded.pages[0].plainText == expectedPageText
+        }
+        XCTAssertTrue(didRecognizeAgain)
+        XCTAssertTrue(didSelfHeal)
+    }
+
     func testClosedNotePreservesManualTitle() async throws {
         let recognizer = ScriptedInkRecognizer(lines: [line("Suggested title. Details")])
         let coordinator = makeCoordinator(recognizer: recognizer)
