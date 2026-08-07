@@ -493,6 +493,7 @@ func workspaceNoteSummaries() async throws {
     older.spaceID = spaceID
     older.noteType = .pdf
     older.links = [NoteLink(id: UUID(), targetNoteID: newer.id, kind: .related, createdAt: Date())]
+    older.tags = ["work", "urgent"]
     older.updatedAt = Date(timeIntervalSince1970: 1)
     newer.updatedAt = Date(timeIntervalSince1970: 2)
     try await fixture.notes.saveNote(older)
@@ -506,6 +507,7 @@ func workspaceNoteSummaries() async throws {
     #expect(summary.previewText == "Useful preview text")
     #expect(summary.hasInk)
     #expect(summary.linkCount == 1)
+    #expect(summary.tags == ["work", "urgent"])
     #expect(summary.spaceID == spaceID)
     #expect(summary.noteType == .pdf)
 }

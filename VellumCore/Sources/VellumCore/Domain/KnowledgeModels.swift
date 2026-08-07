@@ -137,6 +137,7 @@ public struct NoteSummary: Identifiable, Codable, Sendable {
     public let previewText: String
     public let hasInk: Bool
     public let linkCount: Int
+    public let tags: [String]
     public let updatedAt: Date
 
     public init(
@@ -147,6 +148,7 @@ public struct NoteSummary: Identifiable, Codable, Sendable {
         previewText: String,
         hasInk: Bool,
         linkCount: Int,
+        tags: [String] = [],
         updatedAt: Date
     ) {
         self.id = id
@@ -156,7 +158,21 @@ public struct NoteSummary: Identifiable, Codable, Sendable {
         self.previewText = previewText
         self.hasInk = hasInk
         self.linkCount = linkCount
+        self.tags = tags
         self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        noteType = try container.decode(NoteType.self, forKey: .noteType)
+        spaceID = try container.decodeIfPresent(UUID.self, forKey: .spaceID)
+        previewText = try container.decode(String.self, forKey: .previewText)
+        hasInk = try container.decode(Bool.self, forKey: .hasInk)
+        linkCount = try container.decode(Int.self, forKey: .linkCount)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
 }
 

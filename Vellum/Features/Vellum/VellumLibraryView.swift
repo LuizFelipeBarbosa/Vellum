@@ -445,6 +445,7 @@ struct VellumLibraryView: View {
         isSelecting: Bool,
         isSelected: Bool
     ) -> some View {
+        let tags = model.library.summaries.first { $0.id == card.id }?.tags ?? []
         let action: () -> Void = {
             if isSelecting {
                 model.library.toggleSelection(card.id)
@@ -457,6 +458,7 @@ struct VellumLibraryView: View {
             case .pinboard:
                 VellumLibraryCardView(
                     card: card,
+                    tags: tags,
                     isSelecting: isSelecting,
                     isSelected: isSelected,
                     action: action
@@ -464,6 +466,7 @@ struct VellumLibraryView: View {
             case .fieldGuide:
                 VellumLibraryRowView(
                     card: card,
+                    tags: tags,
                     isSelecting: isSelecting,
                     isSelected: isSelected,
                     action: action
@@ -526,6 +529,7 @@ private enum LibraryCardLayout {
 
 private struct VellumLibraryCardView: View {
     let card: LibraryCardData
+    let tags: [String]
     let isSelecting: Bool
     let isSelected: Bool
     let action: () -> Void
@@ -550,6 +554,11 @@ private struct VellumLibraryCardView: View {
                     .lineLimit(1)
                     .padding(.top, 13)
                     .padding(.bottom, 6)
+
+                if !tags.isEmpty {
+                    VellumTagChipsRow(tags: tags)
+                        .padding(.bottom, 8)
+                }
 
                 HStack(spacing: 7) {
                     Circle()
@@ -594,6 +603,7 @@ private struct VellumLibraryCardView: View {
 
 private struct VellumLibraryRowView: View {
     let card: LibraryCardData
+    let tags: [String]
     let isSelecting: Bool
     let isSelected: Bool
     let action: () -> Void
@@ -622,6 +632,10 @@ private struct VellumLibraryRowView: View {
                         .font(.vellumSans(16))
                         .foregroundStyle(VellumTheme.mutedDark)
                         .lineLimit(1)
+
+                    if !tags.isEmpty {
+                        VellumTagChipsRow(tags: tags)
+                    }
 
                     Spacer(minLength: 4)
 
@@ -661,6 +675,35 @@ private struct VellumLibraryRowView: View {
             .font(.system(size: 21, weight: .semibold))
             .foregroundStyle(isSelected ? VellumTheme.accent : VellumTheme.mutedControl)
             .background(VellumTheme.card, in: Circle())
+    }
+}
+
+private struct VellumTagChipsRow: View {
+    let tags: [String]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(tags.prefix(2).enumerated()), id: \.offset) { index, tag in
+                Text(displayText(for: tag))
+                    .font(.vellumMono(10.5))
+                    .foregroundStyle(VellumTheme.bodyMuted)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background {
+                        VellumPillChrome(
+                            fill: VellumTheme.ink(0.05),
+                            border: VellumTheme.ink(0.14),
+                            variant: index
+                        )
+                    }
+                    .accessibilityLabel(tag)
+            }
+        }
+    }
+
+    private func displayText(for tag: String) -> String {
+        tag.count > 12 ? String(tag.prefix(12)) + "…" : tag
     }
 }
 

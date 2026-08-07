@@ -329,6 +329,7 @@ public actor WorkspaceService {
                     previewText: String(preview.prefix(160)),
                     hasInk: hasInk,
                     linkCount: note.links.count,
+                    tags: note.tags,
                     updatedAt: note.updatedAt
                 )
             )
