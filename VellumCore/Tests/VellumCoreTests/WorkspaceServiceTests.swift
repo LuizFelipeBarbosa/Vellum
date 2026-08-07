@@ -150,12 +150,13 @@ func workspaceActivityDigest() async throws {
     #expect(digest.totalAgentActions == 3)
 }
 
-@Test("Analysis context includes current space, spaces, and other notes")
+@Test("Analysis context includes existing workspace knowledge")
 func requestAnalysisCarriesKnowledgeContext() async throws {
     let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let notes = FileNoteRepository(rootDirectory: root)
     let spaces = FileSpaceRepository(rootDirectory: root)
+    let entities = FileEntityRepository(rootDirectory: root)
     let agent = CapturingAgent()
     let service = WorkspaceService(
         notes: notes,
@@ -163,16 +164,74 @@ func requestAnalysisCarriesKnowledgeContext() async throws {
         activity: FileActivityRepository(rootDirectory: root),
         agent: agent,
         spaces: spaces,
-        entities: FileEntityRepository(rootDirectory: root),
+        entities: entities,
         tasks: FileTaskRepository(rootDirectory: root)
     )
     let space = Space(id: UUID(), name: "Research", color: .blue, createdAt: Date())
     try await spaces.save(space)
     var current = try await notes.createNote(title: "Current")
     current.spaceID = space.id
+    current.tags = ["swift", "research"]
     current.pages[0].plainText = "Context text"
+    var other = try await notes.createNote(title: "Other")
+    other.pages[0].plainText = "   "
+    let otherPreview = "Useful preview " + String(repeating: "detail ", count: 30)
+    other.pages.append(
+        NotePage(
+            id: UUID(),
+            order: 2,
+            plainText: "Later page",
+            drawingAssetPath: "pages/later/drawing.data",
+            background: .blank
+        )
+    )
+    other.pages.append(
+        NotePage(
+            id: UUID(),
+            order: 1,
+            plainText: "  \(otherPreview)  ",
+            drawingAssetPath: "pages/preview/drawing.data",
+            background: .blank
+        )
+    )
+    try await notes.saveNote(other)
+    var secondOther = try await notes.createNote(title: "Second Other")
+    secondOther.pages[0].plainText = "Second preview"
+    try await notes.saveNote(secondOther)
+    current.links = [
+        NoteLink(id: UUID(), targetNoteID: other.id, kind: .related, createdAt: Date()),
+        NoteLink(id: UUID(), targetNoteID: other.id, kind: .mention, createdAt: Date()),
+        NoteLink(id: UUID(), targetNoteID: secondOther.id, kind: .related, createdAt: Date()),
+    ]
     try await notes.saveNote(current)
-    let other = try await notes.createNote(title: "Other")
+    let currentSource = EntitySource(noteID: current.id, pageID: nil, excerpt: nil)
+    try await entities.save(
+        Entity(
+            id: UUID(),
+            name: "Vellum",
+            kind: .topic,
+            sources: [currentSource],
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+    )
+    try await entities.save(
+        Entity(
+            id: UUID(),
+            name: "Vellum",
+            kind: .document,
+            sources: [currentSource],
+            createdAt: Date(timeIntervalSince1970: 2)
+        )
+    )
+    try await entities.save(
+        Entity(
+            id: UUID(),
+            name: "Other Entity",
+            kind: .topic,
+            sources: [EntitySource(noteID: other.id, pageID: nil, excerpt: nil)],
+            createdAt: Date(timeIntervalSince1970: 3)
+        )
+    )
 
     _ = try await service.requestAnalysis(noteID: current.id)
     let context = try #require(await agent.context())
@@ -181,8 +240,13 @@ func requestAnalysisCarriesKnowledgeContext() async throws {
     #expect(context.spaces.map(\.id) == [space.id])
     #expect(context.spaces.map(\.name) == [space.name])
     #expect(context.spaces.map(\.color) == [space.color])
-    #expect(context.otherNotes == [NoteRef(id: other.id, title: other.title)])
+    #expect(context.otherNotes.count == 2)
+    #expect(context.otherNotes.first { $0.id == other.id }?.preview == String(otherPreview.prefix(160)))
+    #expect(context.otherNotes.first { $0.id == secondOther.id }?.preview == "Second preview")
     #expect(context.canonicalText == "Context text")
+    #expect(context.existingTags == ["swift", "research"])
+    #expect(context.existingLinkTargetIDs == [other.id, secondOther.id])
+    #expect(context.existingEntityNames == ["Vellum"])
 }
 
 @Test("Soft-deleted notes are hidden from workspace knowledge listings")

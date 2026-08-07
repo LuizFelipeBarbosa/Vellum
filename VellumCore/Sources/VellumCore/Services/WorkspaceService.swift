@@ -342,6 +342,33 @@ public actor WorkspaceService {
             .sorted(by: NotePage.byOrder)
             .map(\.plainText)
             .joined(separator: "\n\n")
+        let listedNotes = try await notes.listNotes()
+        let otherNotes = listedNotes
+            .filter { $0.id != note.id }
+            .map { otherNote in
+                let preview = otherNote.pages
+                    .sorted(by: NotePage.byOrder)
+                    .map(\.plainText)
+                    .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return NoteRef(
+                    id: otherNote.id,
+                    title: otherNote.title,
+                    preview: String(preview.prefix(160))
+                )
+            }
+        var existingLinkTargetIDs: [UUID] = []
+        var seenLinkTargetIDs: Set<UUID> = []
+        for link in note.links where seenLinkTargetIDs.insert(link.targetNoteID).inserted {
+            existingLinkTargetIDs.append(link.targetNoteID)
+        }
+        var existingEntityNames: [String] = []
+        var seenEntityNames: Set<String> = []
+        for entity in try await entities.list()
+        where entity.sources.contains(where: { $0.noteID == note.id }) {
+            guard seenEntityNames.insert(entity.name).inserted else { continue }
+            existingEntityNames.append(entity.name)
+        }
         let now = Date()
         let event = WorkspaceEvent(
             id: UUID(),
@@ -357,9 +384,10 @@ public actor WorkspaceService {
             canonicalText: canonicalText,
             currentSpaceID: note.spaceID,
             spaces: try await spaces.list(),
-            otherNotes: try await notes.listNotes()
-                .filter { $0.id != note.id }
-                .map { NoteRef(id: $0.id, title: $0.title) }
+            otherNotes: otherNotes,
+            existingTags: note.tags,
+            existingLinkTargetIDs: existingLinkTargetIDs,
+            existingEntityNames: existingEntityNames
         )
         let generated = try await agent.analyze(event: event, context: context)
         for proposal in generated {

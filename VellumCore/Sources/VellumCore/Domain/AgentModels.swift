@@ -8,6 +8,12 @@ public struct AgentContext: Codable, Sendable {
     public let currentSpaceID: UUID?
     public let spaces: [Space]
     public let otherNotes: [NoteRef]
+    /// Tags already assigned to the note being analyzed.
+    public let existingTags: [String]
+    /// Note IDs already linked from the note being analyzed.
+    public let existingLinkTargetIDs: [UUID]
+    /// Entity names already sourced from the note being analyzed.
+    public let existingEntityNames: [String]
 
     public init(
         noteID: UUID,
@@ -16,7 +22,10 @@ public struct AgentContext: Codable, Sendable {
         canonicalText: String,
         currentSpaceID: UUID? = nil,
         spaces: [Space] = [],
-        otherNotes: [NoteRef] = []
+        otherNotes: [NoteRef] = [],
+        existingTags: [String] = [],
+        existingLinkTargetIDs: [UUID] = [],
+        existingEntityNames: [String] = []
     ) {
         self.noteID = noteID
         self.noteRevision = noteRevision
@@ -25,6 +34,29 @@ public struct AgentContext: Codable, Sendable {
         self.currentSpaceID = currentSpaceID
         self.spaces = spaces
         self.otherNotes = otherNotes
+        self.existingTags = existingTags
+        self.existingLinkTargetIDs = existingLinkTargetIDs
+        self.existingEntityNames = existingEntityNames
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        noteID = try container.decode(UUID.self, forKey: .noteID)
+        noteRevision = try container.decode(Int.self, forKey: .noteRevision)
+        title = try container.decode(String.self, forKey: .title)
+        canonicalText = try container.decode(String.self, forKey: .canonicalText)
+        currentSpaceID = try container.decodeIfPresent(UUID.self, forKey: .currentSpaceID)
+        spaces = try container.decode([Space].self, forKey: .spaces)
+        otherNotes = try container.decode([NoteRef].self, forKey: .otherNotes)
+        existingTags = try container.decodeIfPresent([String].self, forKey: .existingTags) ?? []
+        existingLinkTargetIDs = try container.decodeIfPresent(
+            [UUID].self,
+            forKey: .existingLinkTargetIDs
+        ) ?? []
+        existingEntityNames = try container.decodeIfPresent(
+            [String].self,
+            forKey: .existingEntityNames
+        ) ?? []
     }
 }
 

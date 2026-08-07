@@ -112,10 +112,20 @@ public struct TaskItem: Identifiable, Codable, Sendable, Equatable {
 public struct NoteRef: Codable, Sendable, Equatable {
     public let id: UUID
     public let title: String
+    /// A short excerpt from the note's first non-empty page.
+    public let preview: String
 
-    public init(id: UUID, title: String) {
+    public init(id: UUID, title: String, preview: String = "") {
         self.id = id
         self.title = title
+        self.preview = preview
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
     }
 }
 
