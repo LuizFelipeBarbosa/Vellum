@@ -328,6 +328,7 @@ final class LibraryScreenModel {
         do {
             var note = try await workspace.loadNote(id: noteID)
             note.title = newTitle.isEmpty ? "Untitled" : newTitle
+            note.titleOrigin = .manual
             _ = try await workspace.saveNote(note)
             await refresh()
         } catch {

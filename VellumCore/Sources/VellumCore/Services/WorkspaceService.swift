@@ -421,6 +421,7 @@ public actor WorkspaceService {
             note = try await saveNote(note)
         case .suggestTitle(let title):
             note.title = title
+            note.titleOrigin = .manual
             note = try await saveNote(note)
         case .createSummary(let summary):
             struct Summary: Encodable {

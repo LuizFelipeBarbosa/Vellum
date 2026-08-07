@@ -36,6 +36,7 @@ final class NoteScreenModel {
     private let notes: any NoteRepository
     private let workspace: WorkspaceService
     private let graph: KnowledgeGraphService
+    private let textRecognition: NoteTextRecognitionCoordinator
     private let onNoteChanged: @MainActor (Note) -> Void
 
     private var pendingSaveTask: Task<Void, Never>?
@@ -91,6 +92,7 @@ final class NoteScreenModel {
         notes = container.notes
         workspace = container.workspace
         graph = container.graph
+        textRecognition = container.textRecognition
         self.onNoteChanged = onNoteChanged
         canvasElements.onElementsChanged = { [weak self] elements in
             self?.elementsChanged(elements)
@@ -126,6 +128,7 @@ final class NoteScreenModel {
         set {
             guard note?.title != newValue else { return }
             note?.title = newValue
+            note?.titleOrigin = .manual
             noteWasEdited()
         }
     }
@@ -833,6 +836,9 @@ final class NoteScreenModel {
                     )
                 }
                 await refreshProposalsAfterSave()
+                if let input = currentRecognitionInput() {
+                    textRecognition.noteDidSave(input)
+                }
             } catch {
                 saveState = .unsaved
                 handle(error)
@@ -990,5 +996,57 @@ final class NoteScreenModel {
             pendingSaveToken = nil
         }
         errorMessage = error.localizedDescription
+    }
+}
+
+extension NoteScreenModel: RecognitionApplying {
+    func currentRecognitionInput() -> TextRecognitionInput? {
+        guard let note else { return nil }
+        return TextRecognitionInput(note: note, drawingData: drawingData)
+    }
+
+    func applyRecognitionOutcome(_ outcome: TextRecognitionOutcome) {
+        guard var currentNote = note,
+              TextRecognitionService.fingerprint(
+                  for: TextRecognitionInput(note: currentNote, drawingData: drawingData)
+              ) == outcome.fingerprint else {
+            return
+        }
+
+        var changed = false
+        for index in currentNote.pages.indices {
+            if let text = outcome.pageTexts[currentNote.pages[index].id],
+               currentNote.pages[index].plainText != text {
+                currentNote.pages[index].plainText = text
+                changed = true
+            }
+        }
+
+        if currentNote.isEligibleForAutoTitle {
+            let orderedPages = currentNote.pages.sorted { lhs, rhs in
+                if lhs.order == rhs.order {
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+                return lhs.order < rhs.order
+            }
+            if let pageText = orderedPages.lazy.compactMap({ page -> String? in
+                guard let text = outcome.pageTexts[page.id],
+                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return nil
+                }
+                return text
+            }).first {
+                let title = TitleSuggestion.firstSentence(from: pageText)
+                if !title.isEmpty {
+                    currentNote.title = title
+                    currentNote.titleOrigin = .auto
+                    changed = true
+                }
+            }
+        }
+
+        guard changed else { return }
+        note = currentNote
+        noteWasEdited()
     }
 }

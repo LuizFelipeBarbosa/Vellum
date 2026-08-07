@@ -89,6 +89,7 @@ final class VellumAppModel {
     private let debugSplitPaneCount: Int?
     private let debugSplitGridRows: [Int]?
     private let debugPDFFixtureNoteRequested: Bool
+    private let debugAutoTitleSeedRequested: Bool
     #endif
 
     init(
@@ -126,6 +127,7 @@ final class VellumAppModel {
         }
         debugAutoOpenMostRecentNote = arguments.contains("-vellum-auto-open-note")
         debugPDFFixtureNoteRequested = arguments.contains("-vellum-pdf-fixture-note")
+        debugAutoTitleSeedRequested = arguments.contains("-vellum-autotitle-seed-note")
         if let flagIndex = arguments.firstIndex(of: "-vellum-split-panes"),
            arguments.indices.contains(flagIndex + 1),
            let count = Int(arguments[flagIndex + 1]) {
@@ -162,12 +164,20 @@ final class VellumAppModel {
         } else {
             screen = .library
         }
+        split.onPaneRemoved = { [weak self] noteID in
+            self?.container.textRecognition.unregister(noteID: noteID)
+        }
     }
 
     func bootstrap() async {
         guard !didBootstrap else { return }
         didBootstrap = true
         _ = await container.seedIfNeeded()
+        #if DEBUG
+        if debugAutoTitleSeedRequested {
+            await seedAutoTitleFixtureNote()
+        }
+        #endif
         await library.refresh()
         await graphScreen.refresh()
 
@@ -358,6 +368,7 @@ final class VellumAppModel {
                 }
             }
         )
+        container.textRecognition.register(noteModel, noteID: id)
         let newPane = NotePane(noteModel: noteModel)
 
         switch placement {
@@ -573,4 +584,40 @@ final class VellumAppModel {
             await self.askScreen.loadSuggestions()
         }
     }
+
+    #if DEBUG
+    /// Seeds a fresh untitled note holding one typed text element so
+    /// VellumFlowUITests/AutoTitleFlowUITests can exercise the recognition
+    /// auto-title pipeline without driving canvas text entry (which XCUITest
+    /// cannot synthesize reliably). Prior fixtures are purged by tag so
+    /// repeated runs stay deterministic.
+    private func seedAutoTitleFixtureNote() async {
+        let marker = "vellum-autotitle-fixture"
+        do {
+            for note in try await container.notes.listNotes(scope: .all)
+            where note.tags.contains(marker) {
+                _ = try await container.notes.purgeNote(id: note.id)
+            }
+
+            var note = try await container.workspace.createNote(title: "")
+            note.tags = [marker]
+            let defaults = toolPreferences.preferences.text
+            note.pages[0].elements.append(
+                CanvasElement(
+                    content: .text(
+                        TextBoxContent(
+                            text: "Team retro notes. more detail",
+                            fontSize: defaults.fontSize,
+                            color: defaults.color
+                        )
+                    ),
+                    frame: CanvasRect(x: 80, y: 80, width: 320, height: 44)
+                )
+            )
+            _ = try await container.workspace.saveNote(note)
+        } catch {
+            print("WARNING: auto-title fixture seeding failed: \(error)")
+        }
+    }
+    #endif
 }
