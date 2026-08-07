@@ -42,6 +42,9 @@ final class NoteScreenModel {
 
     private var pendingSaveTask: Task<Void, Never>?
     private var pendingSaveToken: UUID?
+    private var autoAnalyzeIdleTask: Task<Void, Never>?
+    private var autoAnalyzeIdleToken: UUID?
+    private var inFlightAutoAnalyze: Task<Void, Never>?
     private var editGeneration = 0
     private var savedGeneration = 0
     private var inFlightSave: Task<Void, Never>?
@@ -257,6 +260,10 @@ final class NoteScreenModel {
                 noteWasEdited()
             }
             isShowingBackgroundChooser = offersBackgroundChooser
+            Task { [weak self] in
+                guard let self else { return }
+                await self.autoAnalyzeIfNeeded()
+            }
         } catch {
             handle(error)
         }
@@ -621,18 +628,38 @@ final class NoteScreenModel {
         await flushPendingSave()
         guard !autosaveDisabled, savedGeneration == editGeneration else { return }
 
+        let analyzedTextHash = currentAnalysisText().map {
+            AgentStateSidecar.textHash(for: $0)
+        }
+
         isAnalyzing = true
         defer { isAnalyzing = false }
 
         do {
-            _ = try await workspace.requestAnalysis(noteID: noteID)
-            proposals = sortedProposals(
-                try await workspace.listProposals(noteID: noteID)
-            )
-            try await refreshRelatedContent()
+            try await performAnalysis()
+            if let analyzedTextHash {
+                try await saveAgentAnalysisState(textHash: analyzedTextHash)
+            }
         } catch {
             handle(error)
         }
+    }
+
+    func autoAnalyzeIfNeeded() async {
+        // Analysis can persist proposals incrementally, so overlapping triggers join
+        // the current work instead of cancelling and replacing it.
+        if let inFlightAutoAnalyze {
+            await inFlightAutoAnalyze.value
+            return
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performAutoAnalysisIfNeeded()
+        }
+        inFlightAutoAnalyze = task
+        await task.value
+        inFlightAutoAnalyze = nil
     }
 
     func refreshProposals() async {
@@ -718,6 +745,7 @@ final class NoteScreenModel {
         editGeneration += 1
         saveState = .unsaved
         scheduleDebouncedSave()
+        scheduleIdleAutoAnalyze()
     }
 
     private func pagesRestored(_ pages: [NotePage]) {
@@ -776,6 +804,98 @@ final class NoteScreenModel {
         guard pendingSaveToken == token else { return }
         pendingSaveTask = nil
         pendingSaveToken = nil
+    }
+
+    private func scheduleIdleAutoAnalyze() {
+        autoAnalyzeIdleTask?.cancel()
+        let token = UUID()
+        autoAnalyzeIdleToken = token
+        autoAnalyzeIdleTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(120))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            await self.autoAnalyzeIfNeeded()
+            self.clearIdleAutoAnalyzeTask(matching: token)
+        }
+    }
+
+    private func clearIdleAutoAnalyzeTask(matching token: UUID) {
+        guard autoAnalyzeIdleToken == token else { return }
+        autoAnalyzeIdleTask = nil
+        autoAnalyzeIdleToken = nil
+    }
+
+    private func performAutoAnalysisIfNeeded() async {
+        guard SettingsKeys.isAutoOrganizeEnabled() else { return }
+
+        await flushPendingSave()
+        guard !autosaveDisabled, savedGeneration == editGeneration else { return }
+
+        guard let analysisText = currentAnalysisText(), analysisText.count >= 80 else {
+            return
+        }
+
+        let textHash = AgentStateSidecar.textHash(for: analysisText)
+        let previousState = await loadAgentAnalysisState()
+        guard previousState?.lastAnalyzedTextHash != textHash else { return }
+
+        do {
+            try await performAnalysis()
+            try await saveAgentAnalysisState(textHash: textHash)
+        } catch {
+            print("WARNING: auto-analyze failed: \(error)")
+        }
+    }
+
+    private func currentAnalysisText() -> String? {
+        note?.pages
+            .sorted(by: NotePage.byOrder)
+            .map(\.plainText)
+            .joined(separator: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func loadAgentAnalysisState() async -> AgentAnalysisState? {
+        do {
+            guard let data = try await notes.loadAsset(
+                noteID: noteID,
+                relativePath: AgentStateSidecar.relativePath
+            ) else {
+                return nil
+            }
+            return try? VellumJSONCoding.decoder().decode(
+                AgentAnalysisState.self,
+                from: data
+            )
+        } catch {
+            print("WARNING: auto-analyze state could not be loaded: \(error)")
+            return nil
+        }
+    }
+
+    private func saveAgentAnalysisState(textHash: String) async throws {
+        let state = AgentAnalysisState(
+            schemaVersion: AgentStateSidecar.schemaVersion,
+            lastAnalyzedTextHash: textHash,
+            analyzedAt: Date()
+        )
+        let data = try VellumJSONCoding.encoder().encode(state)
+        try await notes.saveAsset(
+            data,
+            noteID: noteID,
+            relativePath: AgentStateSidecar.relativePath
+        )
+    }
+
+    private func performAnalysis() async throws {
+        _ = try await workspace.requestAnalysis(noteID: noteID)
+        proposals = sortedProposals(
+            try await workspace.listProposals(noteID: noteID)
+        )
+        try await refreshRelatedContent()
     }
 
     private func saveUntilCurrent() async {

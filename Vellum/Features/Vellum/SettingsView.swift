@@ -49,6 +49,18 @@ struct SettingsView: View {
                     )
                 }
                 .padding(.top, 11)
+
+                sectionLabel("INTELLIGENCE")
+                    .padding(.top, 26)
+
+                VStack(spacing: 10) {
+                    SettingsFeelRow(
+                        label: "Suggest organization",
+                        hint: "quiet proposals after you write",
+                        isOn: $model.autoOrganizeEnabled
+                    )
+                }
+                .padding(.top, 11)
             }
             .padding(.horizontal, 24)
             .padding(.top, 22)

@@ -56,6 +56,14 @@ final class VellumAppModel {
             UserDefaults.standard.set(feelWobble, forKey: "vellum.feel.wobble")
         }
     }
+    var autoOrganizeEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                autoOrganizeEnabled,
+                forKey: SettingsKeys.autoOrganizeEnabled
+            )
+        }
+    }
     var screen: AppScreen {
         didSet {
             guard screen == .library else { return }
@@ -112,6 +120,7 @@ final class VellumAppModel {
         feelWobble = defaults.object(forKey: "vellum.feel.wobble") == nil
             ? true
             : defaults.bool(forKey: "vellum.feel.wobble")
+        autoOrganizeEnabled = SettingsKeys.isAutoOrganizeEnabled(in: defaults)
         library = LibraryScreenModel(workspace: container.workspace)
         graphScreen = GraphScreenModel(container: container)
         today = TodayScreenModel(container: container)
@@ -469,6 +478,7 @@ final class VellumAppModel {
     func closePane(_ paneID: UUID) async {
         if let pane = split.panes.first(where: { $0.id == paneID }) {
             await pane.noteModel.flushPendingSave()
+            Task { await pane.noteModel.autoAnalyzeIfNeeded() }
         }
         split.removePane(id: paneID)
         if split.panes.isEmpty {

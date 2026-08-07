@@ -130,32 +130,7 @@ struct NoteHeaderChips: View {
     private var rightCluster: some View {
         chip {
             HStack(spacing: 10) {
-                Button {
-                    Task { await model.organize() }
-                } label: {
-                    if model.isAnalyzing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityLabel("Organizing")
-                    } else {
-                        Label("Organize", systemImage: "sparkles")
-                    }
-                }
-                .buttonStyle(.plain)
-                .font(.vellumSans(16.5, weight: .medium))
-                .foregroundStyle(VellumTheme.ink)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    VellumTheme.highlight.opacity(0.24),
-                    in: OrganicPillShape(variant: 1, smallRadius: 8, isOrganic: vellumWobble)
-                )
-                .overlay {
-                    OrganicPillShape(variant: 1, smallRadius: 8, isOrganic: vellumWobble)
-                        .strokeBorder(VellumTheme.ink(0.24), lineWidth: 1)
-                }
-                .frame(minHeight: 44)
-                .disabled(model.isAnalyzing || model.note == nil)
+                OrganizeButton(model: model)
 
                 askButton
 
@@ -303,5 +278,73 @@ struct NoteHeaderChips: View {
         }
         guard let trailing = reportedTrailingFrame else { return }
         onClusterFrames?(leading, trailing)
+    }
+}
+
+private struct OrganizeButton: View {
+    @Environment(\.vellumWobble) private var vellumWobble
+    @Bindable var model: NoteScreenModel
+
+    @ViewBuilder
+    var body: some View {
+        let pendingCount = model.pendingProposals.count
+
+        if pendingCount > 0 {
+            button
+                .overlay(alignment: .topTrailing) {
+                    OrganizePendingBadge(count: pendingCount)
+                        .offset(x: 5, y: -3)
+                }
+                .accessibilityValue(
+                    "\(pendingCount) suggestion\(pendingCount == 1 ? "" : "s")"
+                )
+        } else {
+            button
+        }
+    }
+
+    private var button: some View {
+        Button {
+            Task { await model.organize() }
+        } label: {
+            if model.isAnalyzing {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Organizing")
+            } else {
+                Label("Organize", systemImage: "sparkles")
+            }
+        }
+        .buttonStyle(.plain)
+        .font(.vellumSans(16.5, weight: .medium))
+        .foregroundStyle(VellumTheme.ink)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            VellumTheme.highlight.opacity(0.24),
+            in: OrganicPillShape(variant: 1, smallRadius: 8, isOrganic: vellumWobble)
+        )
+        .overlay {
+            OrganicPillShape(variant: 1, smallRadius: 8, isOrganic: vellumWobble)
+                .strokeBorder(VellumTheme.ink(0.24), lineWidth: 1)
+        }
+        .frame(minHeight: 44)
+        .disabled(model.isAnalyzing || model.note == nil)
+    }
+}
+
+private struct OrganizePendingBadge: View {
+    let count: Int
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(VellumTheme.accent)
+            Text("\(count)")
+                .font(.vellumMono(10, weight: .medium))
+                .foregroundStyle(VellumTheme.paper)
+        }
+        .frame(width: 18, height: 18)
+        .accessibilityHidden(true)
     }
 }
