@@ -37,6 +37,7 @@ final class NoteScreenModel {
     private let workspace: WorkspaceService
     private let graph: KnowledgeGraphService
     private let textRecognition: NoteTextRecognitionCoordinator
+    let noteAsk: any NoteAskProviding
     private let onNoteChanged: @MainActor (Note) -> Void
 
     private var pendingSaveTask: Task<Void, Never>?
@@ -93,6 +94,7 @@ final class NoteScreenModel {
         workspace = container.workspace
         graph = container.graph
         textRecognition = container.textRecognition
+        noteAsk = container.noteAsk
         self.onNoteChanged = onNoteChanged
         canvasElements.onElementsChanged = { [weak self] elements in
             self?.elementsChanged(elements)

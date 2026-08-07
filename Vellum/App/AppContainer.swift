@@ -13,6 +13,7 @@ struct AppContainer: Sendable {
     let workspace: WorkspaceService
     let graph: KnowledgeGraphService
     let askService: AskService
+    let noteAsk: any NoteAskProviding
     let textRecognition: NoteTextRecognitionCoordinator
 
     @MainActor
@@ -27,7 +28,8 @@ struct AppContainer: Sendable {
         tasks: any TaskRepository,
         workspace: WorkspaceService,
         graph: KnowledgeGraphService,
-        askService: AskService
+        askService: AskService,
+        noteAsk: any NoteAskProviding = KeywordNoteAskProvider()
     ) {
         self.rootDirectory = rootDirectory
         self.notes = notes
@@ -40,6 +42,7 @@ struct AppContainer: Sendable {
         self.workspace = workspace
         self.graph = graph
         self.askService = askService
+        self.noteAsk = noteAsk
         textRecognition = NoteTextRecognitionCoordinator(
             service: TextRecognitionService(recognizer: InkTextRecognizer()),
             workspace: workspace,
@@ -71,6 +74,20 @@ struct AppContainer: Sendable {
             answerer: HeuristicAskAnswerer(),
             activity: activity
         )
+        // NoteAskFlowUITests passes this argument to force deterministic keyword answers.
+        // Release builds compile out the hook and always use Foundation Models with fallback.
+        #if DEBUG
+        let noteAsk: any NoteAskProviding
+        if ProcessInfo.processInfo.arguments.contains("-vellum-heuristic-ai") {
+            noteAsk = KeywordNoteAskProvider()
+        } else {
+            noteAsk = FoundationModelsNoteAskProvider(fallback: KeywordNoteAskProvider())
+        }
+        #else
+        let noteAsk: any NoteAskProviding = FoundationModelsNoteAskProvider(
+            fallback: KeywordNoteAskProvider()
+        )
+        #endif
 
         return AppContainer(
             rootDirectory: rootDirectory,
@@ -83,7 +100,8 @@ struct AppContainer: Sendable {
             tasks: tasks,
             workspace: workspace,
             graph: graph,
-            askService: askService
+            askService: askService,
+            noteAsk: noteAsk
         )
     }
 

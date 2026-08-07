@@ -37,7 +37,12 @@ final class AutoTitleFlowUITests: XCTestCase {
             "Note header did not appear"
         )
         RunLoop.current.run(until: Date().addingTimeInterval(1.0))
-        ShapeFlowTestHelpers.selectTool("Pen", in: app)
+        // Re-tapping an already-selected tool opens its options popover, which
+        // swallows the trigger strokes — only select Pen when it isn't active.
+        let penTool = app.buttons["Pen"]
+        if !(penTool.waitForExistence(timeout: 5) && penTool.isSelected) {
+            ShapeFlowTestHelpers.selectTool("Pen", in: app)
+        }
 
         // A short stroke low on the page: below the typed element so any stray
         // Vision reading of it sorts after the real first sentence, and with no

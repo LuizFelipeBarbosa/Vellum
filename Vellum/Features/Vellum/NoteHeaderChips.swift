@@ -6,6 +6,7 @@ struct NoteHeaderChips: View {
     @Bindable var model: NoteScreenModel
     let app: VellumAppModel
     var onShowActivity: () -> Void
+    var onAskNote: () -> Void
     var onConfirmDelete: () -> Void
     var onExport: (NoteExporter.Format) -> Void
     var onClusterFrames: ((_ leading: CGRect, _ trailing: CGRect) -> Void)? = nil
@@ -156,6 +157,8 @@ struct NoteHeaderChips: View {
                 .frame(minHeight: 44)
                 .disabled(model.isAnalyzing || model.note == nil)
 
+                askButton
+
                 Menu {
                     ForEach(NoteExporter.Format.allCases, id: \.rawValue) { format in
                         Button("Export as \(format.displayName)") {
@@ -199,6 +202,30 @@ struct NoteHeaderChips: View {
             }
             .foregroundStyle(VellumTheme.mutedDark)
         }
+    }
+
+    private var askButton: some View {
+        Button {
+            onAskNote()
+        } label: {
+            Label("Ask", systemImage: "questionmark.bubble")
+        }
+        .accessibilityIdentifier("note-ask-button")
+        .buttonStyle(.plain)
+        .font(.vellumSans(16.5, weight: .medium))
+        .foregroundStyle(VellumTheme.ink)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            VellumTheme.highlight.opacity(0.24),
+            in: OrganicPillShape(variant: 2, smallRadius: 8, isOrganic: vellumWobble)
+        )
+        .overlay {
+            OrganicPillShape(variant: 2, smallRadius: 8, isOrganic: vellumWobble)
+                .strokeBorder(VellumTheme.ink(0.24), lineWidth: 1)
+        }
+        .frame(minHeight: 44)
+        .disabled(model.isLoading || model.note == nil)
     }
 
     @ViewBuilder

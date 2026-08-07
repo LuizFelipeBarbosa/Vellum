@@ -594,8 +594,13 @@ final class VellumAppModel {
     private func seedAutoTitleFixtureNote() async {
         let marker = "vellum-autotitle-fixture"
         do {
-            for note in try await container.notes.listNotes(scope: .all)
+            for var note in try await container.notes.listNotes(scope: .all)
             where note.tags.contains(marker) {
+                // purgeNote only removes trashed notes; soft-delete first.
+                if note.deletedAt == nil {
+                    note.deletedAt = Date()
+                    try await container.notes.saveNote(note)
+                }
                 _ = try await container.notes.purgeNote(id: note.id)
             }
 
