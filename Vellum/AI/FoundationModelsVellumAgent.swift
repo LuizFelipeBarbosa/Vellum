@@ -133,11 +133,11 @@ struct FoundationModelsVellumAgent: VellumAgent {
             context.canonicalText,
             charBudget: organizationCharacterBudget
         )
+        // Spaces are selected by NAME; only candidates use ordinals. A numbered
+        // spaces list invites answers like "1. Work" as the space name.
         let spaces = context.spaces.isEmpty
             ? "(none)"
-            : context.spaces.enumerated().map { offset, space in
-                "\(offset + 1). \(space.name)"
-            }.joined(separator: "\n")
+            : context.spaces.map { "- \($0.name)" }.joined(separator: "\n")
         let candidates = rankedCandidates.isEmpty
             ? "(none)"
             : rankedCandidates.enumerated().map { offset, candidate in

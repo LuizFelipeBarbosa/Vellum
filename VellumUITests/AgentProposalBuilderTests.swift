@@ -177,6 +177,29 @@ final class AgentProposalBuilderTests: XCTestCase {
         XCTAssertEqual(color.rawValue, SpaceColor.blue.rawValue)
     }
 
+    func testFileToSpaceStripsEchoedListMarkerAndMatchesExistingSpace() throws {
+        let space = Space(
+            id: UUID(),
+            name: "Work",
+            color: .green,
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let proposals = build(
+            organize: AgentOrganizeSuggestion(
+                spaceName: "1. Work",
+                relatedNoteOrdinals: []
+            ),
+            context: makeContext(spaces: [space])
+        )
+        let operation = try XCTUnwrap(proposals.first?.operation)
+
+        guard case .fileToSpace(let name, let color) = operation else {
+            return XCTFail("Expected a file-to-space proposal")
+        }
+        XCTAssertEqual(name, "Work")
+        XCTAssertEqual(color.rawValue, SpaceColor.green.rawValue)
+    }
+
     func testWhitespaceSpaceNameIsDropped() {
         let proposals = build(
             organize: AgentOrganizeSuggestion(spaceName: " \n ", relatedNoteOrdinals: []),

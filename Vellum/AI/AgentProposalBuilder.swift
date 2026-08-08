@@ -164,7 +164,7 @@ enum AgentProposalBuilder {
 
         if context.currentSpaceID == nil,
            let suggestedSpaceName = organize?.spaceName {
-            let spaceName = trimmed(suggestedSpaceName)
+            let spaceName = strippingListPrefix(trimmed(suggestedSpaceName))
             if !spaceName.isEmpty {
                 let existingSpace = context.spaces.first {
                     comparisonKey($0.name) == comparisonKey(spaceName)
@@ -235,6 +235,18 @@ enum AgentProposalBuilder {
 
     private static func comparisonKey(_ value: String) -> String {
         trimmed(value).lowercased()
+    }
+
+    /// Drops a leading "1. " / "2) " list marker the model sometimes echoes
+    /// back when it answers with a list entry instead of a bare name.
+    private static func strippingListPrefix(_ value: String) -> String {
+        guard let range = value.range(
+            of: #"^\d+[.)]\s*"#,
+            options: .regularExpression
+        ) else {
+            return value
+        }
+        return String(value[range.upperBound...])
     }
 
     private static func entityKind(from value: String) -> EntityKind {
