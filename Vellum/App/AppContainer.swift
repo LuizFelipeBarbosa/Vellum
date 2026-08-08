@@ -55,7 +55,25 @@ struct AppContainer: Sendable {
         let notes = FileNoteRepository(rootDirectory: rootDirectory)
         let proposals = FileProposalRepository(rootDirectory: rootDirectory)
         let activity = FileActivityRepository(rootDirectory: rootDirectory)
-        let agent = HeuristicVellumAgent()
+        // Flow tests pass -vellum-heuristic-ai to force deterministic heuristic
+        // proposals. Release builds compile out the hook and always use Foundation
+        // Models with the heuristic fallback.
+        #if DEBUG
+        let agent: any VellumAgent
+        if ProcessInfo.processInfo.arguments.contains("-vellum-heuristic-ai") {
+            agent = HeuristicVellumAgent()
+        } else {
+            agent = FoundationModelsVellumAgent(
+                fallback: HeuristicVellumAgent(),
+                ranker: EmbeddingRelatedNoteRanker()
+            )
+        }
+        #else
+        let agent: any VellumAgent = FoundationModelsVellumAgent(
+            fallback: HeuristicVellumAgent(),
+            ranker: EmbeddingRelatedNoteRanker()
+        )
+        #endif
         let spaces = FileSpaceRepository(rootDirectory: rootDirectory)
         let entities = FileEntityRepository(rootDirectory: rootDirectory)
         let tasks = FileTaskRepository(rootDirectory: rootDirectory)
