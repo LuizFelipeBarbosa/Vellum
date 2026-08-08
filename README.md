@@ -85,7 +85,7 @@ the read is behind `#if DEBUG` and compiles out of release builds.
 | `-vellum-pdf-fixture-note` | DEBUG | `VellumAppModel.swift` | `PageOrientationFlowUITests` — opens a note seeded with an imported PDF page |
 | `-vellum-auto-open-note` | DEBUG | `VellumAppModel.swift` | no test; manual convenience — opens the most recent note at launch |
 | `-vellum-autotitle-seed-note` | DEBUG | `VellumAppModel.swift` | `AutoTitleFlowUITests` — purges and reseeds an untitled note holding one typed text element for the recognition auto-title flow |
-| `-vellum-heuristic-ai` | DEBUG | `AppContainer.swift` | `NoteAskFlowUITests` — forces the deterministic keyword ask provider (and, in later phases, other AI fallbacks) so flow tests get stable answers. |
+| `-vellum-heuristic-ai` | DEBUG | `AppContainer.swift` | `NoteAskFlowUITests` — forces the deterministic keyword ask provider and the heuristic organizing agent (instead of their Foundation Models counterparts) so flow tests get stable answers and proposals. |
 | `-askQuestion "<text>"` | DEBUG | `VellumAppModel.swift` | no test; combine with `-prototypeStartView ask` to land on a submitted answer |
 | `-vellum-force-pencil-only` | DEBUG + simulator | `PencilCanvasView.swift`, `SelectionCaptureSurface.swift`, `ShapeEraserSurface.swift`, `ShapeSnapSurface.swift` | `ShapeRecognitionFlowUITests`, `ShapeFlowTestHelpers`, `PhotoInteractionFlowUITests` — makes the simulator treat finger input as touch, not ink, so a synthesized drag is a drag |
 | `-thumbnail-slow-render` | DEBUG | `PageThumbnailStore.swift` | `PagesPanelDragUITests` — stretches thumbnail debounce from 500ms to 3000ms so the loading placeholder can be asserted against |

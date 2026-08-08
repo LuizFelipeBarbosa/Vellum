@@ -56,9 +56,24 @@ final class VellumAppModel {
             UserDefaults.standard.set(feelWobble, forKey: "vellum.feel.wobble")
         }
     }
+    var autoOrganizeEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                autoOrganizeEnabled,
+                forKey: SettingsKeys.autoOrganizeEnabled
+            )
+        }
+    }
     var screen: AppScreen {
         didSet {
             guard screen == .library else { return }
+            // Leaving a note for the library is the common single-pane quiet
+            // point (panes stay open across this navigation), so it is an
+            // auto-analyze trigger alongside pane close.
+            for pane in split.panes {
+                let noteModel = pane.noteModel
+                Task { await noteModel.autoAnalyzeIfNeeded() }
+            }
             Task { [weak self] in
                 guard let self else { return }
                 await self.library.refresh()
@@ -112,6 +127,7 @@ final class VellumAppModel {
         feelWobble = defaults.object(forKey: "vellum.feel.wobble") == nil
             ? true
             : defaults.bool(forKey: "vellum.feel.wobble")
+        autoOrganizeEnabled = SettingsKeys.isAutoOrganizeEnabled(in: defaults)
         library = LibraryScreenModel(workspace: container.workspace)
         graphScreen = GraphScreenModel(container: container)
         today = TodayScreenModel(container: container)
@@ -469,6 +485,7 @@ final class VellumAppModel {
     func closePane(_ paneID: UUID) async {
         if let pane = split.panes.first(where: { $0.id == paneID }) {
             await pane.noteModel.flushPendingSave()
+            Task { await pane.noteModel.autoAnalyzeIfNeeded() }
         }
         split.removePane(id: paneID)
         if split.panes.isEmpty {
@@ -611,7 +628,10 @@ final class VellumAppModel {
                 CanvasElement(
                     content: .text(
                         TextBoxContent(
-                            text: "Team retro notes. more detail",
+                            // ≥80 chars once recognized so the auto-analyze
+                            // content floor passes; the first sentence stays
+                            // "Team retro notes" for the auto-title tests.
+                            text: "Team retro notes. We reviewed the sprint, praised the launch demo, and agreed to fix the deploy pipeline next week.",
                             fontSize: defaults.fontSize,
                             color: defaults.color
                         )

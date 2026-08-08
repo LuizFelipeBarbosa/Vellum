@@ -65,6 +65,10 @@ struct NoteSuggestionsOverlay: View {
                 .accessibilityLabel("Close suggestions")
             }
 
+            if let tags = model.note?.tags, !tags.isEmpty {
+                NoteTagsRow(tags: tags)
+            }
+
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(model.pendingProposals) { proposal in
@@ -148,5 +152,40 @@ struct NoteSuggestionsOverlay: View {
         case .extractEntity(let name, let kind, _, _):
             "Extract \(kind.rawValue): \(name)"
         }
+    }
+}
+
+private struct NoteTagsRow: View {
+    let tags: [String]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("TAGS")
+                .font(.vellumMono(10.5))
+                .foregroundStyle(VellumTheme.mutedCount)
+
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(Array(tags.enumerated()), id: \.offset) { index, tag in
+                        Text(tag)
+                            .font(.vellumMono(10.5))
+                            .foregroundStyle(VellumTheme.bodyMuted)
+                            .lineLimit(1)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background {
+                                VellumPillChrome(
+                                    fill: VellumTheme.ink(0.05),
+                                    border: VellumTheme.ink(0.14),
+                                    variant: index
+                                )
+                            }
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tags: \(tags.joined(separator: ", "))")
     }
 }
