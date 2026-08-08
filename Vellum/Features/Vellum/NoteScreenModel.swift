@@ -901,6 +901,12 @@ final class NoteScreenModel {
     private func saveUntilCurrent() async {
         while let inFlight = inFlightSave {
             await inFlight.value
+            // Awaiting an already-completed task resumes without suspending, so
+            // this loop can starve the creator's continuation (which clears
+            // inFlightSave after the same await) and livelock the main actor
+            // when two flushes overlap. Yield so the creator runs before the
+            // re-check.
+            await Task.yield()
         }
         guard !autosaveDisabled else { return }
         while savedGeneration < editGeneration && !autosaveDisabled {
