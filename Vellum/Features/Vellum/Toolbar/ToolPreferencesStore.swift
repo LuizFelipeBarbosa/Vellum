@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import SwiftUI
 import VellumCore
 
@@ -11,15 +12,23 @@ final class ToolPreferencesStore {
     static let storageKey = "vellum.toolPreferences.v1"
 
     private let defaults: UserDefaults
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "Vellum",
+        category: "ToolPreferencesStore"
+    )
     private var pendingSaveTask: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let data = defaults.data(forKey: Self.storageKey),
-           let decoded = try? JSONDecoder().decode(ToolPreferences.self, from: data) {
-            preferences = decoded
-        } else {
-            preferences = .default
+        preferences = .default
+
+        guard let data = defaults.data(forKey: Self.storageKey) else { return }
+        do {
+            preferences = try JSONDecoder().decode(ToolPreferences.self, from: data)
+        } catch {
+            logger.warning(
+                "Tool preferences could not be decoded; using defaults: \(error.localizedDescription, privacy: .public)"
+            )
         }
     }
 
@@ -90,7 +99,13 @@ final class ToolPreferencesStore {
     }
 
     private func writePreferences() {
-        guard let data = try? JSONEncoder().encode(preferences) else { return }
-        defaults.set(data, forKey: Self.storageKey)
+        do {
+            let data = try JSONEncoder().encode(preferences)
+            defaults.set(data, forKey: Self.storageKey)
+        } catch {
+            logger.error(
+                "Tool preferences could not be encoded: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 }

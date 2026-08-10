@@ -28,7 +28,7 @@ same for `VellumUITests` / `VellumFlowUITests`), and `.gitignore:5` ignores
 
 | Target | XcodeGen type | What it actually is |
 |---|---|---|
-| `VellumUITests` | `bundle.unit-test` (+ `TEST_HOST`) | **Unit tests.** 368 XCTest functions (2026-08 count) across 36+ files, **zero** `XCUIApplication`. Runs in-process against the app. |
+| `VellumUITests` | `bundle.unit-test` (+ `TEST_HOST`) | **Unit tests.** 431 XCTest functions (2026-08-10 count) across 49 files, **zero** `XCUIApplication`. Runs in-process against the app. |
 | `VellumFlowUITests` | `bundle.ui-testing` | The real XCUITest target. 44 tests across 12 files, drives the simulator, owns every launch-argument contract. |
 
 Asked to "add a UI test", the name alone points at the wrong target. Decide by what
@@ -40,8 +40,9 @@ with `TEST_HOST`, `PRODUCT_BUNDLE_IDENTIFIER`, and the shared scheme.
 
 ## `VellumCore` is deliberately platform-free
 
-All 52 files in `VellumCore/Sources/` import only `Foundation` and `CoreGraphics`
-(`grep -rh '^import' VellumCore/Sources`). No UIKit, no SwiftUI, no PencilKit.
+All 67 files in `VellumCore/Sources/` import only `Foundation`, `CoreGraphics`, and
+`CryptoKit` (`grep -rh '^import' VellumCore/Sources`) — all three are platform-free.
+No UIKit, no SwiftUI, no PencilKit.
 
 `VellumCore/Package.swift` declares `.iOS(.v17), .macOS(.v14)`. The macOS platform is
 what lets `swift test` run natively on the Mac in 0.4s with no simulator — that fast
@@ -72,6 +73,48 @@ the package's `.iOS(.v17)` describes the package, not the app.
   private `actor` renderer and gets an image back. Three sites, all the same shape:
   `Export/PageThumbnailStore.swift`, `Export/NotePageRenderer.swift`,
   `Pdf/PdfPageImageCache.swift`. Anything else needs a real reason.
+
+## The save path must stay O(1) — this caused a shipped freeze
+
+Autosave fires ~600ms after every stroke (`NoteScreenModel.scheduleDebouncedSave`). Any
+per-save work that scales with workspace size compounds until the app locks up and has
+to be force-restarted. That is not hypothetical: it shipped. Two mechanisms, both fixed:
+
+- `WorkspaceService.saveNote` logged a `.noteUpdated` event on **every** save, and
+  `FileActivityRepository.append` read and rewrote the **entire** log file each time —
+  O(N²) total I/O in the number of saves. Measured: 400 appends wrote 10.3 MB instead
+  of ~100 KB, and 98% of a real note's log was autosave noise.
+- `onNoteChanged` spawned an **uncancelled, uncoalesced** `Task` per save that re-read
+  the whole workspace (3 manifest scans + 2 activity-corpus scans). These serialize on
+  the `WorkspaceService` actor, so saves queued behind an unbounded backlog and every
+  UI action that touches the actor stalled with them.
+
+The invariants that keep it fixed — do not regress these:
+
+- **`append` is append-only.** It seeks to the end and writes one line. It must never
+  read the whole file. Logs over 1 MiB are byte-tail-truncated to 512 KiB once per
+  process; `readEvents` therefore **skips** undecodable lines, because append-only
+  writing makes a torn trailing line possible and one bad line must not cost the user
+  their whole history.
+- **`.noteUpdated` is coalesced** to at most one event per note per 60s.
+- **`onNoteChanged` does zero I/O.** It patches one row in memory
+  (`LibraryScreenModel.applyLocalUpdate`) and arms a 2s cancel-and-replace debounce
+  (`VellumAppModel.scheduleWorkspaceRefresh`). `refreshStats()` must **never** go back
+  on this path.
+- `applyLocalUpdate` mirrors `WorkspaceService.makeNoteSummaries` field for field and
+  sorts with the same `StableOrder` helper (made `public` for exactly this reason). If
+  the two derivations drift, library rows visibly jump when the debounce lands.
+
+Guarded by `VellumCoreTests/ActivityLogCostTests.swift` (cost assertions that fail hard
+if the quadratic write or the log flood returns) and
+`VellumUITests/WorkspaceRefreshCoalescingTests.swift` (a burst of 20 change events must
+produce exactly one workspace refresh). **Treat a failure in either as a returning
+freeze, not a flaky test.**
+
+Related bounded-memory invariants: `NotePane.undoManager.levelsOfUndo` is capped at 50
+(it is also PencilKit's stroke history — see `PencilCanvasView.swift`), and
+`NotePane.tearDown()` must be called from every path that genuinely discards a pane,
+since `onDisappear` does not fire for programmatic removal.
 
 ## PencilKit gesture coexistence
 
@@ -140,10 +183,10 @@ The full table — argument, DEBUG gating, read site, and the test that depends 
 ## Tests: commands and expected counts
 
 ```sh
-# 375 tests, 14 suites, ~0.4s, no simulator — the fast loop
+# 436 tests, 14 suites, ~1s, no simulator — the fast loop
 cd VellumCore && swift test
 
-# 368 tests, ~19s
+# 431 tests, ~21s
 xcodegen generate
 xcodebuild test -project Vellum.xcodeproj -scheme Vellum \
   -destination 'platform=iOS Simulator,id=9FB0400F-D7AE-4101-8543-AD49E58B09A4' \
@@ -161,11 +204,17 @@ suspended run looks identical to a hung one.
 Simulator `9FB0400F-D7AE-4101-8543-AD49E58B09A4` is "iPad Pro 13-inch (M5)". Pass the
 UDID rather than `name:` — the device set changes.
 
-**One pre-existing failure.**
+**Two pre-existing failures** (2026-08-10; the second was confirmed by A/B against
+`main` @ `c3be8d9` in a throwaway worktree, so do not blame your branch for it):
+`PhotoInteractionFlowUITests.testSelectedPhotoCanMoveAcrossInkZOrder` fails with
+`Paste here did not appear after tapping empty canvas` at ~22s. That is the pasteboard
+message below, but unlike the true flake it reproduced on **three** consecutive runs
+including on `main` — treat a *consistently* failing pasteboard test as environmental
+and A/B it rather than re-running forever. And:
 `ShapeRecognitionFlowUITests.testDraggingASelectedShapeSettlesItOnThePageLattice`
 fails deterministically on `main` with `XCTAssertTrue failed - the line was not
-selected` (`ShapeRecognitionFlowUITests.swift:290`). A full run ending with **exactly
-that one failure** is green. One split-pane test reports as skipped via a
+selected` (`ShapeRecognitionFlowUITests.swift:318`). A full run ending with **exactly
+those two failures** is green. One split-pane test reports as skipped via a
 fixture-shape `XCTSkip` guard (it needs ~24 sidebar rows; the seed provides 8).
 
 **The pasteboard-dependent flow tests are flaky — re-run before believing a

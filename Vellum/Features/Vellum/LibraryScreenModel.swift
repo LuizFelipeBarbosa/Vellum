@@ -86,14 +86,12 @@ final class LibraryScreenModel {
         defer { isLoading = false }
 
         do {
-            let refreshedSummaries = try await workspace.listNoteSummaries()
-            let refreshedSpaces = try await workspace.listSpaces()
-            let unsupportedNotes = try await workspace.unsupportedNotes()
-            summaries = refreshedSummaries
-            spaces = refreshedSpaces
-            unsupportedNoteCount = unsupportedNotes.count
+            let listing = try await workspace.libraryListing()
+            summaries = listing.summaries
+            spaces = listing.spaces
+            unsupportedNoteCount = listing.unsupported.count
             if let selectedSpaceID,
-               !refreshedSpaces.contains(where: { $0.space.id == selectedSpaceID }) {
+               !listing.spaces.contains(where: { $0.space.id == selectedSpaceID }) {
                 self.selectedSpaceID = nil
             }
             selectedIDs = selectedIDs.intersection(Set(summaries.map(\.id)))
@@ -101,6 +99,33 @@ final class LibraryScreenModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // Autosave invokes this after every stroke; disk access here would recreate
+    // the serialized workspace backlog this local patch is intended to avoid.
+    func applyLocalUpdate(_ note: Note) {
+        guard let summaryIndex = summaries.firstIndex(where: { $0.id == note.id }) else {
+            return
+        }
+
+        let existingSummary = summaries[summaryIndex]
+        let orderedPages = note.pages.sorted(by: NotePage.byOrder)
+        let preview = orderedPages
+            .map(\.plainText)
+            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        summaries[summaryIndex] = NoteSummary(
+            id: note.id,
+            title: note.title,
+            noteType: note.noteType,
+            spaceID: note.spaceID,
+            previewText: String(preview.prefix(160)),
+            hasInk: existingSummary.hasInk,
+            linkCount: note.links.count,
+            tags: note.tags,
+            updatedAt: note.updatedAt
+        )
+        summaries.sort { StableOrder.descending($0, $1, by: \.updatedAt) }
     }
 
     var cards: [LibraryCardData] {

@@ -54,6 +54,10 @@ final class NoteScreenModel {
 
     var note: Note? {
         didSet {
+            if oldValue?.pages != note?.pages {
+                let pages = note?.pages ?? []
+                pdfBands = Set(pages.indices.filter { pages[$0].pdfPage != nil })
+            }
             pdfCache.contentWidth = note?.pageGeometry.contentWidth
                 ?? PageGeometry.a4.contentWidth
         }
@@ -128,6 +132,13 @@ final class NoteScreenModel {
         }
     }
 
+    func detachViewCallbacks() {
+        onScrollToPage = nil
+        hasHiddenSelectionStrokes = nil
+        onPageOrientationChanged = nil
+        onOrientationFlipped = nil
+    }
+
     var title: String {
         get { note?.title ?? "" }
         set {
@@ -166,10 +177,7 @@ final class NoteScreenModel {
         note?.pages.isEmpty == false
     }
 
-    var pdfBands: Set<Int> {
-        guard let pages = note?.pages else { return [] }
-        return Set(pages.indices.filter { pages[$0].pdfPage != nil })
-    }
+    private(set) var pdfBands: Set<Int> = []
 
     var pdfLoadFailureMessage: String? {
         guard !pdfLoadFailures.isEmpty else { return nil }

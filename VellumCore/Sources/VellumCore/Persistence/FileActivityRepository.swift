@@ -2,6 +2,13 @@ import Foundation
 
 public actor FileActivityRepository: ActivityRepository {
     private let rootDirectory: URL
+    private var checkedLogPaths: Set<String> = []
+
+    /// Test-visible cost accounting. `append` is the hot path: a rewrite-the-whole-file
+    /// implementation makes `bytesWritten` quadratic in the event count, while an
+    /// append-only one keeps it linear.
+    internal private(set) var bytesWritten: Int = 0
+    internal private(set) var appendCount: Int = 0
 
     public init(rootDirectory: URL) {
         self.rootDirectory = rootDirectory
@@ -24,33 +31,41 @@ public actor FileActivityRepository: ActivityRepository {
                 at: logURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            var log = try existingLog(at: logURL)
-            if !log.isEmpty, log.last != 0x0A {
-                log.append(0x0A)
+
+            if !FileManager.default.fileExists(atPath: logURL.path) {
+                guard FileManager.default.createFile(atPath: logURL.path, contents: nil) else {
+                    throw VellumError.persistenceFailure("Could not create activity log \(logURL.path).")
+                }
             }
-            log.append(try FilePersistence.encoder(prettyPrinted: false).encode(event))
-            log.append(0x0A)
-            try log.write(to: logURL, options: .atomic)
+            try compactLogIfNeeded(at: logURL)
+
+            var appendedData = Data()
+            let payload = try FilePersistence.encoder(prettyPrinted: false).encode(event)
+            let handle = try FileHandle(forUpdating: logURL)
+            do {
+                let endOffset = try handle.seekToEnd()
+                if endOffset > 0 {
+                    try handle.seek(toOffset: endOffset - 1)
+                    if try handle.read(upToCount: 1)?.first != 0x0A {
+                        appendedData.append(0x0A)
+                    }
+                    try handle.seekToEnd()
+                }
+                appendedData.append(payload)
+                appendedData.append(0x0A)
+                try handle.write(contentsOf: appendedData)
+                try handle.close()
+            } catch {
+                try? handle.close()
+                throw error
+            }
+
+            bytesWritten += appendedData.count
+            appendCount += 1
         } catch let error as VellumError {
             throw error
         } catch {
             throw VellumError.persistenceFailure("Could not append activity: \(error.localizedDescription)")
-        }
-    }
-
-    /// The history this append has to preserve. An absent log is legitimately empty,
-    /// but a log that is present and unreadable is not: the append rewrites the whole
-    /// file, so treating a failed read as "empty" would replace the user's entire
-    /// activity history with this one event. Refuse the append instead — a lost event
-    /// is recoverable, a wiped log is not.
-    private func existingLog(at url: URL) throws -> Data {
-        guard FileManager.default.fileExists(atPath: url.path) else { return Data() }
-        do {
-            return try Data(contentsOf: url)
-        } catch {
-            throw VellumError.persistenceFailure(
-                "Could not read activity log \(url.path): \(error.localizedDescription)"
-            )
         }
     }
 
@@ -92,7 +107,36 @@ public actor FileActivityRepository: ActivityRepository {
 
     private func readEventsIfPresent(at url: URL) throws -> [ActivityEvent] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        try compactLogIfNeeded(at: url)
         return try readEvents(from: url)
+    }
+
+    private func compactLogIfNeeded(at url: URL) throws {
+        guard checkedLogPaths.insert(url.path).inserted else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+
+        let handle = try FileHandle(forReadingFrom: url)
+        let tail: Data
+        do {
+            let fileSize = try handle.seekToEnd()
+            guard fileSize > 1_024 * 1_024 else {
+                try handle.close()
+                return
+            }
+
+            try handle.seek(toOffset: fileSize - 512 * 1_024)
+            tail = try handle.readToEnd() ?? Data()
+            try handle.close()
+        } catch {
+            try? handle.close()
+            throw error
+        }
+
+        guard let firstNewline = tail.firstIndex(of: 0x0A) else { return }
+        let retained = tail[tail.index(after: firstNewline)...]
+        // Dropping the oldest history is deliberate: bounded reads matter more than
+        // retaining an unbounded log produced by older builds.
+        try Data(retained).write(to: url, options: .atomic)
     }
 
     private func readEvents(from url: URL) throws -> [ActivityEvent] {
@@ -109,7 +153,8 @@ public actor FileActivityRepository: ActivityRepository {
                     guard let lineData = trimmed.data(using: .utf8) else {
                         throw VellumError.persistenceFailure("Activity log \(url.path) contains invalid text.")
                     }
-                    return try FilePersistence.decoder().decode(ActivityEvent.self, from: lineData)
+                    // A torn trailing line must not cost the user their entire history.
+                    return try? FilePersistence.decoder().decode(ActivityEvent.self, from: lineData)
                 }
         } catch let error as VellumError {
             throw error

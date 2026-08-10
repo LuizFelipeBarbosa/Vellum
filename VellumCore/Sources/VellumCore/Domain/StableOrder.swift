@@ -7,9 +7,9 @@ import Foundation
 /// in whatever order the directory scan produced, which differs between runs. Each
 /// comparison therefore falls back to the element's UUID, and always ascending on it:
 /// the tiebreak exists to be deterministic, not to be meaningful.
-enum StableOrder {
+public enum StableOrder {
     /// `true` when `lhs` sorts before `rhs` by an ascending `key`.
-    static func ascending<Element, Key: Comparable>(
+    public static func ascending<Element, Key: Comparable>(
         _ lhs: Element,
         _ rhs: Element,
         by key: (Element) -> Key,
@@ -25,7 +25,7 @@ enum StableOrder {
 
     /// `true` when `lhs` sorts before `rhs` by a descending `key`. Ties still break on
     /// the ascending UUID, so reversing the key does not reverse the tiebreak.
-    static func descending<Element, Key: Comparable>(
+    public static func descending<Element, Key: Comparable>(
         _ lhs: Element,
         _ rhs: Element,
         by key: (Element) -> Key,
@@ -39,7 +39,7 @@ enum StableOrder {
         return lhsKey > rhsKey
     }
 
-    static func ascending<Element: Identifiable, Key: Comparable>(
+    public static func ascending<Element: Identifiable, Key: Comparable>(
         _ lhs: Element,
         _ rhs: Element,
         by key: (Element) -> Key
@@ -47,7 +47,7 @@ enum StableOrder {
         ascending(lhs, rhs, by: key, tiebreak: \.id)
     }
 
-    static func descending<Element: Identifiable, Key: Comparable>(
+    public static func descending<Element: Identifiable, Key: Comparable>(
         _ lhs: Element,
         _ rhs: Element,
         by key: (Element) -> Key

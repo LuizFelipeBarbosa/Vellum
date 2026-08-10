@@ -12,6 +12,10 @@ struct CanvasElementsBandLayer: View {
     @Environment(\.inkDisplayStyle) private var inkDisplayStyle
     @FocusState private var focusedElementID: UUID?
 
+    #if DEBUG
+    // Shape flow UI tests read this value to confirm elements were created
+    // (VellumFlowUITests/ShapeRecognitionFlowUITests and related shape suites).
+    // Release builds exclude the hook so active inking never scans every element.
     private var shapeCount: Int {
         store.elements.reduce(into: 0) { count, element in
             if case .shape = element.content {
@@ -19,14 +23,20 @@ struct CanvasElementsBandLayer: View {
             }
         }
     }
+    #endif
 
     var body: some View {
         if placement == .belowInk {
+            #if DEBUG
             bandContent
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .ignore)
                 .accessibilityIdentifier("vellum-shape-element-count")
                 .accessibilityValue("\(shapeCount)")
+            #else
+            bandContent
+                .allowsHitTesting(false)
+            #endif
         } else {
             bandContent
                 .allowsHitTesting(isTextToolActive)

@@ -75,14 +75,12 @@ final class PageThumbnailStore {
         }
 
         inFlight.insert(pageIndex)
+        defer { inFlight.remove(pageIndex) }
         let requestedGeneration = generation
         let requestedRemapVersion = remapVersion
         do {
             try await Task.sleep(for: .milliseconds(debounceMilliseconds))
         } catch {
-            if requestedGeneration == generation {
-                inFlight.remove(pageIndex)
-            }
             return
         }
         guard !Task.isCancelled,
@@ -108,7 +106,6 @@ final class PageThumbnailStore {
               requestedRemapVersion == remapVersion else {
             return
         }
-        inFlight.remove(pageIndex)
         guard !Task.isCancelled else { return }
 
         images[pageIndex] = result.image

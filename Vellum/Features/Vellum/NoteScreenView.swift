@@ -100,11 +100,8 @@ struct NoteScreenView: View {
             .background(VellumTheme.canvasBackdrop)
             .task { await establishCanvasWiring() }
             .onDisappear {
-                // The only thing breaking the model -> closure -> model cycle.
-                model.onScrollToPage = nil
-                model.hasHiddenSelectionStrokes = nil
-                model.onPageOrientationChanged = nil
-                model.onOrientationFlipped = nil
+                // SwiftUI can dismiss the screen without a split-state pane removal.
+                model.detachViewCallbacks()
             }
     }
 

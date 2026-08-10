@@ -8,6 +8,8 @@ public actor WorkspaceService {
     private let spaces: any SpaceRepository
     private let entities: any EntityRepository
     private let tasks: any TaskRepository
+    private var lastNoteUpdatedLog: [UUID: Date] = [:]
+    private static let noteUpdatedCoalesceWindow: TimeInterval = 60
 
     public init(
         notes: any NoteRepository,
@@ -63,16 +65,36 @@ public actor WorkspaceService {
     @discardableResult
     public func saveNote(_ note: Note) async throws -> Note {
         let persisted = try await notes.loadNote(id: note.id)
+        let timestamp = Date()
         var saved = note
         saved.deletedAt = persisted.deletedAt
-        saved.updatedAt = Date()
+        saved.updatedAt = timestamp
         saved.revision += 1
         try await notes.saveNote(saved)
-        try await log(
-            noteID: saved.id,
-            kind: .noteUpdated,
-            message: "Updated note '\(saved.title)' to revision \(saved.revision)."
-        )
+
+        let previousLogTime = lastNoteUpdatedLog[saved.id]
+        let shouldLogUpdate = previousLogTime.map {
+            timestamp.timeIntervalSince($0) >= Self.noteUpdatedCoalesceWindow
+        } ?? true
+        if shouldLogUpdate {
+            // The sidebar highlight and agent-action digest both exclude `.noteUpdated`.
+            // ActivityView still shows it in the timeline, where repeated autosave rows
+            // are noise rather than useful signal.
+            lastNoteUpdatedLog[saved.id] = timestamp
+            do {
+                try await log(
+                    noteID: saved.id,
+                    kind: .noteUpdated,
+                    message: "Updated note '\(saved.title)' to revision \(saved.revision).",
+                    createdAt: timestamp
+                )
+            } catch {
+                if lastNoteUpdatedLog[saved.id] == timestamp {
+                    lastNoteUpdatedLog[saved.id] = previousLogTime
+                }
+                throw error
+            }
+        }
         return saved
     }
 
@@ -162,12 +184,7 @@ public actor WorkspaceService {
 
     public func listSpaces() async throws -> [SpaceListing] {
         let listedNotes = try await notes.listNotes()
-        return try await spaces.list().map { space in
-            SpaceListing(
-                space: space,
-                noteCount: listedNotes.count { $0.spaceID == space.id }
-            )
-        }
+        return try await makeSpaceListings(notes: listedNotes)
     }
 
     @discardableResult
@@ -277,9 +294,39 @@ public actor WorkspaceService {
 
     public func activityDigest(since: Date) async throws -> ActivityDigest {
         let events = try await activityRepository.list(noteID: nil)
-            .filter { $0.createdAt >= since }
+        return makeActivityDigest(events: events, since: since)
+    }
+
+    public func activityOverview(
+        since: Date,
+        highlighting: Set<ActivityKind>
+    ) async throws -> ActivityOverview {
+        let events = try await activityRepository.list(noteID: nil)
+        return ActivityOverview(
+            latestMessage: events.last(where: { highlighting.contains($0.kind) })?.message,
+            digest: makeActivityDigest(events: events, since: since)
+        )
+    }
+
+    public func libraryListing() async throws -> LibraryListing {
+        let listedNotes = try await notes.listNotes()
+        let summaries = try await makeNoteSummaries(notes: listedNotes)
+        let spaceListings = try await makeSpaceListings(notes: listedNotes)
+        let unsupported = try await unsupportedNotes()
+        return LibraryListing(
+            summaries: summaries,
+            spaces: spaceListings,
+            unsupported: unsupported
+        )
+    }
+
+    private func makeActivityDigest(
+        events: [ActivityEvent],
+        since: Date
+    ) -> ActivityDigest {
+        let recentEvents = events.filter { $0.createdAt >= since }
         var counts: [ActivityKind: Int] = [:]
-        for event in events {
+        for event in recentEvents {
             counts[event.kind, default: 0] += 1
         }
         let agentActionKinds: Set<ActivityKind> = [
@@ -303,8 +350,13 @@ public actor WorkspaceService {
     }
 
     public func listNoteSummaries() async throws -> [NoteSummary] {
+        let listedNotes = try await notes.listNotes()
+        return try await makeNoteSummaries(notes: listedNotes)
+    }
+
+    private func makeNoteSummaries(notes listedNotes: [Note]) async throws -> [NoteSummary] {
         var summaries: [NoteSummary] = []
-        for note in try await notes.listNotes() {
+        for note in listedNotes {
             let orderedPages = note.pages.sorted(by: NotePage.byOrder)
             let preview = orderedPages
                 .map(\.plainText)
@@ -335,6 +387,15 @@ public actor WorkspaceService {
             )
         }
         return summaries.sorted { StableOrder.descending($0, $1, by: \.updatedAt) }
+    }
+
+    private func makeSpaceListings(notes listedNotes: [Note]) async throws -> [SpaceListing] {
+        try await spaces.list().map { space in
+            SpaceListing(
+                space: space,
+                noteCount: listedNotes.count { $0.spaceID == space.id }
+            )
+        }
     }
 
     public func requestAnalysis(noteID: UUID) async throws -> [AgentProposal] {
@@ -602,12 +663,17 @@ public actor WorkspaceService {
         )
     }
 
-    private func log(noteID: UUID?, kind: ActivityKind, message: String) async throws {
+    private func log(
+        noteID: UUID?,
+        kind: ActivityKind,
+        message: String,
+        createdAt: Date = Date()
+    ) async throws {
         try await activityRepository.append(
             ActivityEvent(
                 id: UUID(),
                 noteID: noteID,
-                createdAt: Date(),
+                createdAt: createdAt,
                 kind: kind,
                 message: message
             )

@@ -7,6 +7,8 @@ import VellumCore
 @MainActor
 @Observable
 final class CanvasElementsStore {
+    private static let maximumCachedImageCount = 60
+
     struct NoteShape: Equatable {
         let portraitAspectRatio: Double
         let orientation: PageOrientation
@@ -36,6 +38,8 @@ final class CanvasElementsStore {
 
     private var isInTransaction = false
     private var activeTextSession: (elementID: UUID, baseline: [CanvasElement])?
+    private var lastImageCacheSequenceByAssetPath: [String: Int] = [:]
+    private var imageCacheSequence = 0
 
     /// Opaque full-state token (drawing + elements + pages) captured at session start.
     struct LiveSessionToken {
@@ -50,6 +54,26 @@ final class CanvasElementsStore {
     func cacheImage(_ image: UIImage, data: Data, forAssetPath assetPath: String) {
         imageCache[assetPath] = image
         imageDataCache[assetPath] = data
+        touchCachedImage(assetPath)
+        evictIfNeeded()
+    }
+
+    private func touchCachedImage(_ assetPath: String) {
+        imageCacheSequence += 1
+        lastImageCacheSequenceByAssetPath[assetPath] = imageCacheSequence
+    }
+
+    private func evictIfNeeded() {
+        while imageCache.count > Self.maximumCachedImageCount {
+            guard let leastRecentAssetPath = lastImageCacheSequenceByAssetPath.min(by: {
+                $0.value < $1.value
+            })?.key else {
+                return
+            }
+            imageCache[leastRecentAssetPath] = nil
+            imageDataCache[leastRecentAssetPath] = nil
+            lastImageCacheSequenceByAssetPath[leastRecentAssetPath] = nil
+        }
     }
 
     func addElement(_ element: CanvasElement) {

@@ -1,5 +1,12 @@
 # Quality-audit baseline
 
+> **Superseded baseline — do not diff against these test counts.** They describe `742c23d`.
+> Current counts (2026-08-10): `VellumCore` **436**, `VellumUITests` **431**,
+> `VellumFlowUITests` **51**. `CLAUDE.md` is the live source. The *method* below — compare
+> counts, never the `TEST SUCCEEDED` line — remains correct and is the reason this file
+> exists. The type-checker table further down was never reproducible run-to-run; re-measure
+> rather than trusting it.
+
 Captured before any cleanup, on branch `chore/quality-audit-slop-removal` off `main` @ `742c23d`.
 Toolchain: Xcode 26.6 (17F113), Swift 6.3.3, XcodeGen 2.45.4.
 Simulator: iPad Pro 13-inch (M5), `9FB0400F-D7AE-4101-8543-AD49E58B09A4`.

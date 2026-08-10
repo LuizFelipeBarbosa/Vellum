@@ -2,6 +2,12 @@ import Foundation
 import FoundationModels
 import VellumCore
 
+private struct FoundationModelsResponseTimeoutError: LocalizedError {
+    var errorDescription: String? {
+        "The on-device model did not finish responding in time."
+    }
+}
+
 struct FoundationModelsNoteAskProvider: NoteAskProviding {
     let fallback: any NoteAskProviding
 
@@ -45,7 +51,10 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
     private var session: LanguageModelSession
     private var lastCompletedTurn: CompletedTurn?
     private var turnInProgress = false
-    private var turnWaiters: [CheckedContinuation<Void, Never>] = []
+    private var turnWaiters: [
+        (id: UUID, continuation: CheckedContinuation<Void, Never>)
+    ] = []
+    private var cancelledTurnWaiterIDs = Set<UUID>()
 
     init(source: AskSource) {
         self.source = source
@@ -105,14 +114,23 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
         _ question: String,
         continuation: AsyncThrowingStream<NoteAskStreamEvent, Error>.Continuation
     ) async {
-        await acquireTurn()
+        do {
+            try await acquireTurn()
+        } catch {
+            continuation.finish(throwing: error)
+            return
+        }
         defer { releaseTurn() }
 
         do {
             try Task.checkCancellation()
+            let clock = ContinuousClock()
+            let responseDeadline = clock.now.advanced(by: .seconds(120))
             while session.isResponding {
-                try Task.checkCancellation()
-                await Task.yield()
+                guard clock.now < responseDeadline else {
+                    throw FoundationModelsResponseTimeoutError()
+                }
+                try await Task.sleep(for: .milliseconds(50))
             }
 
             let turnContext = makeTurnContext(
@@ -256,15 +274,33 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
         }
     }
 
-    private func acquireTurn() async {
+    private func acquireTurn() async throws {
         guard turnInProgress else {
             turnInProgress = true
             return
         }
 
-        await withCheckedContinuation { continuation in
-            turnWaiters.append(continuation)
+        let waiterID = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                turnWaiters.append((id: waiterID, continuation: continuation))
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id: waiterID) }
         }
+
+        if cancelledTurnWaiterIDs.remove(waiterID) != nil {
+            throw CancellationError()
+        }
+    }
+
+    private func cancelWaiter(id: UUID) {
+        guard let index = turnWaiters.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let waiter = turnWaiters.remove(at: index)
+        cancelledTurnWaiterIDs.insert(id)
+        waiter.continuation.resume()
     }
 
     private func releaseTurn() {
@@ -272,7 +308,8 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
             turnInProgress = false
             return
         }
-        turnWaiters.removeFirst().resume()
+        let waiter = turnWaiters.removeFirst()
+        waiter.continuation.resume()
     }
 
     private static func roleInstructions(for title: String) -> String {

@@ -93,6 +93,8 @@ final class VellumAppModel {
 
     private var toastTask: Task<Void, Never>?
     private var askNavigationTask: Task<Void, Never>?
+    private var workspaceRefreshTask: Task<Void, Never>?
+    private var workspaceRefreshToken: UUID?
     private var openingNoteIDs: Set<UUID> = []
     private var lastSplitContainerSize: CGSize = .zero
     private var resizeOverflowTask: Task<Void, Never>?
@@ -281,16 +283,23 @@ final class VellumAppModel {
     }
 
     func refreshStats() async {
+        await refreshCounts()
+        await refreshActivitySummary()
+    }
+
+    func refreshCounts() async {
         do {
             noteCount = library.summaries.count
             spaceListings = library.spaces
             openTaskCount = try await container.workspace.listTasks().count { !$0.isDone }
             trashCount = try await container.workspace.listTrashedNotes().count
+        } catch {
+            library.errorMessage = error.localizedDescription
+        }
+    }
 
-            let events = try await container.workspace.activity(noteID: nil)
-            let digest = try await container.workspace.activityDigest(
-                since: Date().addingTimeInterval(-24 * 3600)
-            )
+    func refreshActivitySummary() async {
+        do {
             let includedKinds: Set<ActivityKind> = [
                 .noteFiledToSpace,
                 .notesLinked,
@@ -299,9 +308,12 @@ final class VellumAppModel {
                 .proposalAccepted,
                 .workspaceSeeded,
             ]
-            activityMessage = events.last(where: { includedKinds.contains($0.kind) })?.message
-                ?? "No recent activity"
-            activityCount = digest.totalAgentActions
+            let overview = try await container.workspace.activityOverview(
+                since: Date().addingTimeInterval(-24 * 3600),
+                highlighting: includedKinds
+            )
+            activityMessage = overview.latestMessage ?? "No recent activity"
+            activityCount = overview.digest.totalAgentActions
         } catch {
             library.errorMessage = error.localizedDescription
         }
@@ -376,12 +388,9 @@ final class VellumAppModel {
             noteID: id,
             container: container,
             offersBackgroundChooser: isNewlyCreated,
-            onNoteChanged: { [weak self] _ in
-                Task { [weak self] in
-                    guard let self else { return }
-                    await self.library.refresh()
-                    await self.refreshStats()
-                }
+            onNoteChanged: { [weak self] note in
+                self?.library.applyLocalUpdate(note)
+                self?.scheduleWorkspaceRefresh()
             }
         )
         container.textRecognition.register(noteModel, noteID: id)
@@ -403,6 +412,30 @@ final class VellumAppModel {
 
         screen = .note
         return newPane.id
+    }
+
+    // Every stroke reaches this path, so coalescing the library reload and excluding
+    // stats scans prevents workspace work from outpacing the autosave cadence.
+    func scheduleWorkspaceRefresh() {
+        workspaceRefreshTask?.cancel()
+        let token = UUID()
+        workspaceRefreshToken = token
+        workspaceRefreshTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(2))
+            } catch {
+                return
+            }
+            guard let self else { return }
+            await self.library.refresh()
+            self.clearWorkspaceRefreshTask(matching: token)
+        }
+    }
+
+    private func clearWorkspaceRefreshTask(matching token: UUID) {
+        guard workspaceRefreshToken == token else { return }
+        workspaceRefreshTask = nil
+        workspaceRefreshToken = nil
     }
 
     func handleSplitContainerResize(_ size: CGSize) {

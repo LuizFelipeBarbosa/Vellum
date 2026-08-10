@@ -11,10 +11,26 @@ struct PdfPagesLayer: View {
     let viewport: CanvasViewport
     let pageCount: Int
     let geometry: PageGeometry
+    private let sortedBands: [Int]
+
+    init(
+        cache: PdfPageImageCache,
+        pdfBands: Set<Int>,
+        viewport: CanvasViewport,
+        pageCount: Int,
+        geometry: PageGeometry
+    ) {
+        self.cache = cache
+        self.pdfBands = pdfBands
+        self.viewport = viewport
+        self.pageCount = pageCount
+        self.geometry = geometry
+        sortedBands = pdfBands.sorted()
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            ForEach(pdfBands.sorted(), id: \.self) { band in
+            ForEach(sortedBands, id: \.self) { band in
                 if (0..<pageCount).contains(band),
                    let pageID = cache.pageID(forBand: band),
                    let page = cache.page(forBand: band),

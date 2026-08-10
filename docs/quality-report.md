@@ -1,5 +1,17 @@
 # Vellum code-quality audit
 
+> **Historical record — numbers are as of `742c23d` and no longer current.** The tree has
+> since grown by ~100 commits and an entire AI subsystem: 34.1k production lines across
+> 182 files (115 app + 67 core), and 436 / 431 / 51 tests. The findings and reasoning
+> below still stand; only the counts are stale. Current test commands and counts live in
+> `CLAUDE.md`. Two items this document lists as OPEN are now fixed: the release-build test
+> hooks are `#if DEBUG`-gated, and the duplicated test scaffolding moved into
+> `VellumUITests/TestSupport/`.
+>
+> A 2026-08-10 audit re-verified the dead-code sweep below and found **zero** unreferenced
+> types or functions across 472 types — do not re-run a dead-code hunt, it returns only
+> false positives (launch-argument hooks and protocol conformances).
+
 Audit of `main` @ `742c23d` (27.7k lines production, 28.8k lines tests). Every
 claim below was produced by a read-only agent that had to cite `file:line` and
 quote the source; findings without a citation were dropped. The highest-impact

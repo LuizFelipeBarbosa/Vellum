@@ -216,12 +216,14 @@ final class NoteSplitState {
         pane.heightFraction = oldPane.heightFraction
         columns[index.column].panes[index.row] = pane
         focus(pane.id)
+        oldPane.tearDown()
         onPaneRemoved?(oldNoteID)
     }
 
     func removePane(id: UUID) {
         guard let index = paneIndex(of: id) else { return }
-        let removedNoteID = columns[index.column].panes[index.row].noteID
+        let removedPane = columns[index.column].panes[index.row]
+        let removedNoteID = removedPane.noteID
         let removedPaneWasFocused = focusedPaneID == id
         // Only the focused pane can own a live element-selection tool borrow.
         if removedPaneWasFocused {
@@ -236,6 +238,7 @@ final class NoteSplitState {
             at: index.row,
             from: column.panes.map(\.heightFraction)
         )
+        removedPane.tearDown()
         column.panes.remove(at: index.row)
 
         if column.panes.isEmpty {
@@ -333,8 +336,9 @@ final class NoteSplitState {
 
     func closeAll() async {
         await flushAll()
-        for noteID in panes.map(\.noteID) {
-            onPaneRemoved?(noteID)
+        for pane in panes {
+            pane.tearDown()
+            onPaneRemoved?(pane.noteID)
         }
         columns.removeAll()
         focusedPaneID = nil
