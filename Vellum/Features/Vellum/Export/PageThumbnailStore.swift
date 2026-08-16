@@ -74,9 +74,14 @@ final class PageThumbnailStore {
             return
         }
 
-        inFlight.insert(pageIndex)
-        defer { inFlight.remove(pageIndex) }
         let requestedGeneration = generation
+        inFlight.insert(pageIndex)
+        // A stale request must not remove a newer generation's in-flight marker.
+        defer {
+            if requestedGeneration == generation {
+                inFlight.remove(pageIndex)
+            }
+        }
         let requestedRemapVersion = remapVersion
         do {
             try await Task.sleep(for: .milliseconds(debounceMilliseconds))

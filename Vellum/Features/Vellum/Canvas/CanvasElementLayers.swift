@@ -142,7 +142,7 @@ struct CanvasElementsBandLayer: View {
 
     @ViewBuilder
     private func image(for content: ImageContent) -> some View {
-        if let image = store.imageCache[content.assetPath] {
+        if let image = store.cachedImage(for: content.assetPath) {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFit()

@@ -2,8 +2,7 @@
  `activityAppendCostIsLinearInEventCount` guards the append-only activity-log implementation against
  regressing to a whole-file rewrite on every event.
 
- `repeatedSavesDoNotFloodTheActivityLog` is expected to fail until save activity is coalesced or
- throttled in the workspace service.
+ `repeatedSavesDoNotFloodTheActivityLog` guards the workspace service's save coalescing.
  */
 import Foundation
 import Testing
@@ -14,8 +13,9 @@ func activityAppendCostIsLinearInEventCount() async throws {
     let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repo = FileActivityRepository(rootDirectory: root)
+    let appendTotal = 400
 
-    for index in 0..<400 {
+    for index in 0..<appendTotal {
         try await repo.append(
             ActivityEvent(
                 id: UUID(),
@@ -28,12 +28,19 @@ func activityAppendCostIsLinearInEventCount() async throws {
     }
 
     let written = await repo.bytesWritten
-    // A single serialized ActivityEvent line is roughly 250 bytes. 400 appends that
-    // each write only the new event (linear) total roughly 400 * 250 ~= 100 KB.
-    // 400 * 400 = 160,000 leaves comfortable room for serialized event size while
-    // still catching the quadratic cost of rewriting the whole log on every append.
-    #expect(written < 400 * 400)
-    #expect(await repo.appendCount == 400)
+    var representativeLine = try FilePersistence.encoder(prettyPrinted: false).encode(
+        ActivityEvent(
+            id: UUID(),
+            noteID: nil,
+            createdAt: Date(),
+            kind: .noteUpdated,
+            message: "Update \(appendTotal - 1)"
+        )
+    )
+    representativeLine.append(0x0A)
+    // Four line lengths per append leaves format-growth margin while still catching rewrites.
+    #expect(written < 4 * appendTotal * representativeLine.count)
+    #expect(await repo.appendCount == appendTotal)
 }
 
 @Test
@@ -107,6 +114,84 @@ func oversizedActivityLogIsCompactedToCompleteTailLines() async throws {
 }
 
 @Test
+func oversizedActivityLogWithoutNewlinesIsByteCompactedAndRemainsUsable() async throws {
+    let root = try TemporaryDirectory.make()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logURL = root.appendingPathComponent("activity.jsonl")
+    try Data(repeating: 0x78, count: 1_024 * 1_024 + 1).write(to: logURL)
+
+    let repo = FileActivityRepository(rootDirectory: root)
+    #expect(try await repo.list(noteID: nil).isEmpty)
+    #expect(try Data(contentsOf: logURL).count <= 512 * 1_024)
+
+    let appended = ActivityEvent(
+        id: UUID(),
+        noteID: nil,
+        createdAt: Date(),
+        kind: .noteUpdated,
+        message: "Valid after byte compaction"
+    )
+    try await repo.append(appended)
+
+    let listed = try await repo.list(noteID: nil)
+    #expect(listed.map(\.id) == [appended.id])
+}
+
+@Test
+func failedActivityLogCompactionIsRetried() async throws {
+    let root = try TemporaryDirectory.make()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let logURL = root.appendingPathComponent("activity.jsonl")
+    let repeated = ActivityEvent(
+        id: UUID(),
+        noteID: nil,
+        createdAt: Date(timeIntervalSince1970: 0),
+        kind: .noteUpdated,
+        message: String(repeating: "x", count: 256)
+    )
+    var line = try FilePersistence.encoder(prettyPrinted: false).encode(repeated)
+    line.append(0x0A)
+    var oversizedLog = Data()
+    while oversizedLog.count <= 1_024 * 1_024 {
+        oversizedLog.append(line)
+    }
+    try oversizedLog.write(to: logURL)
+
+    let repo = FileActivityRepository(rootDirectory: root)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o500],
+        ofItemAtPath: root.path
+    )
+    defer {
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: root.path
+        )
+    }
+
+    // Successful small-file checks remain one-shot; failed compactions must stay retryable.
+    // Atomic replacement cannot succeed in the read-only directory, but the read can.
+    #expect(try await !repo.list(noteID: nil).isEmpty)
+    #expect(try Data(contentsOf: logURL).count > 1_024 * 1_024)
+    let appended = ActivityEvent(
+        id: UUID(),
+        noteID: nil,
+        createdAt: Date(),
+        kind: .noteUpdated,
+        message: "Appended despite failed compaction"
+    )
+    try await repo.append(appended)
+
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o700],
+        ofItemAtPath: root.path
+    )
+    let listed = try await repo.list(noteID: nil)
+    #expect(listed.contains { $0.id == appended.id })
+    #expect(try Data(contentsOf: logURL).count <= 512 * 1_024)
+}
+
+@Test
 func repeatedSavesDoNotFloodTheActivityLog() async throws {
     let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -127,7 +212,32 @@ func repeatedSavesDoNotFloodTheActivityLog() async throws {
 
     let events = try await service.activity(noteID: note.id)
     let updates = events.filter { $0.kind == .noteUpdated }
-    #expect(updates.count <= 5)
+    #expect(updates.count == 1)
+}
+
+@Test
+func purgingANoteClearsItsSaveCoalescingState() async throws {
+    let root = try TemporaryDirectory.make()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let service = WorkspaceService(
+        notes: FileNoteRepository(rootDirectory: root),
+        proposals: FileProposalRepository(rootDirectory: root),
+        activity: FileActivityRepository(rootDirectory: root),
+        agent: HeuristicVellumAgent(),
+        spaces: FileSpaceRepository(rootDirectory: root),
+        entities: FileEntityRepository(rootDirectory: root),
+        tasks: FileTaskRepository(rootDirectory: root)
+    )
+    var note = try await service.createNote(title: "Reused identifier")
+    note = try await service.saveNote(note)
+
+    try await service.deleteNote(id: note.id)
+    try await service.purgeNote(id: note.id)
+    try await service.importNote(note, assets: [])
+    note = try await service.saveNote(note)
+
+    let events = try await service.activity(noteID: note.id)
+    #expect(events.filter { $0.kind == .noteUpdated }.count == 1)
 }
 
 @Test
@@ -148,12 +258,14 @@ func libraryListingScansTheWorkspaceOnce() async throws {
     )
     _ = try await service.createNote(title: "Library seed")
     _ = try await service.createSpace(name: "Seed space", color: .blue)
+    let baselineScanCount = await notes.listNotesCallCount
 
     let listing = try await service.libraryListing()
 
     #expect(listing.summaries.count == 1)
     #expect(listing.spaces.count == 1)
-    #expect(await notes.listNotesCallCount == 1)
+    let listingScanCount = await notes.listNotesCallCount - baselineScanCount
+    #expect(listingScanCount == 1)
 }
 
 @Test

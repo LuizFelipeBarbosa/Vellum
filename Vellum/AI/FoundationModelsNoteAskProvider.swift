@@ -50,11 +50,7 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
     private let baseInstructions: String
     private var session: LanguageModelSession
     private var lastCompletedTurn: CompletedTurn?
-    private var turnInProgress = false
-    private var turnWaiters: [
-        (id: UUID, continuation: CheckedContinuation<Void, Never>)
-    ] = []
-    private var cancelledTurnWaiterIDs = Set<UUID>()
+    private let turnGate = AskTurnGate()
 
     init(source: AskSource) {
         self.source = source
@@ -115,17 +111,19 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
         continuation: AsyncThrowingStream<NoteAskStreamEvent, Error>.Continuation
     ) async {
         do {
-            try await acquireTurn()
+            try await turnGate.acquire()
         } catch {
             continuation.finish(throwing: error)
             return
         }
-        defer { releaseTurn() }
+        defer {
+            Task { await turnGate.release() }
+        }
 
         do {
             try Task.checkCancellation()
             let clock = ContinuousClock()
-            let responseDeadline = clock.now.advanced(by: .seconds(120))
+            let responseDeadline = clock.now.advanced(by: .seconds(10))
             while session.isResponding {
                 guard clock.now < responseDeadline else {
                     throw FoundationModelsResponseTimeoutError()
@@ -202,17 +200,37 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
         prompt: String,
         continuation: AsyncThrowingStream<NoteAskStreamEvent, Error>.Continuation
     ) async throws -> String {
-        var cumulativeAnswer = ""
-        let stream = session.streamResponse(
-            to: prompt,
-            options: GenerationOptions(maximumResponseTokens: Self.responseTokenBudget)
-        )
-        for try await snapshot in stream {
-            try Task.checkCancellation()
-            cumulativeAnswer = snapshot.content
-            continuation.yield(.partial(cumulativeAnswer))
+        let clock = ContinuousClock()
+        let responseDeadline = clock.now.advanced(by: .seconds(120))
+
+        return try await withThrowingTaskGroup(of: String.self) { group in
+            // The stream is created inside the child task: LanguageModelSession is
+            // Sendable but its ResponseStream is not, so a stream made on this actor
+            // could not be sent into the group.
+            group.addTask { [session] in
+                let stream = session.streamResponse(
+                    to: prompt,
+                    options: GenerationOptions(maximumResponseTokens: Self.responseTokenBudget)
+                )
+                var cumulativeAnswer = ""
+                for try await snapshot in stream {
+                    try Task.checkCancellation()
+                    cumulativeAnswer = snapshot.content
+                    continuation.yield(.partial(cumulativeAnswer))
+                }
+                return cumulativeAnswer
+            }
+            group.addTask {
+                try await clock.sleep(until: responseDeadline)
+                throw FoundationModelsResponseTimeoutError()
+            }
+
+            defer { group.cancelAll() }
+            guard let answer = try await group.next() else {
+                throw CancellationError()
+            }
+            return answer
         }
-        return cumulativeAnswer
     }
 
     private func makeTurnContext(
@@ -272,44 +290,6 @@ actor FoundationModelsNoteAskSession: NoteAskSession {
                 excerpt: excerpt
             )
         }
-    }
-
-    private func acquireTurn() async throws {
-        guard turnInProgress else {
-            turnInProgress = true
-            return
-        }
-
-        let waiterID = UUID()
-        await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                turnWaiters.append((id: waiterID, continuation: continuation))
-            }
-        } onCancel: {
-            Task { await self.cancelWaiter(id: waiterID) }
-        }
-
-        if cancelledTurnWaiterIDs.remove(waiterID) != nil {
-            throw CancellationError()
-        }
-    }
-
-    private func cancelWaiter(id: UUID) {
-        guard let index = turnWaiters.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-        let waiter = turnWaiters.remove(at: index)
-        cancelledTurnWaiterIDs.insert(id)
-        waiter.continuation.resume()
-    }
-
-    private func releaseTurn() {
-        guard !turnWaiters.isEmpty else {
-            turnInProgress = false
-            return
-        }
-        let waiter = turnWaiters.removeFirst()
-        waiter.continuation.resume()
     }
 
     private static func roleInstructions(for title: String) -> String {

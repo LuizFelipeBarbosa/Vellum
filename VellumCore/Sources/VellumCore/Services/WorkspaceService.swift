@@ -8,8 +8,8 @@ public actor WorkspaceService {
     private let spaces: any SpaceRepository
     private let entities: any EntityRepository
     private let tasks: any TaskRepository
-    private var lastNoteUpdatedLog: [UUID: Date] = [:]
-    private static let noteUpdatedCoalesceWindow: TimeInterval = 60
+    private var lastNoteUpdatedLog: [UUID: ContinuousClock.Instant] = [:]
+    private static let noteUpdatedCoalesceWindow: Duration = .seconds(60)
 
     public init(
         notes: any NoteRepository,
@@ -72,15 +72,16 @@ public actor WorkspaceService {
         saved.revision += 1
         try await notes.saveNote(saved)
 
-        let previousLogTime = lastNoteUpdatedLog[saved.id]
-        let shouldLogUpdate = previousLogTime.map {
-            timestamp.timeIntervalSince($0) >= Self.noteUpdatedCoalesceWindow
+        let updateInstant = ContinuousClock().now
+        let previousLogInstant = lastNoteUpdatedLog[saved.id]
+        let shouldLogUpdate = previousLogInstant.map {
+            $0.duration(to: updateInstant) >= Self.noteUpdatedCoalesceWindow
         } ?? true
         if shouldLogUpdate {
             // The sidebar highlight and agent-action digest both exclude `.noteUpdated`.
             // ActivityView still shows it in the timeline, where repeated autosave rows
             // are noise rather than useful signal.
-            lastNoteUpdatedLog[saved.id] = timestamp
+            lastNoteUpdatedLog[saved.id] = updateInstant
             do {
                 try await log(
                     noteID: saved.id,
@@ -89,8 +90,8 @@ public actor WorkspaceService {
                     createdAt: timestamp
                 )
             } catch {
-                if lastNoteUpdatedLog[saved.id] == timestamp {
-                    lastNoteUpdatedLog[saved.id] = previousLogTime
+                if lastNoteUpdatedLog[saved.id] == updateInstant {
+                    lastNoteUpdatedLog[saved.id] = previousLogInstant
                 }
                 throw error
             }
@@ -150,6 +151,7 @@ public actor WorkspaceService {
 
     public func purgeNote(id: UUID) async throws {
         guard try await notes.purgeNote(id: id) else { return }
+        lastNoteUpdatedLog[id] = nil
         for task in try await tasks.list() where task.noteID == id {
             try await tasks.delete(id: task.id)
         }

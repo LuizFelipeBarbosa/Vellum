@@ -1,6 +1,9 @@
 import Foundation
+import os
 
 public actor FileActivityRepository: ActivityRepository {
+    private static let logger = Logger(subsystem: "com.vellum", category: "activity-log")
+
     private let rootDirectory: URL
     private var checkedLogPaths: Set<String> = []
 
@@ -37,7 +40,7 @@ public actor FileActivityRepository: ActivityRepository {
                     throw VellumError.persistenceFailure("Could not create activity log \(logURL.path).")
                 }
             }
-            try compactLogIfNeeded(at: logURL)
+            try? compactLogIfNeeded(at: logURL)
 
             var appendedData = Data()
             let payload = try FilePersistence.encoder(prettyPrinted: false).encode(event)
@@ -107,12 +110,12 @@ public actor FileActivityRepository: ActivityRepository {
 
     private func readEventsIfPresent(at url: URL) throws -> [ActivityEvent] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-        try compactLogIfNeeded(at: url)
+        try? compactLogIfNeeded(at: url)
         return try readEvents(from: url)
     }
 
     private func compactLogIfNeeded(at url: URL) throws {
-        guard checkedLogPaths.insert(url.path).inserted else { return }
+        guard !checkedLogPaths.contains(url.path) else { return }
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 
         let handle = try FileHandle(forReadingFrom: url)
@@ -121,6 +124,7 @@ public actor FileActivityRepository: ActivityRepository {
             let fileSize = try handle.seekToEnd()
             guard fileSize > 1_024 * 1_024 else {
                 try handle.close()
+                checkedLogPaths.insert(url.path)
                 return
             }
 
@@ -132,11 +136,17 @@ public actor FileActivityRepository: ActivityRepository {
             throw error
         }
 
-        guard let firstNewline = tail.firstIndex(of: 0x0A) else { return }
-        let retained = tail[tail.index(after: firstNewline)...]
+        let retained: Data
+        if let firstNewline = tail.firstIndex(of: 0x0A) {
+            retained = Data(tail[tail.index(after: firstNewline)...])
+        } else {
+            // The reader tolerates a torn first line, so byte truncation is safe here.
+            retained = tail
+        }
         // Dropping the oldest history is deliberate: bounded reads matter more than
         // retaining an unbounded log produced by older builds.
-        try Data(retained).write(to: url, options: .atomic)
+        try retained.write(to: url, options: .atomic)
+        checkedLogPaths.insert(url.path)
     }
 
     private func readEvents(from url: URL) throws -> [ActivityEvent] {
@@ -145,17 +155,28 @@ public actor FileActivityRepository: ActivityRepository {
             guard let contents = String(data: data, encoding: .utf8) else {
                 throw VellumError.persistenceFailure("Activity log \(url.path) is not UTF-8.")
             }
-            return try contents
-                .split(separator: "\n", omittingEmptySubsequences: false)
-                .compactMap { line -> ActivityEvent? in
-                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmed.isEmpty else { return nil }
-                    guard let lineData = trimmed.data(using: .utf8) else {
-                        throw VellumError.persistenceFailure("Activity log \(url.path) contains invalid text.")
-                    }
-                    // A torn trailing line must not cost the user their entire history.
-                    return try? FilePersistence.decoder().decode(ActivityEvent.self, from: lineData)
+            let decoder = FilePersistence.decoder()
+            var events: [ActivityEvent] = []
+            var skippedLineCount = 0
+            for line in contents.split(separator: "\n", omittingEmptySubsequences: false) {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                guard let lineData = trimmed.data(using: .utf8) else {
+                    throw VellumError.persistenceFailure("Activity log \(url.path) contains invalid text.")
                 }
+                // A torn trailing line must not cost the user their entire history.
+                if let event = try? decoder.decode(ActivityEvent.self, from: lineData) {
+                    events.append(event)
+                } else {
+                    skippedLineCount += 1
+                }
+            }
+            if skippedLineCount > 0 {
+                Self.logger.warning(
+                    "Skipped \(skippedLineCount) undecodable lines in \(url.lastPathComponent, privacy: .public)."
+                )
+            }
+            return events
         } catch let error as VellumError {
             throw error
         } catch {

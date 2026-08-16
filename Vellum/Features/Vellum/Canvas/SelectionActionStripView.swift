@@ -95,14 +95,14 @@ struct SelectionActionStripView: View {
         switch action {
         case .cut:
             Button {
-                controller.cutSelection()
+                Task { await controller.cutSelection() }
             } label: {
                 actionLabel(action.title, systemImage: action.systemImage)
             }
             .accessibilityLabel(action.accessibilityLabel)
         case .copy:
             Button {
-                controller.copySelection()
+                Task { _ = await controller.copySelection() }
             } label: {
                 actionLabel(action.title, systemImage: action.systemImage)
             }

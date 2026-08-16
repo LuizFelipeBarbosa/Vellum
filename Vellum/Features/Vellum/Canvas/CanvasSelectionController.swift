@@ -29,6 +29,7 @@ final class CanvasSelectionController {
     weak var canvasReference: NoteCanvasReference?
     weak var elementsStore: CanvasElementsStore?
     var persistImageData: ((Data) async -> String?)?
+    var loadImageData: ((String) async -> Data?)?
     var importSystemImage: ((Data, CGPoint?) async -> UUID?)?
     var onOperationFailed: ((String) -> Void)?
     var contentWidth: CGFloat = PageGeometry.a4.contentWidth
@@ -778,7 +779,7 @@ final class CanvasSelectionController {
     }
 
     @discardableResult
-    func copySelection() -> Bool {
+    func copySelection() async -> Bool {
         guard let selection,
               let canvasView = canvasReference?.canvasView,
               let elementsStore else { return false }
@@ -794,7 +795,19 @@ final class CanvasSelectionController {
         var imageAssets: [String: Data] = [:]
         for element in elements {
             guard case .image(let image) = element.content else { continue }
-            guard let data = elementsStore.imageDataCache[image.assetPath] else {
+            let data: Data
+            if let cachedData = elementsStore.cachedImageData(for: image.assetPath) {
+                data = cachedData
+            } else if let loadedData = await loadImageData?(image.assetPath),
+                      let loadedImage = UIImage(data: loadedData) {
+                elementsStore.cacheImage(
+                    loadedImage,
+                    data: loadedData,
+                    forAssetPath: image.assetPath
+                )
+                data = loadedData
+            } else {
+                onOperationFailed?("Couldn't copy: image data unavailable")
                 return false
             }
             imageAssets[image.assetPath] = data
@@ -809,11 +822,8 @@ final class CanvasSelectionController {
         )
     }
 
-    func cutSelection() {
-        guard copySelection() else {
-            onOperationFailed?("Couldn't cut: image data still loading")
-            return
-        }
+    func cutSelection() async {
+        guard await copySelection() else { return }
         deleteSelection()
     }
 

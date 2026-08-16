@@ -32,7 +32,8 @@ final class SelectionPasteboardTests: XCTestCase {
         let originalStrokeCount = harness.canvasView.drawing.strokes.count
         let originalElements = harness.store.elements
 
-        XCTAssertTrue(harness.controller.copySelection())
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertTrue(copySucceeded)
         // This no-argument paste also guards the legacy nil-target +20/+20 offset.
         await harness.controller.pasteFromPasteboard()
 
@@ -82,7 +83,8 @@ final class SelectionPasteboardTests: XCTestCase {
         selectMixedContent(in: harness)
         let target = CGPoint(x: 320, y: 280)
 
-        XCTAssertTrue(harness.controller.copySelection())
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertTrue(copySucceeded)
         await harness.controller.pasteFromPasteboard(at: target)
 
         let pastedSelection = try XCTUnwrap(harness.controller.selection)
@@ -120,7 +122,8 @@ final class SelectionPasteboardTests: XCTestCase {
         )
         selectMixedContent(in: harness)
 
-        XCTAssertTrue(harness.controller.copySelection())
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertTrue(copySucceeded)
         await harness.controller.pasteFromPasteboard(at: CGPoint(x: 1, y: 1))
 
         let pastedSelection = try XCTUnwrap(harness.controller.selection)
@@ -161,7 +164,8 @@ final class SelectionPasteboardTests: XCTestCase {
         let originalStrokeCount = harness.canvasView.drawing.strokes.count
         let originalElements = harness.store.elements
 
-        XCTAssertTrue(harness.controller.copySelection())
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertTrue(copySucceeded)
         await harness.controller.pasteFromPasteboard(at: CGPoint(x: 320, y: 280))
 
         XCTAssertEqual(harness.canvasView.drawing.strokes.count, originalStrokeCount + 1)
@@ -303,7 +307,8 @@ final class SelectionPasteboardTests: XCTestCase {
             elements: [element]
         )
         selectMixedContent(in: harness)
-        XCTAssertTrue(harness.controller.copySelection())
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertTrue(copySucceeded)
 
         let imageData = try XCTUnwrap(makePNGData())
         var pasteboardItems = UIPasteboard.general.items
@@ -341,7 +346,8 @@ final class SelectionPasteboardTests: XCTestCase {
         XCTAssertNil(harness.controller.pendingPasteTarget)
 
         selectMixedContent(in: harness)
-        XCTAssertTrue(harness.controller.copySelection())
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertTrue(copySucceeded)
         harness.controller.requestPasteAffordance(at: firstTarget)
         XCTAssertEqual(harness.controller.pendingPasteTarget, firstTarget)
         harness.controller.requestPasteAffordance(at: secondTarget)
@@ -419,7 +425,8 @@ final class SelectionPasteboardTests: XCTestCase {
         let harness = CanvasHarness.make(strokes: [], elements: [element])
         harness.controller.selectElement(id: element.id)
 
-        XCTAssertTrue(harness.controller.copySelection())
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertTrue(copySucceeded)
         await harness.controller.pasteFromPasteboard()
 
         let pasted = try XCTUnwrap(
@@ -440,7 +447,7 @@ final class SelectionPasteboardTests: XCTestCase {
         )
         selectMixedContent(in: harness)
 
-        harness.controller.cutSelection()
+        await harness.controller.cutSelection()
 
         XCTAssertTrue(harness.canvasView.drawing.strokes.isEmpty)
         XCTAssertTrue(harness.store.elements.isEmpty)
@@ -468,7 +475,7 @@ final class SelectionPasteboardTests: XCTestCase {
         )
     }
 
-    func testColdCacheCutDoesNotDeleteOrReplacePasteboard() {
+    func testColdCacheCutDoesNotDeleteOrReplacePasteboard() async {
         let element = makeImageElement(assetPath: "assets/cold.jpg")
         let harness = CanvasHarness.make(
             strokes: [
@@ -484,8 +491,9 @@ final class SelectionPasteboardTests: XCTestCase {
         var failureMessage: String?
         harness.controller.onOperationFailed = { failureMessage = $0 }
 
-        XCTAssertFalse(harness.controller.copySelection())
-        harness.controller.cutSelection()
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertFalse(copySucceeded)
+        await harness.controller.cutSelection()
 
         XCTAssertEqual(harness.canvasView.drawing.strokes.count, originalStrokeCount)
         XCTAssertEqual(harness.store.elements.count, originalElementCount)
@@ -494,7 +502,29 @@ final class SelectionPasteboardTests: XCTestCase {
         XCTAssertFalse(failureMessage?.isEmpty ?? true)
     }
 
-    func testWarmCacheCopyPreservesOriginalImageBytes() throws {
+    func testColdCacheCopyLoadsImageDataAndWarmsCache() async throws {
+        let assetPath = "assets/cold.png"
+        let element = makeImageElement(assetPath: assetPath)
+        let harness = CanvasHarness.make(strokes: [], elements: [element])
+        let fixtureData = try XCTUnwrap(makePNGData())
+        var loadedAssetPath: String?
+        harness.controller.loadImageData = { requestedAssetPath in
+            loadedAssetPath = requestedAssetPath
+            return fixtureData
+        }
+        selectMixedContent(in: harness)
+
+        XCTAssertNil(harness.store.cachedImageData(for: assetPath))
+        let copySucceeded = await harness.controller.copySelection()
+
+        XCTAssertTrue(copySucceeded)
+        XCTAssertEqual(loadedAssetPath, assetPath)
+        let payload = try XCTUnwrap(SelectionPasteboard.read())
+        XCTAssertEqual(payload.imageAssets[assetPath], fixtureData)
+        XCTAssertEqual(harness.store.cachedImageData(for: assetPath), fixtureData)
+    }
+
+    func testWarmCacheCopyPreservesOriginalImageBytes() async throws {
         let assetPath = "assets/original.png"
         let element = makeImageElement(assetPath: assetPath)
         let harness = CanvasHarness.make(strokes: [], elements: [element])
@@ -503,7 +533,8 @@ final class SelectionPasteboardTests: XCTestCase {
         harness.store.cacheImage(image, data: originalData, forAssetPath: assetPath)
         selectMixedContent(in: harness)
 
-        XCTAssertTrue(harness.controller.copySelection())
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertTrue(copySucceeded)
 
         let payload = try XCTUnwrap(SelectionPasteboard.read())
         XCTAssertEqual(payload.imageAssets[assetPath], originalData)
@@ -533,7 +564,8 @@ final class SelectionPasteboardTests: XCTestCase {
         harness.controller.extendCapture(to: CGPoint(x: 120, y: 120))
         harness.controller.endCapture()
 
-        XCTAssertTrue(harness.controller.copySelection())
+        let copySucceeded = await harness.controller.copySelection()
+        XCTAssertTrue(copySucceeded)
         await harness.controller.pasteFromPasteboard()
 
         let pasted = try XCTUnwrap(

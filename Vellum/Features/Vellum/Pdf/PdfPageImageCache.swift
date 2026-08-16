@@ -92,6 +92,16 @@ final class PdfPageImageCache {
         }
     }
 
+    func clearCaches() {
+        documents.removeAll()
+        images.removeAll()
+        inFlight.removeAll()
+        lastRequestSequenceByKey.removeAll()
+        requestSequence = 0
+        lastVisibleWindowRequest = nil
+        pinnedPageIDs.removeAll()
+    }
+
     func setAppearance(isDark: Bool) {
         guard isDark != isDarkAppearance else { return }
         isDarkAppearance = isDark

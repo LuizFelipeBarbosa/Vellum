@@ -6,14 +6,23 @@ import XCTest
 private actor CountingNoteRepository: NoteRepository {
     private let wrapped: any NoteRepository
     private var listNotesCallCount = 0
+    private var listTrashedNotesCallCount = 0
 
     init(wrapping wrapped: any NoteRepository) {
         self.wrapped = wrapped
     }
 
     func listNotes(scope: NoteListScope) async throws -> [Note] {
-        listNotesCallCount += 1
-        return try await wrapped.listNotes(scope: scope)
+        let notes = try await wrapped.listNotes(scope: scope)
+        switch scope {
+        case .active:
+            listNotesCallCount += 1
+        case .trashed:
+            listTrashedNotesCallCount += 1
+        case .all:
+            break
+        }
+        return notes
     }
 
     func unsupportedNotes() async throws -> [UnsupportedNotePackage] {
@@ -74,6 +83,37 @@ private actor CountingNoteRepository: NoteRepository {
     func listCallCount() -> Int {
         listNotesCallCount
     }
+
+    func trashedListCallCount() -> Int {
+        listTrashedNotesCallCount
+    }
+}
+
+private actor CountingTaskRepository: TaskRepository {
+    private let wrapped: any TaskRepository
+    private var listTasksCallCount = 0
+
+    init(wrapping wrapped: any TaskRepository) {
+        self.wrapped = wrapped
+    }
+
+    func list() async throws -> [TaskItem] {
+        let tasks = try await wrapped.list()
+        listTasksCallCount += 1
+        return tasks
+    }
+
+    func save(_ task: TaskItem) async throws {
+        try await wrapped.save(task)
+    }
+
+    func delete(id: UUID) async throws {
+        try await wrapped.delete(id: id)
+    }
+
+    func listCallCount() -> Int {
+        listTasksCallCount
+    }
 }
 
 @MainActor
@@ -97,8 +137,11 @@ final class WorkspaceRefreshCoalescingTests: XCTestCase {
         let fixture = makeFixture()
         _ = try await fixture.notes.createNote(title: "Seed")
         let model = VellumAppModel(container: fixture.container, arguments: [])
+        model.workspaceRefreshDebounce = .milliseconds(50)
         await model.library.refresh()
         let baseline = await fixture.notes.listCallCount()
+        let taskListBaseline = await fixture.tasks.listCallCount()
+        let trashedListBaseline = await fixture.notes.trashedListCallCount()
 
         for _ in 0..<20 {
             model.scheduleWorkspaceRefresh()
@@ -107,9 +150,14 @@ final class WorkspaceRefreshCoalescingTests: XCTestCase {
         let immediateCallCount = await fixture.notes.listCallCount()
         XCTAssertEqual(immediateCallCount, baseline)
 
-        let refreshFinished = try await waitUntil(timeout: 4) {
+        let refreshFinished = try await waitUntil(timeout: 1) {
             let callCount = await fixture.notes.listCallCount()
-            return callCount > baseline && !model.library.isLoading
+            let taskListCallCount = await fixture.tasks.listCallCount()
+            let trashedListCallCount = await fixture.notes.trashedListCallCount()
+            return callCount > baseline
+                && taskListCallCount > taskListBaseline
+                && trashedListCallCount > trashedListBaseline
+                && !model.library.isLoading
         }
         XCTAssertTrue(
             refreshFinished,
@@ -117,6 +165,57 @@ final class WorkspaceRefreshCoalescingTests: XCTestCase {
         )
         let finalCallCount = await fixture.notes.listCallCount()
         XCTAssertEqual(finalCallCount, baseline + 1)
+    }
+
+    func testContinuousWorkspaceRefreshRequestsCannotStarveRefreshOrCounts() async throws {
+        let fixture = makeFixture()
+        _ = try await fixture.notes.createNote(title: "Seed")
+        let model = VellumAppModel(container: fixture.container, arguments: [])
+        model.workspaceRefreshDebounce = .milliseconds(50)
+        model.workspaceRefreshMaxLatency = .milliseconds(200)
+        await model.library.refresh()
+        let noteListBaseline = await fixture.notes.listCallCount()
+        let taskListBaseline = await fixture.tasks.listCallCount()
+        var refreshedDuringRearming = false
+        var countsRefreshedDuringRearming = false
+
+        for _ in 0..<24 {
+            model.scheduleWorkspaceRefresh()
+            try await Task.sleep(for: .milliseconds(25))
+
+            let noteListCallCount = await fixture.notes.listCallCount()
+            let taskListCallCount = await fixture.tasks.listCallCount()
+            refreshedDuringRearming = refreshedDuringRearming
+                || noteListCallCount > noteListBaseline
+            countsRefreshedDuringRearming = countsRefreshedDuringRearming
+                || taskListCallCount > taskListBaseline
+        }
+
+        XCTAssertTrue(
+            refreshedDuringRearming,
+            "library refresh was starved by continuous debounce re-arming"
+        )
+        XCTAssertTrue(
+            countsRefreshedDuringRearming,
+            "sidebar counts were not refreshed during the bounded-latency window"
+        )
+    }
+
+    func testApplyLocalUpdateOverridesAndPreservesHasInkSynchronously() async throws {
+        let fixture = makeFixture()
+        var note = try await fixture.notes.createNote(title: "Ink fidelity")
+        let library = LibraryScreenModel(workspace: fixture.container.workspace)
+        await library.refresh()
+        XCTAssertEqual(library.summaries.first(where: { $0.id == note.id })?.hasInk, false)
+
+        library.applyLocalUpdate(note, hasInk: true)
+
+        XCTAssertEqual(library.summaries.first(where: { $0.id == note.id })?.hasInk, true)
+
+        note.title = "Preserve the override"
+        library.applyLocalUpdate(note)
+
+        XCTAssertEqual(library.summaries.first(where: { $0.id == note.id })?.hasInk, true)
     }
 
     func testApplyLocalUpdatePatchesSummaryWithoutWorkspaceRefresh() async throws {
@@ -198,7 +297,8 @@ final class WorkspaceRefreshCoalescingTests: XCTestCase {
 
     private func makeFixture() -> (
         container: AppContainer,
-        notes: CountingNoteRepository
+        notes: CountingNoteRepository,
+        tasks: CountingTaskRepository
     ) {
         let fileNotes = FileNoteRepository(rootDirectory: rootDirectory)
         let notes = CountingNoteRepository(wrapping: fileNotes)
@@ -207,7 +307,8 @@ final class WorkspaceRefreshCoalescingTests: XCTestCase {
         let agent = HeuristicVellumAgent()
         let spaces = FileSpaceRepository(rootDirectory: rootDirectory)
         let entities = FileEntityRepository(rootDirectory: rootDirectory)
-        let tasks = FileTaskRepository(rootDirectory: rootDirectory)
+        let fileTasks = FileTaskRepository(rootDirectory: rootDirectory)
+        let tasks = CountingTaskRepository(wrapping: fileTasks)
         let workspace = WorkspaceService(
             notes: notes,
             proposals: proposals,
@@ -239,7 +340,7 @@ final class WorkspaceRefreshCoalescingTests: XCTestCase {
                 activity: activity
             )
         )
-        return (container, notes)
+        return (container, notes, tasks)
     }
 
     private func waitUntil(

@@ -31,6 +31,6 @@ final class NotePane: Identifiable {
 
     func tearDown() {
         undoManager.removeAllActions()
-        noteModel.detachViewCallbacks()
+        noteModel.prepareForDiscard()
     }
 }

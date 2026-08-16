@@ -90,11 +90,14 @@ final class VellumAppModel {
     var spaceListings: [SpaceListing] = []
     var activityMessage = "No recent activity"
     var activityCount = 0
+    var workspaceRefreshDebounce: Duration = .seconds(2)
+    var workspaceRefreshMaxLatency: Duration = .seconds(10)
 
     private var toastTask: Task<Void, Never>?
     private var askNavigationTask: Task<Void, Never>?
     private var workspaceRefreshTask: Task<Void, Never>?
     private var workspaceRefreshToken: UUID?
+    private var workspaceRefreshBurstStart: ContinuousClock.Instant?
     private var openingNoteIDs: Set<UUID> = []
     private var lastSplitContainerSize: CGSize = .zero
     private var resizeOverflowTask: Task<Void, Never>?
@@ -389,8 +392,13 @@ final class VellumAppModel {
             container: container,
             offersBackgroundChooser: isNewlyCreated,
             onNoteChanged: { [weak self] note in
-                self?.library.applyLocalUpdate(note)
-                self?.scheduleWorkspaceRefresh()
+                guard let self else { return }
+                let noteModel = self.split.pane(for: note.id)?.noteModel
+                self.library.applyLocalUpdate(
+                    note,
+                    hasInk: noteModel?.hasInkInMemory
+                )
+                self.scheduleWorkspaceRefresh()
             }
         )
         container.textRecognition.register(noteModel, noteID: id)
@@ -414,20 +422,43 @@ final class VellumAppModel {
         return newPane.id
     }
 
-    // Every stroke reaches this path, so coalescing the library reload and excluding
-    // stats scans prevents workspace work from outpacing the autosave cadence.
+    // Every stroke reaches this path, so refreshes are coalesced with bounded latency.
+    // Only library and sidebar counts reload; refreshStats/activity scans stay off saves.
     func scheduleWorkspaceRefresh() {
+        let now = ContinuousClock().now
+        if let burstStart = workspaceRefreshBurstStart,
+           burstStart.duration(to: now) >= workspaceRefreshMaxLatency {
+            workspaceRefreshTask?.cancel()
+            let token = UUID()
+            workspaceRefreshToken = token
+            workspaceRefreshBurstStart = nil
+            workspaceRefreshTask = Task { [weak self] in
+                guard let self else { return }
+                await self.library.refresh()
+                await self.refreshCounts()
+                self.clearWorkspaceRefreshTask(matching: token)
+            }
+            return
+        }
+
+        if workspaceRefreshBurstStart == nil {
+            workspaceRefreshBurstStart = now
+        }
         workspaceRefreshTask?.cancel()
         let token = UUID()
+        let debounce = workspaceRefreshDebounce
         workspaceRefreshToken = token
         workspaceRefreshTask = Task { [weak self] in
             do {
-                try await Task.sleep(for: .seconds(2))
+                try await Task.sleep(for: debounce)
             } catch {
                 return
             }
             guard let self else { return }
+            guard self.workspaceRefreshToken == token else { return }
+            self.workspaceRefreshBurstStart = nil
             await self.library.refresh()
+            await self.refreshCounts()
             self.clearWorkspaceRefreshTask(matching: token)
         }
     }
@@ -436,6 +467,7 @@ final class VellumAppModel {
         guard workspaceRefreshToken == token else { return }
         workspaceRefreshTask = nil
         workspaceRefreshToken = nil
+        workspaceRefreshBurstStart = nil
     }
 
     func handleSplitContainerResize(_ size: CGSize) {

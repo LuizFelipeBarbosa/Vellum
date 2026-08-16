@@ -1,10 +1,37 @@
 import Foundation
+import UIKit
 @testable import Vellum
 import VellumCore
 import XCTest
 
 @MainActor
 final class NoteSplitStateTests: XCTestCase {
+    func testPaneCapsUndoHistoryAtFiftyLevels() {
+        let pane = makePane(container: makeContainer())
+
+        XCTAssertEqual(pane.undoManager.levelsOfUndo, 50)
+    }
+
+    func testPaneTearDownClearsEditorImageCaches() {
+        let pane = makePane(container: makeContainer())
+        let image = UIImage()
+        let pdfKey = PdfPageImageCache.ImageKey(pageID: UUID(), bucket: .fit)
+        pane.noteModel.canvasElements.cacheImage(
+            image,
+            data: Data([1]),
+            forAssetPath: "assets/image.jpg"
+        )
+        pane.noteModel.pdfCache.insertImage(image, for: pdfKey)
+        XCTAssertFalse(pane.noteModel.canvasElements.imageCache.isEmpty)
+        XCTAssertFalse(pane.noteModel.pdfCache.images.isEmpty)
+
+        pane.tearDown()
+
+        XCTAssertTrue(pane.noteModel.canvasElements.imageCache.isEmpty)
+        XCTAssertTrue(pane.noteModel.canvasElements.imageDataCache.isEmpty)
+        XCTAssertTrue(pane.noteModel.pdfCache.images.isEmpty)
+    }
+
     func testInsertColumnSupportsTrailingLeadingAndMiddlePositions() {
         let container = makeContainer()
         let first = makePane(container: container)
@@ -313,6 +340,22 @@ final class NoteSplitStateTests: XCTestCase {
         )
     }
 
+    func testReplacePaneTearsDownDiscardedPane() {
+        let container = makeContainer()
+        let discarded = makePane(container: container)
+        let replacement = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: discarded, at: nil)
+        discarded.noteModel.onScrollToPage = { _ in }
+        discarded.undoManager.registerUndo(withTarget: discarded) { _ in }
+        XCTAssertTrue(discarded.undoManager.canUndo)
+
+        state.replacePane(id: discarded.id, with: replacement)
+
+        XCTAssertFalse(discarded.undoManager.canUndo)
+        XCTAssertNil(discarded.noteModel.onScrollToPage)
+    }
+
     func testRemovePaneRenormalizesRowsAndUsesSameIndexThenLastRow() {
         let container = makeContainer()
         let top = makePane(container: container)
@@ -338,6 +381,92 @@ final class NoteSplitStateTests: XCTestCase {
         XCTAssertEqual(state.columns[0].panes.map(\.id), [top.id])
         XCTAssertEqual(state.columns[0].panes[0].heightFraction, 1, accuracy: 0.0001)
         XCTAssertEqual(state.focusedPaneID, top.id)
+    }
+
+    func testRemovePaneTearsDownDiscardedPane() {
+        let pane = makePane(container: makeContainer())
+        let state = NoteSplitState()
+        state.insertColumn(with: pane, at: nil)
+        pane.noteModel.onScrollToPage = { _ in }
+        pane.undoManager.registerUndo(withTarget: pane) { _ in }
+        XCTAssertTrue(pane.undoManager.canUndo)
+
+        state.removePane(id: pane.id)
+
+        XCTAssertFalse(pane.undoManager.canUndo)
+        XCTAssertNil(pane.noteModel.onScrollToPage)
+    }
+
+    func testRemovePaneFlushesPendingEditBeforeDiscard() async throws {
+        let container = makeContainer()
+        let note = try await container.notes.createNote(title: "Before discard")
+        let model = NoteScreenModel(
+            noteID: note.id,
+            container: container,
+            onNoteChanged: { _ in }
+        )
+        await model.load()
+        let pane = NotePane(noteModel: model)
+        let state = NoteSplitState()
+        state.insertColumn(with: pane, at: nil)
+        model.title = "Saved during discard"
+
+        state.removePane(id: pane.id)
+
+        let saveFinished = try await waitUntilAsync(timeout: 1) {
+            let savedNote = try? await container.notes.loadNote(id: note.id)
+            return savedNote?.title == "Saved during discard"
+        }
+        XCTAssertTrue(saveFinished, "discard dropped a pending title edit")
+    }
+
+    func testCloseAllTearsDownEveryDiscardedPane() async {
+        let container = makeContainer()
+        let first = makePane(container: container)
+        let second = makePane(container: container)
+        let state = NoteSplitState()
+        state.insertColumn(with: first, at: nil)
+        state.insertColumn(with: second, at: nil)
+        for pane in [first, second] {
+            pane.noteModel.onScrollToPage = { _ in }
+            pane.undoManager.registerUndo(withTarget: pane) { _ in }
+            XCTAssertTrue(pane.undoManager.canUndo)
+        }
+
+        await state.closeAll()
+
+        for pane in [first, second] {
+            XCTAssertFalse(pane.undoManager.canUndo)
+            XCTAssertNil(pane.noteModel.onScrollToPage)
+        }
+    }
+
+    func testPdfBandsTracksOnlyPdfPageProjection() async throws {
+        let container = makeContainer()
+        var note = try await container.notes.createNote(title: "PDF bands")
+        let model = NoteScreenModel(
+            noteID: note.id,
+            container: container,
+            onNoteChanged: { _ in }
+        )
+        model.note = note
+        XCTAssertTrue(model.pdfBands.isEmpty)
+
+        note.pages[0].pdfPage = PDFPageReference(
+            assetPath: "assets/source.pdf",
+            pageIndex: 0
+        )
+        model.note = note
+        XCTAssertEqual(model.pdfBands, Set([0]))
+
+        let bandsBeforeTextEdit = model.pdfBands
+        note.pages[0].plainText = "Only content changed"
+        model.note = note
+        XCTAssertEqual(model.pdfBands, bandsBeforeTextEdit)
+
+        note.pages[0].pdfPage = nil
+        model.note = note
+        XCTAssertTrue(model.pdfBands.isEmpty)
     }
 
     func testRemovePaneClearsBorrowedSelectionToolWhenRemovingFocusedPane() {
@@ -742,6 +871,18 @@ final class NoteSplitStateTests: XCTestCase {
     ) async throws -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
+            guard Date() < deadline else { return false }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return true
+    }
+
+    private func waitUntilAsync(
+        timeout: TimeInterval,
+        condition: () async -> Bool
+    ) async throws -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !(await condition()) {
             guard Date() < deadline else { return false }
             try await Task.sleep(for: .milliseconds(20))
         }

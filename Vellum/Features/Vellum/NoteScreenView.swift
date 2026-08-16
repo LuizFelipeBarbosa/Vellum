@@ -883,6 +883,9 @@ struct NoteScreenView: View {
         selectionController.persistImageData = { [weak model] data in
             await model?.persistPastedImageData(data)
         }
+        selectionController.loadImageData = { [weak model] assetPath in
+            await model?.loadImageAssetData(assetPath)
+        }
         selectionController.importSystemImage = { [weak model] data, target in
             await model?.importImage(
                 data,
@@ -1037,6 +1040,12 @@ struct NoteScreenView: View {
     }
 
     private func currentPageRendererContent() -> NotePageRenderer.Content {
+        currentPageRendererContent(imagesByAssetPath: model.canvasElements.imageCache)
+    }
+
+    private func currentPageRendererContent(
+        imagesByAssetPath: [String: UIImage]
+    ) -> NotePageRenderer.Content {
         let persistedDrawing = model.drawingData.flatMap { data in
             try? PKDrawing(data: data)
         }
@@ -1050,7 +1059,7 @@ struct NoteScreenView: View {
                 ?? persistedDrawing
                 ?? PKDrawing(),
             elements: model.canvasElements.elements,
-            imagesByAssetPath: model.canvasElements.imageCache,
+            imagesByAssetPath: imagesByAssetPath,
             pageCount: pageState.pageCount,
             geometry: model.note?.pageGeometry ?? .a4,
             style: model.note?.backgroundStyle ?? .legacyDefault,
@@ -1069,9 +1078,10 @@ struct NoteScreenView: View {
 
         Task {
             await model.flushPendingSave()
-            let content = currentPageRendererContent()
 
             do {
+                let images = try await model.loadImagesForExport()
+                let content = currentPageRendererContent(imagesByAssetPath: images)
                 let output = try NoteExporter.export(
                     content: content,
                     title: model.title,

@@ -28,7 +28,7 @@ same for `VellumUITests` / `VellumFlowUITests`), and `.gitignore:5` ignores
 
 | Target | XcodeGen type | What it actually is |
 |---|---|---|
-| `VellumUITests` | `bundle.unit-test` (+ `TEST_HOST`) | **Unit tests.** 431 XCTest functions (2026-08-10 count) across 49 files, **zero** `XCUIApplication`. Runs in-process against the app. |
+| `VellumUITests` | `bundle.unit-test` (+ `TEST_HOST`) | **Unit tests.** 450 XCTest functions (2026-08-16 count) across 51 files, **zero** `XCUIApplication`. Runs in-process against the app. |
 | `VellumFlowUITests` | `bundle.ui-testing` | The real XCUITest target. 44 tests across 12 files, drives the simulator, owns every launch-argument contract. |
 
 Asked to "add a UI test", the name alone points at the wrong target. Decide by what
@@ -40,8 +40,9 @@ with `TEST_HOST`, `PRODUCT_BUNDLE_IDENTIFIER`, and the shared scheme.
 
 ## `VellumCore` is deliberately platform-free
 
-All 67 files in `VellumCore/Sources/` import only `Foundation`, `CoreGraphics`, and
-`CryptoKit` (`grep -rh '^import' VellumCore/Sources`) — all three are platform-free.
+All files in `VellumCore/Sources/` import only `Foundation`, `CoreGraphics`,
+`CryptoKit`, and `os` (`grep -rh '^import' VellumCore/Sources`) — all four are
+platform-free (Darwin-only is fine; `swift test` runs natively on macOS).
 No UIKit, no SwiftUI, no PencilKit.
 
 `VellumCore/Package.swift` declares `.iOS(.v17), .macOS(.v14)`. The macOS platform is
@@ -99,11 +100,23 @@ The invariants that keep it fixed — do not regress these:
 - **`.noteUpdated` is coalesced** to at most one event per note per 60s.
 - **`onNoteChanged` does zero I/O.** It patches one row in memory
   (`LibraryScreenModel.applyLocalUpdate`) and arms a 2s cancel-and-replace debounce
-  (`VellumAppModel.scheduleWorkspaceRefresh`). `refreshStats()` must **never** go back
-  on this path.
+  (`VellumAppModel.scheduleWorkspaceRefresh`). The debounce has a 10s **max-latency**
+  backstop (continuous inking re-arms the 2s window forever and would otherwise starve
+  the refresh); when it lands it runs `library.refresh()` + `refreshCounts()` only —
+  `refreshStats()`/`refreshActivitySummary()` (the activity-corpus scan) must **never**
+  go back on this path.
 - `applyLocalUpdate` mirrors `WorkspaceService.makeNoteSummaries` field for field and
   sorts with the same `StableOrder` helper (made `public` for exactly this reason). If
-  the two derivations drift, library rows visibly jump when the debounce lands.
+  the two derivations drift, library rows visibly jump when the debounce lands. The
+  one field the on-disk derivation owns is `hasInk`: the save path passes
+  `NoteScreenModel.hasInkInMemory`, which predicts the post-save asset size and returns
+  `nil` (= preserve) whenever it can't — return `nil`, never guess.
+- **The bounded image caches self-heal; never read them raw.** `CanvasElementsStore`'s
+  image caches are LRU-capped at 60, so a raw dictionary read silently loses evicted
+  images. Reads go through `cachedImage(for:)`/`cachedImageData(for:)` (LRU-touch +
+  reload-on-miss); export goes through `NoteScreenModel.loadImagesForExport()` and copy
+  through the `loadImageData` loader, both of which fall back to disk — an evicted
+  image must never be silently omitted from an export or a pasteboard payload.
 
 Guarded by `VellumCoreTests/ActivityLogCostTests.swift` (cost assertions that fail hard
 if the quadratic write or the log flood returns) and
@@ -114,7 +127,10 @@ freeze, not a flaky test.**
 Related bounded-memory invariants: `NotePane.undoManager.levelsOfUndo` is capped at 50
 (it is also PencilKit's stroke history — see `PencilCanvasView.swift`), and
 `NotePane.tearDown()` must be called from every path that genuinely discards a pane,
-since `onDisappear` does not fire for programmatic removal.
+since `onDisappear` does not fire for programmatic removal. `tearDown()` routes through
+`NoteScreenModel.prepareForDiscard()`, which **flushes** (never cancels) a pending
+debounced save, cancels the 120s auto-analyze idle timer, and clears the PDF/image
+caches so a briefly-pinned discarded model holds kilobytes, not ~128 MB.
 
 ## PencilKit gesture coexistence
 
@@ -183,10 +199,10 @@ The full table — argument, DEBUG gating, read site, and the test that depends 
 ## Tests: commands and expected counts
 
 ```sh
-# 436 tests, 14 suites, ~1s, no simulator — the fast loop
+# 439 tests, 14 suites, ~1s, no simulator — the fast loop
 cd VellumCore && swift test
 
-# 431 tests, ~21s
+# 450 tests, ~23s
 xcodegen generate
 xcodebuild test -project Vellum.xcodeproj -scheme Vellum \
   -destination 'platform=iOS Simulator,id=9FB0400F-D7AE-4101-8543-AD49E58B09A4' \

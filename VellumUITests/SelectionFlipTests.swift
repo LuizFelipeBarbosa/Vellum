@@ -345,7 +345,8 @@ final class SelectionFlipTests: XCTestCase {
         )
         XCTAssertEqual(duplicate.rotation, flippedSource.rotation)
 
-        XCTAssertTrue(harness.controller.copySelection())
+        let copied = await harness.controller.copySelection()
+        XCTAssertTrue(copied)
         await harness.controller.pasteFromPasteboard()
 
         let pastedID = try XCTUnwrap(harness.controller.selection?.elementIDs.first)

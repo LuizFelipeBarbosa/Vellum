@@ -103,7 +103,7 @@ final class LibraryScreenModel {
 
     // Autosave invokes this after every stroke; disk access here would recreate
     // the serialized workspace backlog this local patch is intended to avoid.
-    func applyLocalUpdate(_ note: Note) {
+    func applyLocalUpdate(_ note: Note, hasInk: Bool? = nil) {
         guard let summaryIndex = summaries.firstIndex(where: { $0.id == note.id }) else {
             return
         }
@@ -120,7 +120,7 @@ final class LibraryScreenModel {
             noteType: note.noteType,
             spaceID: note.spaceID,
             previewText: String(preview.prefix(160)),
-            hasInk: existingSummary.hasInk,
+            hasInk: hasInk ?? existingSummary.hasInk,
             linkCount: note.links.count,
             tags: note.tags,
             updatedAt: note.updatedAt

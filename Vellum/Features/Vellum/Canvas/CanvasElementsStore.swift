@@ -31,6 +31,7 @@ final class CanvasElementsStore {
     var onPagesRestored: (([NotePage]) -> Void)?
     var noteShapeProvider: (() -> NoteShape)?
     var onNoteShapeRestored: ((NoteShape) -> Void)?
+    var onImageCacheMiss: ((String) -> Void)?
     /// Fired after an undo/redo snapshot restore. Selection must be invalidated:
     /// the programmatic drawing write suppresses onExternalDrawingChange, so
     /// stroke indices held by a selection would silently go stale.
@@ -38,8 +39,12 @@ final class CanvasElementsStore {
 
     private var isInTransaction = false
     private var activeTextSession: (elementID: UUID, baseline: [CanvasElement])?
-    private var lastImageCacheSequenceByAssetPath: [String: Int] = [:]
-    private var imageCacheSequence = 0
+    // LRU bookkeeping is written on every cachedImage(for:) hit, which views call
+    // during body evaluation — if these were observation-tracked, the read-then-write
+    // of `+=` would register the evaluating view as a dependent and immediately
+    // invalidate it, looping the render every frame.
+    @ObservationIgnored private var lastImageCacheSequenceByAssetPath: [String: Int] = [:]
+    @ObservationIgnored private var imageCacheSequence = 0
 
     /// Opaque full-state token (drawing + elements + pages) captured at session start.
     struct LiveSessionToken {
@@ -56,6 +61,31 @@ final class CanvasElementsStore {
         imageDataCache[assetPath] = data
         touchCachedImage(assetPath)
         evictIfNeeded()
+    }
+
+    func clearImageCaches() {
+        imageCache.removeAll()
+        imageDataCache.removeAll()
+        lastImageCacheSequenceByAssetPath.removeAll()
+        imageCacheSequence = 0
+    }
+
+    func cachedImage(for assetPath: String) -> UIImage? {
+        guard let image = imageCache[assetPath] else {
+            onImageCacheMiss?(assetPath)
+            return nil
+        }
+        touchCachedImage(assetPath)
+        return image
+    }
+
+    func cachedImageData(for assetPath: String) -> Data? {
+        guard let data = imageDataCache[assetPath] else {
+            onImageCacheMiss?(assetPath)
+            return nil
+        }
+        touchCachedImage(assetPath)
+        return data
     }
 
     private func touchCachedImage(_ assetPath: String) {

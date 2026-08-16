@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import PDFKit
 import PencilKit
 import UIKit
@@ -8,6 +9,8 @@ import VellumCore
 @MainActor
 @Observable
 final class NoteScreenModel {
+    private static let imageLogger = Logger(subsystem: "com.vellum", category: "images")
+
     enum SaveState: Equatable {
         case saved
         case saving
@@ -26,6 +29,17 @@ final class NoteScreenModel {
         case missing
         case loadError(String)
         case undecodable
+    }
+
+    enum ImageLoadError: LocalizedError {
+        case assetUnavailable(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .assetUnavailable(let assetPath):
+                "The image at \(assetPath) could not be loaded for export."
+            }
+        }
     }
 
     let noteID: UUID
@@ -51,10 +65,15 @@ final class NoteScreenModel {
     private var drawingDataPendingSave: Data?
     private var autosaveDisabled = false
     private var pendingPageMutationSave = false
+    // Written from cachedImage(for:)'s miss callback during view body evaluation;
+    // must stay out of observation tracking or the miss would invalidate the
+    // evaluating view (see the matching note in CanvasElementsStore).
+    @ObservationIgnored private var inFlightImageReloads: Set<String> = []
 
     var note: Note? {
         didSet {
-            if oldValue?.pages != note?.pages {
+            // This fires on every edit, so keep it O(pages), not O(pages × content size).
+            if oldValue?.pages.map(\.pdfPage) != note?.pages.map(\.pdfPage) {
                 let pages = note?.pages ?? []
                 pdfBands = Set(pages.indices.filter { pages[$0].pdfPage != nil })
             }
@@ -63,6 +82,21 @@ final class NoteScreenModel {
         }
     }
     var drawingData: Data?
+    var hasInkInMemory: Bool? {
+        guard let note else { return nil }
+        guard !note.pages.isEmpty else { return false }
+
+        let orderedFirstPage = note.pages.sorted(by: NotePage.byOrder).first
+        guard orderedFirstPage?.id == note.pages.first?.id else { return nil }
+
+        if let drawingDataPendingSave {
+            return !drawingDataPendingSave.isEmpty
+        }
+        if let drawingData {
+            return !drawingData.isEmpty
+        }
+        return nil
+    }
     var proposals: [AgentProposal] = []
     var saveState: SaveState = .saved
     var isLoading = false
@@ -109,6 +143,9 @@ final class NoteScreenModel {
         canvasElements.pagesProvider = { [weak self] in
             self?.note?.pages ?? []
         }
+        canvasElements.onImageCacheMiss = { [weak self] assetPath in
+            self?.reloadImageOnCacheMiss(assetPath)
+        }
         canvasElements.noteShapeProvider = { [weak self] in
             guard let note = self?.note else {
                 return CanvasElementsStore.NoteShape(
@@ -137,6 +174,32 @@ final class NoteScreenModel {
         hasHiddenSelectionStrokes = nil
         onPageOrientationChanged = nil
         onOrientationFlipped = nil
+    }
+
+    func prepareForDiscard() {
+        autoAnalyzeIdleTask?.cancel()
+        autoAnalyzeIdleTask = nil
+        autoAnalyzeIdleToken = nil
+
+        let needsSave = pendingSaveTask != nil
+            || saveState == .unsaved
+            || savedGeneration != editGeneration
+        if needsSave {
+            pendingSaveTask?.cancel()
+            pendingSaveTask = nil
+            pendingSaveToken = nil
+            Task {
+                await flushPendingSave()
+                // Finalizing a live text session during the flush can schedule a new idle timer.
+                autoAnalyzeIdleTask?.cancel()
+                autoAnalyzeIdleTask = nil
+                autoAnalyzeIdleToken = nil
+            }
+        }
+
+        pdfCache.clearCaches()
+        canvasElements.clearImageCaches()
+        detachViewCallbacks()
     }
 
     var title: String {
@@ -1059,6 +1122,60 @@ final class NoteScreenModel {
         }
 
         pdfLoadFailures = failures
+    }
+
+    func loadImagesForExport() async throws -> [String: UIImage] {
+        let assetPaths = Set(
+            canvasElements.elements.compactMap { element -> String? in
+                guard case .image(let content) = element.content else { return nil }
+                return content.assetPath
+            }
+        )
+        var images: [String: UIImage] = [:]
+        for assetPath in assetPaths {
+            if let cached = canvasElements.cachedImage(for: assetPath) {
+                images[assetPath] = cached
+                continue
+            }
+            guard let data = try await notes.loadAsset(
+                noteID: noteID,
+                relativePath: assetPath
+            ), let image = UIImage(data: data) else {
+                throw ImageLoadError.assetUnavailable(assetPath)
+            }
+            canvasElements.cacheImage(image, data: data, forAssetPath: assetPath)
+            images[assetPath] = image
+        }
+        return images
+    }
+
+    func loadImageAssetData(_ assetPath: String) async -> Data? {
+        do {
+            return try await notes.loadAsset(noteID: noteID, relativePath: assetPath)
+        } catch {
+            Self.imageLogger.error("Image load failed for \(assetPath, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }
+
+    private func reloadImageOnCacheMiss(_ assetPath: String) {
+        guard !inFlightImageReloads.contains(assetPath) else { return }
+        inFlightImageReloads.insert(assetPath)
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.inFlightImageReloads.remove(assetPath) }
+            do {
+                guard let data = try await self.notes.loadAsset(
+                    noteID: self.noteID,
+                    relativePath: assetPath
+                ), let image = UIImage(data: data) else {
+                    return
+                }
+                self.canvasElements.cacheImage(image, data: data, forAssetPath: assetPath)
+            } catch {
+                Self.imageLogger.error("Image reload failed for \(assetPath, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     private func cacheImages(for elements: [CanvasElement], noteID: UUID) async {
