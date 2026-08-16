@@ -1050,9 +1050,11 @@ struct NoteScreenView: View {
             try? PKDrawing(data: data)
         }
         let pdfExpectedBands = model.pdfBands
-        var pdfPagesByBand: [Int: PDFPage] = [:]
+        var pdfBandRefs: [Int: PdfBandRef] = [:]
         for band in pdfExpectedBands where band < pageState.pageCount {
-            pdfPagesByBand[band] = model.pdfCache.page(forBand: band)
+            if let ref = model.pdfCache.bandRef(forBand: band) {
+                pdfBandRefs[band] = ref
+            }
         }
         let content = NotePageRenderer.Content(
             drawing: activeCanvasReference.canvasView?.drawing
@@ -1063,7 +1065,8 @@ struct NoteScreenView: View {
             pageCount: pageState.pageCount,
             geometry: model.note?.pageGeometry ?? .a4,
             style: model.note?.backgroundStyle ?? .legacyDefault,
-            pdfPagesByBand: pdfPagesByBand,
+            pdfSource: model.pdfCache.documentStore,
+            pdfBandRefs: pdfBandRefs,
             pdfExpectedBands: pdfExpectedBands
         )
         assert(content.geometry == pageState.pageGeometry)
@@ -1082,7 +1085,7 @@ struct NoteScreenView: View {
             do {
                 let images = try await model.loadImagesForExport()
                 let content = currentPageRendererContent(imagesByAssetPath: images)
-                let output = try NoteExporter.export(
+                let output = try await NoteExporter.export(
                     content: content,
                     title: model.title,
                     format: format,

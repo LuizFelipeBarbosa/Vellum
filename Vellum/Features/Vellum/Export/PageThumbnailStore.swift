@@ -15,9 +15,9 @@ private struct PageThumbnailRenderResult: @unchecked Sendable {
 }
 
 private actor PageThumbnailRenderer {
-    func render(_ request: PageThumbnailRenderRequest) -> PageThumbnailRenderResult {
+    func render(_ request: PageThumbnailRenderRequest) async -> PageThumbnailRenderResult {
         PageThumbnailRenderResult(
-            image: NotePageRenderer.image(
+            image: await NotePageRenderer.image(
                 pageIndex: request.pageIndex,
                 content: request.content,
                 pointSize: request.pointSize,

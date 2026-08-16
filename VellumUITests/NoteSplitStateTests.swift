@@ -4,6 +4,85 @@ import UIKit
 import VellumCore
 import XCTest
 
+private enum IntentionalSaveFailure: Error {
+    case requested
+}
+
+private actor FailingSaveNoteRepository: NoteRepository {
+    private let wrapped: any NoteRepository
+    private var failingNoteID: UUID?
+
+    init(wrapping wrapped: any NoteRepository) {
+        self.wrapped = wrapped
+    }
+
+    func failSaves(for noteID: UUID) {
+        failingNoteID = noteID
+    }
+
+    func listNotes(scope: NoteListScope) async throws -> [Note] {
+        try await wrapped.listNotes(scope: scope)
+    }
+
+    func unsupportedNotes() async throws -> [UnsupportedNotePackage] {
+        try await wrapped.unsupportedNotes()
+    }
+
+    func createNote(title: String) async throws -> Note {
+        try await wrapped.createNote(title: title)
+    }
+
+    func insertNote(_ note: Note) async throws {
+        try await wrapped.insertNote(note)
+    }
+
+    func importNote(
+        _ note: Note,
+        assets: [(relativePath: String, data: Data)]
+    ) async throws {
+        try await wrapped.importNote(note, assets: assets)
+    }
+
+    func loadNote(id: UUID) async throws -> Note {
+        try await wrapped.loadNote(id: id)
+    }
+
+    func saveNote(_ note: Note) async throws {
+        guard note.id != failingNoteID else {
+            throw IntentionalSaveFailure.requested
+        }
+        try await wrapped.saveNote(note)
+    }
+
+    func deleteNote(id: UUID) async throws {
+        try await wrapped.deleteNote(id: id)
+    }
+
+    func purgeNote(id: UUID) async throws -> Bool {
+        try await wrapped.purgeNote(id: id)
+    }
+
+    func loadAsset(noteID: UUID, relativePath: String) async throws -> Data? {
+        try await wrapped.loadAsset(noteID: noteID, relativePath: relativePath)
+    }
+
+    func assetSize(noteID: UUID, relativePath: String) async throws -> Int? {
+        try await wrapped.assetSize(noteID: noteID, relativePath: relativePath)
+    }
+
+    func saveAsset(_ data: Data, noteID: UUID, relativePath: String) async throws {
+        try await wrapped.saveAsset(data, noteID: noteID, relativePath: relativePath)
+    }
+
+    func deleteAsset(noteID: UUID, relativePath: String) async throws {
+        try await wrapped.deleteAsset(noteID: noteID, relativePath: relativePath)
+    }
+
+    func purgeUnreferencedAssets(noteID: UUID) async throws {
+        try await wrapped.purgeUnreferencedAssets(noteID: noteID)
+    }
+}
+
 @MainActor
 final class NoteSplitStateTests: XCTestCase {
     func testPaneCapsUndoHistoryAtFiftyLevels() {
@@ -420,6 +499,74 @@ final class NoteSplitStateTests: XCTestCase {
         XCTAssertTrue(saveFinished, "discard dropped a pending title edit")
     }
 
+    func testFlushAllReturnsTrueWhenEveryPaneSaveSucceeds() async throws {
+        let container = makeContainer()
+        let firstNote = try await container.notes.createNote(title: "First")
+        let secondNote = try await container.notes.createNote(title: "Second")
+        let firstModel = NoteScreenModel(
+            noteID: firstNote.id,
+            container: container,
+            onNoteChanged: { _ in }
+        )
+        let secondModel = NoteScreenModel(
+            noteID: secondNote.id,
+            container: container,
+            onNoteChanged: { _ in }
+        )
+        await firstModel.load()
+        await secondModel.load()
+        let state = NoteSplitState()
+        state.insertColumn(with: NotePane(noteModel: firstModel), at: nil)
+        state.insertColumn(with: NotePane(noteModel: secondModel), at: nil)
+        firstModel.title = "First saved"
+        secondModel.title = "Second saved"
+
+        let didFlushAll = await state.flushAll()
+
+        XCTAssertTrue(didFlushAll)
+        let savedFirst = try await container.notes.loadNote(id: firstNote.id)
+        let savedSecond = try await container.notes.loadNote(id: secondNote.id)
+        XCTAssertEqual(savedFirst.title, "First saved")
+        XCTAssertEqual(savedSecond.title, "Second saved")
+    }
+
+    func testFlushAllReturnsFalseWhenOnePaneSaveFails() async throws {
+        let rootDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let notes = FailingSaveNoteRepository(
+            wrapping: FileNoteRepository(rootDirectory: rootDirectory)
+        )
+        let container = makeContainer(rootDirectory: rootDirectory, notes: notes)
+        let failingNote = try await notes.createNote(title: "Will fail")
+        let succeedingNote = try await notes.createNote(title: "Will save")
+        let failingModel = NoteScreenModel(
+            noteID: failingNote.id,
+            container: container,
+            onNoteChanged: { _ in }
+        )
+        let succeedingModel = NoteScreenModel(
+            noteID: succeedingNote.id,
+            container: container,
+            onNoteChanged: { _ in }
+        )
+        await failingModel.load()
+        await succeedingModel.load()
+        await notes.failSaves(for: failingNote.id)
+        let state = NoteSplitState()
+        state.insertColumn(with: NotePane(noteModel: failingModel), at: nil)
+        state.insertColumn(with: NotePane(noteModel: succeedingModel), at: nil)
+        failingModel.title = "Failed edit"
+        succeedingModel.title = "Successful edit"
+
+        let didFlushAll = await state.flushAll()
+
+        XCTAssertFalse(didFlushAll)
+        let storedFailingNote = try await notes.loadNote(id: failingNote.id)
+        let storedSucceedingNote = try await notes.loadNote(id: succeedingNote.id)
+        XCTAssertEqual(storedFailingNote.title, "Will fail")
+        XCTAssertEqual(storedSucceedingNote.title, "Successful edit")
+    }
+
     func testCloseAllTearsDownEveryDiscardedPane() async {
         let container = makeContainer()
         let first = makePane(container: container)
@@ -834,6 +981,49 @@ final class NoteSplitStateTests: XCTestCase {
         AppContainer.live(
             rootDirectory: FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        )
+    }
+
+    private func makeContainer(
+        rootDirectory: URL,
+        notes: any NoteRepository
+    ) -> AppContainer {
+        let proposals = FileProposalRepository(rootDirectory: rootDirectory)
+        let activity = FileActivityRepository(rootDirectory: rootDirectory)
+        let agent = HeuristicVellumAgent()
+        let spaces = FileSpaceRepository(rootDirectory: rootDirectory)
+        let entities = FileEntityRepository(rootDirectory: rootDirectory)
+        let tasks = FileTaskRepository(rootDirectory: rootDirectory)
+        let workspace = WorkspaceService(
+            notes: notes,
+            proposals: proposals,
+            activity: activity,
+            agent: agent,
+            spaces: spaces,
+            entities: entities,
+            tasks: tasks
+        )
+        let graph = KnowledgeGraphService(
+            notes: notes,
+            spaces: spaces,
+            entities: entities
+        )
+        return AppContainer(
+            rootDirectory: rootDirectory,
+            notes: notes,
+            proposals: proposals,
+            activity: activity,
+            agent: agent,
+            spaces: spaces,
+            entities: entities,
+            tasks: tasks,
+            workspace: workspace,
+            graph: graph,
+            askService: AskService(
+                notes: notes,
+                answerer: HeuristicAskAnswerer(),
+                activity: activity
+            )
         )
     }
 

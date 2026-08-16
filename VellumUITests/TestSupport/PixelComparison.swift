@@ -2,6 +2,7 @@ import CoreGraphics
 import Foundation
 import PDFKit
 import UIKit
+@testable import Vellum
 import VellumCore
 import XCTest
 
@@ -104,6 +105,34 @@ enum PixelComparison {
             width: CGFloat(rect.width),
             height: CGFloat(rect.height)
         )
+    }
+}
+
+extension PixelComparison {
+    /// Loads a solid-color single-page PDF into a fresh, isolated `PdfDocumentStore` and
+    /// returns a `PdfBandRef` pointing at its one page — the seam tests use to exercise the
+    /// PDF band render path without ever touching PDFKit directly themselves.
+    static func makePdfDocumentStore(
+        color: UIColor,
+        size: CGSize,
+        assetPath: String = "assets/pixel-comparison.pdf",
+        pageIndex: Int = 0
+    ) async throws -> (store: PdfDocumentStore, bandRef: PdfBandRef) {
+        let document = try makeSolidPDFDocument(color: color, size: size)
+        let data = try XCTUnwrap(document.dataRepresentation())
+        let store = PdfDocumentStore()
+        let loaded = await store.loadDocument(data: data, forAssetPath: assetPath)
+        let metadata = try XCTUnwrap(loaded)
+        guard metadata.indices.contains(pageIndex) else {
+            XCTFail("Expected page \(pageIndex) in the seeded solid-color PDF")
+            return (store, PdfBandRef(assetPath: assetPath, pageIndex: pageIndex, displayedSize: .zero))
+        }
+        let bandRef = PdfBandRef(
+            assetPath: assetPath,
+            pageIndex: pageIndex,
+            displayedSize: metadata[pageIndex].displayedMediaBoxSize
+        )
+        return (store, bandRef)
     }
 }
 

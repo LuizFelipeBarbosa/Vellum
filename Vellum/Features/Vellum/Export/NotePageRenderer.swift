@@ -1,12 +1,33 @@
-import PDFKit
+import CoreGraphics
+import Foundation
 import PencilKit
 import SwiftUI
 import UIKit
 import VellumCore
 
+/// A pointer to one page of a PDF asset already parsed inside `PdfDocumentStore`, plus the
+/// rotation-applied size `PdfDocumentStore` computed for it. Carries no live PDFKit object.
+struct PdfBandRef: Sendable, Equatable {
+    let assetPath: String
+    let pageIndex: Int
+    let displayedSize: CGSize
+}
+
+/// The pixels or vector bytes for one page's PDF band, already resolved from
+/// `PdfDocumentStore` by the caller before a synchronous draw. `Data` and `UIImage` both
+/// need to be Sendable-safe to have reached this point — see the concurrency note under
+/// `PdfDocumentStore.raster` for why `UIImage` here is fine (it was produced fresh by
+/// `NotePageRenderer.image`'s own `await`, not smuggled from another isolation domain).
+enum ResolvedPdfBand {
+    case raster(UIImage)
+    case vector(Data)
+}
+
 enum NotePageRenderer {
-    /// A render snapshot crosses to a serial background actor. Its UIKit,
-    /// PencilKit, and PDFKit references are treated as immutable while rendering.
+    /// A render snapshot crosses to a serial background actor. The unchecked conformance is
+    /// needed only for the immutable `PKDrawing` and `[String: UIImage]` snapshot handoff.
+    /// `pdfSource` is a Sendable actor reference and `pdfBandRefs` contains Sendable values;
+    /// no live PDFKit object is part of `Content`.
     struct Content: @unchecked Sendable {
         var drawing: PKDrawing
         var elements: [CanvasElement]
@@ -18,13 +39,9 @@ enum NotePageRenderer {
         var interfaceStyle: UIUserInterfaceStyle = .light
         /// Surrounding UI appearance for PDF raster inversion, matching `PdfPagesLayer`.
         var pdfInterfaceStyle: UIUserInterfaceStyle = .light
-        var pdfPagesByBand: [Int: PDFPage] = [:]
+        var pdfSource: PdfDocumentStore?
+        var pdfBandRefs: [Int: PdfBandRef] = [:]
         var pdfExpectedBands: Set<Int> = []
-    }
-
-    enum PDFBandTreatment {
-        case vector
-        case blendedRaster
     }
 
     /// Draws page `pageIndex` into `ctx`, whose coordinate space is content points
@@ -32,7 +49,7 @@ enum NotePageRenderer {
     static func draw(
         pageIndex: Int,
         content: Content,
-        pdfBandTreatment: PDFBandTreatment = .vector,
+        resolvedPdf: ResolvedPdfBand? = nil,
         in ctx: CGContext
     ) {
         let pageRect = content.geometry.pageRect(index: pageIndex)
@@ -47,30 +64,32 @@ enum NotePageRenderer {
         ctx.saveGState()
         defer { ctx.restoreGState() }
 
-        let pdfPage = content.pdfPagesByBand[pageIndex]
+        let pdfBandRef = content.pdfBandRefs[pageIndex]
         drawPaper(
             pageRect: pageRect,
             pageBounds: pageBounds,
             style: content.style,
             interfaceStyle: content.interfaceStyle,
-            drawsPattern: pdfPage == nil,
+            drawsPattern: pdfBandRef == nil,
             in: ctx
         )
 
-        if let pdfPage {
-            switch pdfBandTreatment {
-            case .vector:
-                drawPDFPage(
-                    pdfPage,
+        if let pdfBandRef, let resolvedPdf {
+            switch resolvedPdf {
+            case .vector(let data):
+                drawVectorPDFBand(
+                    data: data,
+                    displayedSize: pdfBandRef.displayedSize,
                     pageIndex: pageIndex,
                     pageRect: pageRect,
                     pageBounds: pageBounds,
                     geometry: content.geometry,
                     in: ctx
                 )
-            case .blendedRaster:
-                drawBlendedRasterPDFPage(
-                    pdfPage,
+            case .raster(let image):
+                drawRasterPDFBand(
+                    image,
+                    displayedSize: pdfBandRef.displayedSize,
                     pageIndex: pageIndex,
                     pageRect: pageRect,
                     pageBounds: pageBounds,
@@ -114,13 +133,40 @@ enum NotePageRenderer {
         }
     }
 
-    /// Convenience rendering for one page at the provided point size and scale.
+    /// Convenience rendering for one page at the provided point size and scale. When
+    /// `resolvedPdf` is nil and this page has a PDF band, fetches a raster from
+    /// `content.pdfSource` sized to approximate the page's on-screen resolution — this is an
+    /// intentional approximation of the old CGPDFPage-vector-then-rasterize path (which drew at
+    /// `fittedRect.size * scale`); resampling a `PDFPage.thumbnail` render taken at
+    /// `displayedSize * scale` into the same on-page rect is visually equivalent for the solid
+    /// and near-solid fixtures this path is tested against, and it is what lets this function
+    /// avoid ever holding a live `PDFPage`.
     static func image(
         pageIndex: Int,
         content: Content,
+        resolvedPdf: ResolvedPdfBand? = nil,
         pointSize: CGSize,
         scale: CGFloat
-    ) -> UIImage {
+    ) async -> UIImage {
+        var resolvedPdf = resolvedPdf
+        if resolvedPdf == nil,
+           let pdfBandRef = content.pdfBandRefs[pageIndex],
+           let pdfSource = content.pdfSource {
+            let effectiveScale = min(3, max(1, (pointSize.width / content.geometry.contentWidth) * scale))
+            let targetPixelSize = CGSize(
+                width: pdfBandRef.displayedSize.width * effectiveScale,
+                height: pdfBandRef.displayedSize.height * effectiveScale
+            )
+            if let raster = await pdfSource.raster(
+                assetPath: pdfBandRef.assetPath,
+                pageIndex: pdfBandRef.pageIndex,
+                targetPixelSize: targetPixelSize,
+                invertsColors: content.pdfInterfaceStyle == .dark
+            ) {
+                resolvedPdf = .raster(raster)
+            }
+        }
+
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         format.opaque = true
@@ -132,7 +178,7 @@ enum NotePageRenderer {
             draw(
                 pageIndex: pageIndex,
                 content: content,
-                pdfBandTreatment: .blendedRaster,
+                resolvedPdf: resolvedPdf,
                 in: rendererContext.cgContext
             )
         }
@@ -226,19 +272,23 @@ enum NotePageRenderer {
         }
     }
 
-    private static func drawPDFPage(
-        _ page: PDFPage,
+    private static func drawVectorPDFBand(
+        data: Data,
+        displayedSize: CGSize,
         pageIndex: Int,
         pageRect: CGRect,
         pageBounds: CGRect,
         geometry: PageGeometry,
         in ctx: CGContext
     ) {
-        guard let pageRef = page.pageRef else { return }
+        guard let provider = CGDataProvider(data: data as CFData),
+              let document = CGPDFDocument(provider),
+              let pageRef = document.page(at: 1) else {
+            return
+        }
 
-        let displayedSize = displayedMediaBoxSize(for: page)
-        // This flip is symmetric only because geometry.fittedRect centers the
-        // PDF vertically. A top-anchored fit would not match PdfPagesLayer.
+        // This flip is symmetric only because geometry.fittedRect centers the PDF vertically.
+        // A top-anchored fit would not match PdfPagesLayer.
         let fittedRect = geometry.fittedRect(
             forSourcePageSize: displayedSize,
             pageIndex: pageIndex
@@ -259,8 +309,9 @@ enum NotePageRenderer {
         ctx.restoreGState()
     }
 
-    private static func drawBlendedRasterPDFPage(
-        _ page: PDFPage,
+    private static func drawRasterPDFBand(
+        _ image: UIImage,
+        displayedSize: CGSize,
         pageIndex: Int,
         pageRect: CGRect,
         pageBounds: CGRect,
@@ -268,42 +319,15 @@ enum NotePageRenderer {
         pdfInterfaceStyle: UIUserInterfaceStyle,
         in ctx: CGContext
     ) {
-        guard let pageRef = page.pageRef else { return }
-
-        let displayedSize = displayedMediaBoxSize(for: page)
         let fittedRect = geometry.fittedRect(
             forSourcePageSize: displayedSize,
             pageIndex: pageIndex
         ).offsetBy(dx: 0, dy: -pageRect.minY)
-        let localFittedRect = CGRect(origin: .zero, size: fittedRect.size)
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = true
-        format.scale = min(3, max(1, abs(ctx.ctm.a)))
-        let renderer = UIGraphicsImageRenderer(size: fittedRect.size, format: format)
-        let raster = renderer.image { rendererContext in
-            UIColor.white.setFill()
-            rendererContext.fill(localFittedRect)
-
-            let rasterContext = rendererContext.cgContext
-            rasterContext.translateBy(x: 0, y: fittedRect.height)
-            rasterContext.scaleBy(x: 1, y: -1)
-            rasterContext.concatenate(
-                pdfDrawingTransform(
-                    for: pageRef,
-                    displayedMediaBoxSize: displayedSize,
-                    fittingInto: localFittedRect
-                )
-            )
-            rasterContext.drawPDFPage(pageRef)
-        }
-        let renderedImage = pdfInterfaceStyle == .dark
-            ? PdfRasterAppearance.invertedPreservingHue(raster)
-            : raster
 
         ctx.saveGState()
         ctx.clip(to: pageBounds)
         UIGraphicsPushContext(ctx)
-        renderedImage.draw(
+        image.draw(
             in: fittedRect,
             blendMode: pdfInterfaceStyle == .dark ? .screen : .multiply,
             alpha: 1
@@ -339,13 +363,6 @@ enum NotePageRenderer {
             ty: fittedRect.midY - referenceRect.midY * scale
         )
         return nativeTransform.concatenating(fittingTransform)
-    }
-
-    private static func displayedMediaBoxSize(for page: PDFPage) -> CGSize {
-        let size = page.bounds(for: .mediaBox).size
-        let rotation = ((page.rotation % 360) + 360) % 360
-        guard rotation == 90 || rotation == 270 else { return size }
-        return CGSize(width: size.height, height: size.width)
     }
 
     private static func drawInk(

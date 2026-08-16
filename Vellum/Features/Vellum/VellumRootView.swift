@@ -1,6 +1,30 @@
+import os
 import SwiftUI
+import UIKit
+
+@MainActor
+private final class BackgroundTaskAssertion {
+    private var taskID: UIBackgroundTaskIdentifier = .invalid
+
+    func begin() {
+        taskID = UIApplication.shared.beginBackgroundTask(
+            withName: "com.vellum.flushSave"
+        ) { [weak self] in
+            self?.endIfNeeded()
+        }
+    }
+
+    func endIfNeeded() {
+        guard taskID != .invalid else { return }
+        let taskIDToEnd = taskID
+        taskID = .invalid
+        UIApplication.shared.endBackgroundTask(taskIDToEnd)
+    }
+}
 
 struct VellumRootView: View {
+    private static let saveLogger = Logger(subsystem: "com.vellum", category: "save")
+
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: VellumAppModel
 
@@ -78,7 +102,17 @@ struct VellumRootView: View {
         .task { await model.bootstrap() }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .inactive || newPhase == .background {
-                Task { await model.split.flushAll() }
+                Task { @MainActor in
+                    let backgroundTask = BackgroundTaskAssertion()
+                    backgroundTask.begin()
+                    let didFlushAll = await model.split.flushAll()
+                    backgroundTask.endIfNeeded()
+                    if !didFlushAll {
+                        Self.saveLogger.error(
+                            "background flush did not save all panes"
+                        )
+                    }
+                }
             }
             if newPhase == .background {
                 model.toolPreferences.flush()

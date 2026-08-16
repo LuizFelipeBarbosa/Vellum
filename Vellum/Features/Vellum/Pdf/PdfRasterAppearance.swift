@@ -3,6 +3,7 @@ import CoreImage.CIFilterBuiltins
 import UIKit
 
 enum PdfRasterAppearance {
+    /// `CIContext` is documented thread-safe by Apple, so this is safe from `PdfDocumentStore`.
     private static let context = CIContext()
 
     static func invertedPreservingHue(_ image: UIImage) -> UIImage {

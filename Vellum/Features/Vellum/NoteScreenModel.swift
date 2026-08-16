@@ -1,7 +1,6 @@
 import Foundation
 import Observation
 import os
-import PDFKit
 import PencilKit
 import UIKit
 import VellumCore
@@ -1114,11 +1113,10 @@ final class NoteScreenModel {
                 failures[assetPath] = .loadError(error.localizedDescription)
                 continue
             }
-            guard let document = PDFDocument(data: data) else {
+            let loaded = await pdfCache.loadDocument(data: data, forAssetPath: assetPath)
+            if !loaded {
                 failures[assetPath] = .undecodable
-                continue
             }
-            pdfCache.setDocument(document, forAssetPath: assetPath)
         }
 
         pdfLoadFailures = failures

@@ -1,31 +1,6 @@
 import Observation
-import PDFKit
 import UIKit
 import VellumCore
-
-private struct PdfPageRenderRequest: @unchecked Sendable {
-    let page: PDFPage
-    let targetPixelSize: CGSize
-    let invertsColors: Bool
-}
-
-private struct PdfPageRenderResult: @unchecked Sendable {
-    let image: UIImage
-}
-
-private actor PdfPageRenderer {
-    func render(_ request: PdfPageRenderRequest) -> PdfPageRenderResult {
-        let image = request.page.thumbnail(
-            of: request.targetPixelSize,
-            for: .mediaBox
-        )
-        return PdfPageRenderResult(
-            image: request.invertsColors
-                ? PdfRasterAppearance.invertedPreservingHue(image)
-                : image
-        )
-    }
-}
 
 @MainActor
 @Observable
@@ -61,7 +36,7 @@ final class PdfPageImageCache {
     var pagesProvider: (() -> [NotePage])?
     var contentWidth: CGFloat = PageGeometry.a4.contentWidth
 
-    private var documents: [String: PDFDocument] = [:]
+    private var bandMetadata: [String: [PdfDocumentStore.PageMetadata]] = [:]
     private var inFlight = Set<ImageKey>()
     private var lastRequestSequenceByKey: [ImageKey: Int] = [:]
     private var requestSequence = 0
@@ -69,7 +44,7 @@ final class PdfPageImageCache {
     private var pinnedPageIDs: Set<UUID> = []
     private var isDarkAppearance = false
     private let maximumByteCost: Int
-    private let renderer = PdfPageRenderer()
+    let documentStore = PdfDocumentStore()
 
     init(maximumByteCost: Int = PdfPageImageCache.byteBudget) {
         self.maximumByteCost = maximumByteCost
@@ -81,8 +56,15 @@ final class PdfPageImageCache {
         }
     }
 
-    func setDocument(_ doc: PDFDocument, forAssetPath assetPath: String) {
-        documents[assetPath] = doc
+    @discardableResult
+    func loadDocument(data: Data, forAssetPath assetPath: String) async -> Bool {
+        guard let metadata = await documentStore.loadDocument(
+            data: data,
+            forAssetPath: assetPath
+        ) else {
+            return false
+        }
+        bandMetadata[assetPath] = metadata
         if let request = lastVisibleWindowRequest {
             updateVisibleWindow(
                 bands: request.bands,
@@ -90,10 +72,13 @@ final class PdfPageImageCache {
                 displayScale: request.displayScale
             )
         }
+        return true
     }
 
     func clearCaches() {
-        documents.removeAll()
+        bandMetadata.removeAll()
+        let store = documentStore
+        Task { await store.removeAllDocuments() }
         images.removeAll()
         inFlight.removeAll()
         lastRequestSequenceByKey.removeAll()
@@ -127,12 +112,26 @@ final class PdfPageImageCache {
         }
     }
 
-    func page(forBand band: Int) -> PDFPage? {
+    func displayedPageSize(forBand band: Int) -> CGSize? {
         guard let reference = pageReference(forBand: band),
-              let document = documents[reference.assetPath] else {
+              let metadata = bandMetadata[reference.assetPath],
+              metadata.indices.contains(reference.pageIndex) else {
             return nil
         }
-        return document.page(at: reference.pageIndex)
+        return metadata[reference.pageIndex].displayedMediaBoxSize
+    }
+
+    func bandRef(forBand band: Int) -> PdfBandRef? {
+        guard let reference = pageReference(forBand: band),
+              let metadata = bandMetadata[reference.assetPath],
+              metadata.indices.contains(reference.pageIndex) else {
+            return nil
+        }
+        return PdfBandRef(
+            assetPath: reference.assetPath,
+            pageIndex: reference.pageIndex,
+            displayedSize: metadata[reference.pageIndex].displayedMediaBoxSize
+        )
     }
 
     func pageID(forBand band: Int) -> UUID? {
@@ -173,28 +172,35 @@ final class PdfPageImageCache {
             touch(key)
             guard images[key] == nil,
                   !inFlight.contains(key),
-                  let page = documents[reference.assetPath]?.page(at: reference.pageIndex) else {
+                  let metadata = bandMetadata[reference.assetPath],
+                  metadata.indices.contains(reference.pageIndex) else {
                 continue
             }
 
             inFlight.insert(key)
             let targetPixelSize = Self.targetPixelSize(
-                for: page,
+                for: metadata[reference.pageIndex].displayedMediaBoxSize,
                 bucket: bucket,
                 displayScale: displayScale,
                 contentWidth: contentWidth
             )
-            let request = PdfPageRenderRequest(
-                page: page,
-                targetPixelSize: targetPixelSize,
-                invertsColors: isDarkAppearance
-            )
+            let assetPath = reference.assetPath
+            let pageIndex = reference.pageIndex
+            let invertsColors = isDarkAppearance
+            let store = documentStore
 
             Task { [weak self] in
                 guard let self else { return }
-                let result = await renderer.render(request)
+                let image = await store.raster(
+                    assetPath: assetPath,
+                    pageIndex: pageIndex,
+                    targetPixelSize: targetPixelSize,
+                    invertsColors: invertsColors
+                )
                 inFlight.remove(key)
-                insertImage(result.image, for: key)
+                if let image {
+                    insertImage(image, for: key)
+                }
             }
         }
 
@@ -248,12 +254,11 @@ final class PdfPageImageCache {
     }
 
     private static func targetPixelSize(
-        for page: PDFPage,
+        for sourceSize: CGSize,
         bucket: ScaleBucket,
         displayScale: CGFloat,
         contentWidth: CGFloat
     ) -> CGSize {
-        let sourceSize = displayedMediaBoxSize(for: page)
         guard sourceSize.width > 0, sourceSize.height > 0 else {
             return CGSize(width: 1, height: 1)
         }
@@ -273,12 +278,5 @@ final class PdfPageImageCache {
             width: targetWidth * capScale,
             height: targetHeight * capScale
         )
-    }
-
-    private static func displayedMediaBoxSize(for page: PDFPage) -> CGSize {
-        let size = page.bounds(for: .mediaBox).size
-        let rotation = ((page.rotation % 360) + 360) % 360
-        guard rotation == 90 || rotation == 270 else { return size }
-        return CGSize(width: size.height, height: size.width)
     }
 }

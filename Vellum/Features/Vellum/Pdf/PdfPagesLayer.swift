@@ -1,4 +1,3 @@
-import PDFKit
 import SwiftUI
 import UIKit
 import VellumCore
@@ -33,10 +32,10 @@ struct PdfPagesLayer: View {
             ForEach(sortedBands, id: \.self) { band in
                 if (0..<pageCount).contains(band),
                    let pageID = cache.pageID(forBand: band),
-                   let page = cache.page(forBand: band),
+                   let size = cache.displayedPageSize(forBand: band),
                    let image = cachedImage(for: pageID) {
                     let rect = geometry.fittedRect(
-                        forSourcePageSize: displayedMediaBoxSize(for: page),
+                        forSourcePageSize: size,
                         pageIndex: band
                     )
                     Image(uiImage: image)
@@ -69,12 +68,5 @@ struct PdfPagesLayer: View {
                 isDark: colorScheme == .dark
             )
         ]
-    }
-
-    private func displayedMediaBoxSize(for page: PDFPage) -> CGSize {
-        let size = page.bounds(for: .mediaBox).size
-        let rotation = ((page.rotation % 360) + 360) % 360
-        guard rotation == 90 || rotation == 270 else { return size }
-        return CGSize(width: size.height, height: size.width)
     }
 }

@@ -51,13 +51,13 @@ enum NoteExporter {
         title: String,
         format: Format,
         minimumFilledPages: Int = 0
-    ) throws -> Output {
+    ) async throws -> Output {
         let pageCount = exportPageCount(
             for: content,
             minimumFilledPages: minimumFilledPages
         )
         let missingPDFBands = content.pdfExpectedBands
-            .filter { (0..<pageCount).contains($0) && content.pdfPagesByBand[$0] == nil }
+            .filter { (0..<pageCount).contains($0) && content.pdfBandRefs[$0] == nil }
             .sorted()
         if !missingPDFBands.isEmpty {
             throw NoteExportError.missingPDFPages(missingPDFBands)
@@ -96,7 +96,7 @@ enum NoteExporter {
                 at: directory,
                 withIntermediateDirectories: true
             )
-            let urls = try write(
+            let urls = try await write(
                 content: renderContent,
                 title: sanitizedTitle(title),
                 format: format,
@@ -134,11 +134,22 @@ enum NoteExporter {
         format: Format,
         pageCount: Int,
         to directory: URL
-    ) throws -> [URL] {
+    ) async throws -> [URL] {
         switch format {
         case .pdf:
             let url = directory.appendingPathComponent("\(title).pdf")
             let pdfPageSize = content.geometry.pdfPageSize
+            var prefetchedBands: [Int: ResolvedPdfBand] = [:]
+            for pageIndex in 0..<pageCount {
+                guard let pdfBandRef = content.pdfBandRefs[pageIndex] else { continue }
+                guard let data = await content.pdfSource?.vectorPageData(
+                    assetPath: pdfBandRef.assetPath,
+                    pageIndex: pdfBandRef.pageIndex
+                ) else {
+                    throw NoteExportError.missingPDFPages([pageIndex])
+                }
+                prefetchedBands[pageIndex] = .vector(data)
+            }
             let renderer = UIGraphicsPDFRenderer(
                 bounds: CGRect(origin: .zero, size: pdfPageSize)
             )
@@ -151,6 +162,7 @@ enum NoteExporter {
                     NotePageRenderer.draw(
                         pageIndex: pageIndex,
                         content: content,
+                        resolvedPdf: prefetchedBands[pageIndex],
                         in: context.cgContext
                     )
                     context.cgContext.restoreGState()
@@ -159,11 +171,30 @@ enum NoteExporter {
             return [url]
 
         case .png, .jpeg:
+            var prefetchedBands: [Int: ResolvedPdfBand] = [:]
+            for pageIndex in 0..<pageCount {
+                guard let pdfBandRef = content.pdfBandRefs[pageIndex] else { continue }
+                let targetPixelSize = CGSize(
+                    width: pdfBandRef.displayedSize.width * 2,
+                    height: pdfBandRef.displayedSize.height * 2
+                )
+                guard let raster = await content.pdfSource?.raster(
+                    assetPath: pdfBandRef.assetPath,
+                    pageIndex: pdfBandRef.pageIndex,
+                    targetPixelSize: targetPixelSize,
+                    invertsColors: content.pdfInterfaceStyle == .dark
+                ) else {
+                    throw NoteExportError.missingPDFPages([pageIndex])
+                }
+                prefetchedBands[pageIndex] = .raster(raster)
+            }
+
             var urls: [URL] = []
             for pageIndex in 0..<pageCount {
-                let image = NotePageRenderer.image(
+                let image = await NotePageRenderer.image(
                     pageIndex: pageIndex,
                     content: content,
+                    resolvedPdf: prefetchedBands[pageIndex],
                     pointSize: CGSize(
                         width: content.geometry.contentWidth,
                         height: content.geometry.pageHeight

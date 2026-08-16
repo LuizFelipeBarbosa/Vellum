@@ -9,8 +9,8 @@ import XCTest
 
 @MainActor
 final class NoteExporterTests: XCTestCase {
-    func testPDFExportsThreeA4Pages() throws {
-        let output = try NoteExporter.export(
+    func testPDFExportsThreeA4Pages() async throws {
+        let output = try await NoteExporter.export(
             content: makeThreePageContent(),
             title: "Export",
             format: .pdf
@@ -30,15 +30,15 @@ final class NoteExporterTests: XCTestCase {
         }
     }
 
-    func testPNGExportsThreeRasterPages() throws {
-        try assertThreePageRasterExport(format: .png)
+    func testPNGExportsThreeRasterPages() async throws {
+        try await assertThreePageRasterExport(format: .png)
     }
 
-    func testJPEGExportsThreeRasterPages() throws {
-        try assertThreePageRasterExport(format: .jpeg)
+    func testJPEGExportsThreeRasterPages() async throws {
+        try await assertThreePageRasterExport(format: .jpeg)
     }
 
-    func testEmptyContentExportsOnePageForEveryFormat() throws {
+    func testEmptyContentExportsOnePageForEveryFormat() async throws {
         let content = NotePageRenderer.Content(
             drawing: PKDrawing(),
             elements: [],
@@ -47,7 +47,7 @@ final class NoteExporterTests: XCTestCase {
         )
 
         for format in NoteExporter.Format.allCases {
-            let output = try NoteExporter.export(
+            let output = try await NoteExporter.export(
                 content: content,
                 title: "Empty",
                 format: format
@@ -65,21 +65,21 @@ final class NoteExporterTests: XCTestCase {
         }
     }
 
-    func testPDFBackedPageWithoutInkExportsAsOnePDFPage() throws {
-        let pdfDocument = try PixelComparison.makeSolidPDFDocument(
+    func testPDFBackedPageWithoutInkExportsAsOnePDFPage() async throws {
+        let (pdfSource, pdfBandRef) = try await PixelComparison.makePdfDocumentStore(
             color: .blue,
             size: CGSize(width: 320, height: 320)
         )
-        let pdfPage = try XCTUnwrap(pdfDocument.page(at: 0))
         let content = NotePageRenderer.Content(
             drawing: PKDrawing(),
             elements: [],
             imagesByAssetPath: [:],
             pageCount: 1,
-            pdfPagesByBand: [0: pdfPage],
+            pdfSource: pdfSource,
+            pdfBandRefs: [0: pdfBandRef],
             pdfExpectedBands: [0]
         )
-        let output = try NoteExporter.export(
+        let output = try await NoteExporter.export(
             content: content,
             title: "PDF-backed",
             format: .pdf,
@@ -91,7 +91,7 @@ final class NoteExporterTests: XCTestCase {
         XCTAssertEqual(document.numberOfPages, 1)
     }
 
-    func testMissingExpectedPDFPageThrowsBeforeCreatingOutputDirectory() throws {
+    func testMissingExpectedPDFPageThrowsBeforeCreatingOutputDirectory() async throws {
         let content = NotePageRenderer.Content(
             drawing: PKDrawing(),
             elements: [],
@@ -102,7 +102,7 @@ final class NoteExporterTests: XCTestCase {
         let directoriesBefore = try temporaryExportDirectoryNames()
 
         do {
-            let output = try NoteExporter.export(
+            let output = try await NoteExporter.export(
                 content: content,
                 title: "Missing PDF",
                 format: .pdf,
@@ -124,7 +124,7 @@ final class NoteExporterTests: XCTestCase {
         XCTAssertEqual(directoriesAfter, directoriesBefore)
     }
 
-    func testMissingInRangeImageAssetThrowsBeforeCreatingOutputDirectory() throws {
+    func testMissingInRangeImageAssetThrowsBeforeCreatingOutputDirectory() async throws {
         let assetPath = "assets/missing.png"
         let element = CanvasElement(
             content: .image(
@@ -144,7 +144,7 @@ final class NoteExporterTests: XCTestCase {
         let directoriesBefore = try temporaryExportDirectoryNames()
 
         do {
-            let output = try NoteExporter.export(
+            let output = try await NoteExporter.export(
                 content: content,
                 title: "Missing image",
                 format: .pdf
@@ -161,7 +161,7 @@ final class NoteExporterTests: XCTestCase {
         XCTAssertEqual(directoriesAfter, directoriesBefore)
     }
 
-    func testOffPageMissingImageAssetDoesNotThrow() throws {
+    func testOffPageMissingImageAssetDoesNotThrow() async throws {
         let missingAssetPath = "assets/off-page-missing.png"
         let presentAssetPath = "assets/in-range.png"
         let offPageElement = CanvasElement(
@@ -194,7 +194,7 @@ final class NoteExporterTests: XCTestCase {
             pageCount: 1
         )
 
-        let output = try NoteExporter.export(
+        let output = try await NoteExporter.export(
             content: content,
             title: "Off-page missing image",
             format: .pdf
@@ -205,7 +205,7 @@ final class NoteExporterTests: XCTestCase {
         XCTAssertEqual(output.urls.count, 1)
     }
 
-    func testMissingImageAssetPathsPreserveElementOrderWithoutDuplicates() {
+    func testMissingImageAssetPathsPreserveElementOrderWithoutDuplicates() async throws {
         let firstPath = "assets/first-missing.png"
         let secondPath = "assets/second-missing.png"
         let paths = [firstPath, secondPath, firstPath]
@@ -233,7 +233,7 @@ final class NoteExporterTests: XCTestCase {
         )
 
         do {
-            let output = try NoteExporter.export(
+            let output = try await NoteExporter.export(
                 content: content,
                 title: "Missing images",
                 format: .pdf
@@ -252,7 +252,7 @@ final class NoteExporterTests: XCTestCase {
         }
     }
 
-    func testRotatedImageCrossingPageBoundaryExportsSecondPage() throws {
+    func testRotatedImageCrossingPageBoundaryExportsSecondPage() async throws {
         let assetPath = "assets/rotated-red.png"
         let centerY = PageGeometry.a4.pageHeight - 30
         let element = CanvasElement(
@@ -278,7 +278,7 @@ final class NoteExporterTests: XCTestCase {
             ],
             pageCount: 1
         )
-        let output = try NoteExporter.export(
+        let output = try await NoteExporter.export(
             content: content,
             title: "Rotated boundary",
             format: .png
@@ -295,7 +295,7 @@ final class NoteExporterTests: XCTestCase {
         )
     }
 
-    func testWrappedTextCrossingPageBoundaryExportsAndDrawsOnSecondPage() throws {
+    func testWrappedTextCrossingPageBoundaryExportsAndDrawsOnSecondPage() async throws {
         let frame = CanvasRect(
             x: 304,
             y: Double(PageGeometry.a4.pageHeight - 64),
@@ -318,7 +318,7 @@ final class NoteExporterTests: XCTestCase {
             imagesByAssetPath: [:],
             pageCount: 1
         )
-        let output = try NoteExporter.export(
+        let output = try await NoteExporter.export(
             content: content,
             title: "Wrapped boundary",
             format: .png
@@ -341,7 +341,7 @@ final class NoteExporterTests: XCTestCase {
             pageCount: 2
         )
         let reference = try PixelComparison.pixelBuffer(
-            for: NotePageRenderer.image(
+            for: await NotePageRenderer.image(
                 pageIndex: 1,
                 content: referenceContent,
                 pointSize: CGSize(
@@ -361,7 +361,7 @@ final class NoteExporterTests: XCTestCase {
         )
     }
 
-    func testSanitizesTitleInEveryFormatFilename() throws {
+    func testSanitizesTitleInEveryFormatFilename() async throws {
         let content = NotePageRenderer.Content(
             drawing: PKDrawing(),
             elements: [],
@@ -370,7 +370,7 @@ final class NoteExporterTests: XCTestCase {
         )
 
         for format in NoteExporter.Format.allCases {
-            let output = try NoteExporter.export(
+            let output = try await NoteExporter.export(
                 content: content,
                 title: "A/B: C",
                 format: format
@@ -389,8 +389,8 @@ final class NoteExporterTests: XCTestCase {
 
     private func assertThreePageRasterExport(
         format: NoteExporter.Format
-    ) throws {
-        let output = try NoteExporter.export(
+    ) async throws {
+        let output = try await NoteExporter.export(
             content: makeThreePageContent(),
             title: "Export",
             format: format

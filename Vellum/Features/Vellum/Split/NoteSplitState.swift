@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import VellumCore
 
 /// Where a moved pane lands, expressed as the two insertions the grid supports.
@@ -44,6 +45,8 @@ final class SplitColumn: Identifiable {
 @MainActor
 @Observable
 final class NoteSplitState {
+    private static let saveLogger = Logger(subsystem: "com.vellum", category: "save")
+
     private(set) var columns: [SplitColumn] = []
     var focusedPaneID: UUID?
     var onPaneRemoved: ((UUID) -> Void)?
@@ -328,10 +331,19 @@ final class NoteSplitState {
         }
     }
 
-    func flushAll() async {
+    @discardableResult
+    func flushAll() async -> Bool {
+        var didFlushAll = true
         for pane in panes {
-            _ = await pane.noteModel.flushPendingSave()
+            let didFlush = await pane.noteModel.flushPendingSave()
+            if !didFlush {
+                didFlushAll = false
+                Self.saveLogger.error(
+                    "flushAll: save did not complete for note \(pane.noteID)"
+                )
+            }
         }
+        return didFlushAll
     }
 
     func closeAll() async {
