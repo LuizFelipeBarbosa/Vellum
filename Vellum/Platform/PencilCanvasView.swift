@@ -107,19 +107,24 @@ final class PagedCanvasView: PKCanvasView {
         updateStrokeCountAccessibilityValue()
     }
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if window == nil {
-            strokeCountAccessibilityElement.removeFromSuperview()
-        } else {
-            installStrokeCountAccessibilityElement()
-        }
-    }
-
     fileprivate func updateStrokeCountAccessibilityValue() {
         strokeCountAccessibilityElement.accessibilityValue = "\(drawing.strokes.count)"
     }
 #endif
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            invalidateZoomSnapDisplayLink()
+#if DEBUG
+            strokeCountAccessibilityElement.removeFromSuperview()
+#endif
+        } else {
+#if DEBUG
+            installStrokeCountAccessibilityElement()
+#endif
+        }
+    }
 
     var topContentInset: CGFloat = 0 {
         didSet {
@@ -255,17 +260,19 @@ final class PagedCanvasView: PKCanvasView {
     }
 
     private func finishZoomSnap() {
-        zoomSnapDisplayLink?.invalidate()
-        zoomSnapDisplayLink = nil
-        isAnimatingZoomSnap = false
+        invalidateZoomSnapDisplayLink()
         (delegate as? PencilCanvasView.Coordinator)?.flushPendingDrawingSyncIfNeeded(for: self)
     }
 
     func cancelZoomSnap() {
+        invalidateZoomSnapDisplayLink()
+        (delegate as? PencilCanvasView.Coordinator)?.flushPendingDrawingSyncIfNeeded(for: self)
+    }
+
+    fileprivate func invalidateZoomSnapDisplayLink() {
         zoomSnapDisplayLink?.invalidate()
         zoomSnapDisplayLink = nil
         isAnimatingZoomSnap = false
-        (delegate as? PencilCanvasView.Coordinator)?.flushPendingDrawingSyncIfNeeded(for: self)
     }
 
     /// Called from scrollViewDidZoom: limit haptics (suppressed during programmatic snap).
@@ -548,6 +555,7 @@ struct PencilCanvasView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ canvasView: PKCanvasView, coordinator: Coordinator) {
+        (canvasView as? PagedCanvasView)?.invalidateZoomSnapDisplayLink()
         if coordinator.isObservingToolPicker {
             coordinator.toolPicker.removeObserver(canvasView)
         }

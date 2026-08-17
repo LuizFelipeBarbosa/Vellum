@@ -1,4 +1,5 @@
 import Foundation
+import os
 import VellumCore
 
 /// Applies text recognition results to an open note editor's model.
@@ -44,11 +45,14 @@ final class NoteTextRecognitionCoordinator {
     }
 
     func register(_ applier: any RecognitionApplying, noteID: UUID) {
+        recognitionTasks[noteID]?.cancel()
+        seedTasks[noteID]?.cancel()
         appliers[noteID] = WeakApplierBox(applier)
     }
 
     func unregister(noteID: UUID) {
         appliers[noteID] = nil
+        pruneRetainedStateIfClosedAndIdle(noteID: noteID)
     }
 
     func noteDidSave(_ input: TextRecognitionInput) {
@@ -95,8 +99,18 @@ final class NoteTextRecognitionCoordinator {
                 fingerprint = nil
             }
 
+            guard !Task.isCancelled else {
+                finishCancelledSeeding(noteID: noteID)
+                return
+            }
             finishSeeding(noteID: noteID, fingerprint: fingerprint)
         }
+    }
+
+    private func finishCancelledSeeding(noteID: UUID) {
+        seedTasks[noteID] = nil
+        guard let pending = pendingSeedInputs.removeValue(forKey: noteID) else { return }
+        noteDidSave(pending.0)
     }
 
     private func finishSeeding(noteID: UUID, fingerprint: String?) {
@@ -106,8 +120,10 @@ final class NoteTextRecognitionCoordinator {
             lastFingerprint[noteID] = fingerprint
         }
 
-        guard let pending = pendingSeedInputs.removeValue(forKey: noteID) else { return }
-        enqueueRecognition(for: pending.0, fingerprint: pending.1)
+        if let pending = pendingSeedInputs.removeValue(forKey: noteID) {
+            enqueueRecognition(for: pending.0, fingerprint: pending.1)
+        }
+        pruneRetainedStateIfClosedAndIdle(noteID: noteID)
     }
 
     private func enqueueRecognition(
@@ -131,7 +147,8 @@ final class NoteTextRecognitionCoordinator {
             } catch is CancellationError {
                 // Superseded recognition is expected during normal editing.
             } catch {
-                print("WARNING: text recognition failed: \(error)")
+                Logger(subsystem: "com.vellum", category: "recognition")
+                    .warning("Text recognition failed: \(String(describing: error), privacy: .public)")
             }
 
             finishRecognitionTask(noteID: input.noteID, taskID: taskID)
@@ -245,6 +262,19 @@ final class NoteTextRecognitionCoordinator {
         guard recognitionTaskIDs[noteID] == taskID else { return }
         recognitionTaskIDs[noteID] = nil
         recognitionTasks[noteID] = nil
+        pruneRetainedStateIfClosedAndIdle(noteID: noteID)
+    }
+
+    private func pruneRetainedStateIfClosedAndIdle(noteID: UUID) {
+        guard registeredApplier(for: noteID) == nil,
+              seedTasks[noteID] == nil,
+              recognitionTasks[noteID] == nil else { return }
+        lastFingerprint[noteID] = nil
+        seededNoteIDs.remove(noteID)
+    }
+
+    func retainsRecognitionState(for noteID: UUID) -> Bool {
+        lastFingerprint[noteID] != nil || seededNoteIDs.contains(noteID)
     }
 
     private static func orderedPages(_ pages: [NotePage]) -> [NotePage] {

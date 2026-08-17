@@ -1,10 +1,13 @@
 import Foundation
 import Observation
+import os
 import VellumCore
 
 @MainActor
 @Observable
 final class AskScreenModel {
+    private static let askLogger = Logger(subsystem: "com.vellum", category: "ask")
+
     enum AskPhase: Equatable {
         case idle, thinking, answered
     }
@@ -33,7 +36,7 @@ final class AskScreenModel {
         } catch {
             guard !Task.isCancelled else { return }
             suggested = []
-            print("WARNING: loading Ask suggestions failed: \(error)")
+            Self.askLogger.error("WARNING: loading Ask suggestions failed: \(String(describing: error), privacy: .public)")
         }
     }
 

@@ -20,11 +20,65 @@ func noteLifecycle() async throws {
     try await repository.saveNote(note)
     #expect(try await repository.loadNote(id: note.id).title == "Renamed")
 
-    try await repository.deleteNote(id: note.id)
+    note.deletedAt = Date()
+    try await repository.saveNote(note)
+    try await repository.destroyNotePackage(id: note.id)
     #expect(try await repository.listNotes().isEmpty)
     await #expect(throws: VellumError.noteNotFound(note.id)) {
         try await repository.loadNote(id: note.id)
     }
+}
+
+@Test("Destroying an active note package is refused")
+func destroyActiveNotePackageIsRefused() async throws {
+    let root = try TemporaryDirectory.make()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let repository = FileNoteRepository(rootDirectory: root)
+    let note = try await repository.createNote(title: "Keep me")
+
+    await #expect(
+        throws: VellumError.persistenceFailure(
+            "Refusing to destroy note \(note.id.uuidString) because it is not trashed."
+        )
+    ) {
+        try await repository.destroyNotePackage(id: note.id)
+    }
+    let reloaded = try await repository.loadNote(id: note.id)
+    #expect(reloaded.id == note.id)
+    #expect(reloaded.title == note.title)
+    #expect(reloaded.deletedAt == nil)
+}
+
+@Test("The first write sweeps orphaned staging directories once")
+func firstWriteSweepsOrphanedStagingDirectories() async throws {
+    let root = try TemporaryDirectory.make()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let orphan = root.appendingPathComponent(
+        ".staging-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+        at: orphan,
+        withIntermediateDirectories: false
+    )
+    let repository = FileNoteRepository(rootDirectory: root)
+
+    let first = try await repository.createNote(title: "First")
+    #expect(!FileManager.default.fileExists(atPath: orphan.path))
+    let second = try await repository.createNote(title: "Second")
+
+    #expect(try await repository.loadNote(id: first.id).title == first.title)
+    #expect(try await repository.loadNote(id: second.id).title == second.title)
+    #expect(
+        FileManager.default.fileExists(
+            atPath: FilePersistence.packageURL(rootDirectory: root, noteID: first.id).path
+        )
+    )
+    #expect(
+        FileManager.default.fileExists(
+            atPath: FilePersistence.packageURL(rootDirectory: root, noteID: second.id).path
+        )
+    )
 }
 
 @Test("Note listing scopes filter active and trashed notes")
@@ -230,10 +284,12 @@ func saveAfterDeleteDoesNotRecreatePackage() async throws {
     let root = try TemporaryDirectory.make()
     defer { try? FileManager.default.removeItem(at: root) }
     let repository = FileNoteRepository(rootDirectory: root)
-    let note = try await repository.createNote(title: "Delete me")
+    var note = try await repository.createNote(title: "Delete me")
     let package = root.appendingPathComponent("\(note.id.uuidString).native-note")
 
-    try await repository.deleteNote(id: note.id)
+    note.deletedAt = Date()
+    try await repository.saveNote(note)
+    try await repository.destroyNotePackage(id: note.id)
     await #expect(throws: VellumError.noteNotFound(note.id)) {
         try await repository.saveNote(note)
     }

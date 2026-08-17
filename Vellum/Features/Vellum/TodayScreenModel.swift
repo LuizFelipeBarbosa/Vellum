@@ -74,23 +74,37 @@ final class TodayScreenModel {
     func refresh() async {
         let now = Date.now
 
-        async let summariesResult = try? container.workspace.listNoteSummaries()
-        async let tasksResult = try? container.workspace.listTasks()
-        async let entitiesResult = try? container.entities.list()
-        async let digestResult = try? container.workspace.activityDigest(
-            since: now.addingTimeInterval(-24 * 3600)
+        async let summariesResult = Self.loadResult {
+            try await container.workspace.listNoteSummaries()
+        }
+        async let tasksResult = Self.loadResult {
+            try await container.workspace.listTasks()
+        }
+        async let entitiesResult = Self.loadResult {
+            try await container.entities.list()
+        }
+        async let digestResult = Self.loadResult {
+            try await container.workspace.activityDigest(
+                since: now.addingTimeInterval(-24 * 3600)
+            )
+        }
+        let (summaries, tasks, entities, digest) = await (
+            summariesResult,
+            tasksResult,
+            entitiesResult,
+            digestResult
         )
 
-        if let summaries = await summariesResult {
-            updateNotes(summaries, relativeTo: now)
+        if let value = summaries.value {
+            updateNotes(value, relativeTo: now)
         }
 
-        if let tasks = await tasksResult {
-            updateTasks(tasks)
+        if let value = tasks.value {
+            updateTasks(value)
         }
 
-        if let entities = await entitiesResult {
-            looseThreads = entities.sorted(by: entityPrecedes).prefix(6).map { entity in
+        if let value = entities.value {
+            looseThreads = value.sorted(by: entityPrecedes).prefix(6).map { entity in
                 TodayLooseThread(
                     id: entity.id,
                     name: entity.name,
@@ -100,9 +114,14 @@ final class TodayScreenModel {
             }
         }
 
-        if let digest = await digestResult {
-            digestSubline = digestLine(for: digest.totalAgentActions)
+        if let value = digest.value {
+            digestSubline = digestLine(for: value.totalAgentActions)
         }
+
+        errorMessage = summaries.errorDescription
+            ?? tasks.errorDescription
+            ?? entities.errorDescription
+            ?? digest.errorDescription
     }
 
     func toggleTask(id: UUID, isDone: Bool) async {
@@ -158,6 +177,16 @@ final class TodayScreenModel {
                     in: .whitespacesAndNewlines
                 )
             )
+        }
+    }
+
+    private static func loadResult<T>(
+        _ operation: () async throws -> T
+    ) async -> (value: T?, errorDescription: String?) {
+        do {
+            return (try await operation(), nil)
+        } catch {
+            return (nil, error.localizedDescription)
         }
     }
 

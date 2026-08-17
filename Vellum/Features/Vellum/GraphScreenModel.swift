@@ -28,23 +28,33 @@ final class GraphScreenModel {
     var positions: [GraphNodeID: CGPoint] = [:]
     var spaceColors: [UUID: SpaceColor] = [:]
     var selectedNodeID: GraphNodeID?
+    var errorMessage: String?
 
     init(container: AppContainer) {
         self.container = container
     }
 
     func refresh() async {
-        async let snapshotResult = try? container.graph.snapshot()
-        async let spacesResult = try? container.spaces.list()
+        async let snapshotResult = Self.loadResult {
+            try await container.graph.snapshot()
+        }
+        async let spacesResult = Self.loadResult {
+            try await container.spaces.list()
+        }
+        let (loadedSnapshot, loadedSpaces) = await (snapshotResult, spacesResult)
 
-        guard let refreshedSnapshot = await snapshotResult else { return }
+        guard let refreshedSnapshot = loadedSnapshot.value else {
+            errorMessage = loadedSnapshot.errorDescription
+            return
+        }
+        errorMessage = loadedSpaces.errorDescription
         snapshot = refreshedSnapshot
         positions = GraphLayout.positions(
             nodes: refreshedSnapshot.nodes,
             edges: refreshedSnapshot.edges,
             in: CGSize(width: 1194, height: 700)
         )
-        let spaces = await spacesResult ?? []
+        let spaces = loadedSpaces.value ?? []
         spaceColors = Dictionary(uniqueKeysWithValues: spaces.map { ($0.id, $0.color) })
 
         let availableIDs = Set(refreshedSnapshot.nodes.map(\.id))
@@ -55,6 +65,16 @@ final class GraphScreenModel {
                 }
                 return lhs.id.stableGraphID < rhs.id.stableGraphID
             }.first?.id
+        }
+    }
+
+    private static func loadResult<T>(
+        _ operation: () async throws -> T
+    ) async -> (value: T?, errorDescription: String?) {
+        do {
+            return (try await operation(), nil)
+        } catch {
+            return (nil, error.localizedDescription)
         }
     }
 

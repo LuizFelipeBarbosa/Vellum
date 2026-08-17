@@ -1,7 +1,10 @@
 import Foundation
+import os
 import VellumCore
 
 struct AppContainer: Sendable {
+    private static let seedingLogger = Logger(subsystem: "com.vellum", category: "seeding")
+
     let rootDirectory: URL
     let notes: any NoteRepository
     let proposals: any AgentProposalRepository
@@ -135,7 +138,7 @@ struct AppContainer: Sendable {
         do {
             return try await seeder.seedIfNeeded()
         } catch {
-            print("WARNING: workspace seeding failed: \(error)")
+            Self.seedingLogger.error("WARNING: workspace seeding failed: \(String(describing: error), privacy: .public)")
             return false
         }
     }

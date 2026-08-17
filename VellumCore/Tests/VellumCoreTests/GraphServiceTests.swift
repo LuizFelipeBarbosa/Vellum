@@ -30,7 +30,10 @@ func graphSnapshotFiltersDanglingLinks() async throws {
     let fixture = try GraphFixture()
     defer { fixture.cleanup() }
     let seeded = try await seedGraph(in: fixture)
-    try await fixture.notes.deleteNote(id: seeded.gamma.id)
+    var gamma = seeded.gamma
+    gamma.deletedAt = Date()
+    try await fixture.notes.saveNote(gamma)
+    try await fixture.notes.destroyNotePackage(id: gamma.id)
 
     let snapshot = try await fixture.service.snapshot()
 

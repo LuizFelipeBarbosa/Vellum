@@ -88,6 +88,26 @@ func staleProposalCannotBeAccepted() async throws {
     #expect(reloaded.status.rawValue == ProposalStatus.stale.rawValue)
 }
 
+@Test("Saving a stale note advances beyond the persisted revision")
+func staleSaveKeepsRevisionMonotonic() async throws {
+    let fixture = try WorkspaceFixture()
+    defer { fixture.cleanup() }
+    var callerA = try await fixture.service.createNote(title: "Original")
+    var callerB = try await fixture.service.loadNote(id: callerA.id)
+
+    callerB.title = "Caller B"
+    let diskAfterCallerB = try await fixture.service.saveNote(callerB)
+    callerA.title = "Caller A"
+    let saved = try await fixture.service.saveNote(callerA)
+
+    #expect(saved.revision > callerA.revision)
+    #expect(saved.revision > diskAfterCallerB.revision)
+    #expect(saved.title == "Caller A")
+    let reloaded = try await fixture.service.loadNote(id: saved.id)
+    #expect(reloaded.revision == saved.revision)
+    #expect(reloaded.title == saved.title)
+}
+
 @Test("A custom agent uses the same proposal acceptance seam")
 func scriptedAgentAcceptFlow() async throws {
     let root = try TemporaryDirectory.make()

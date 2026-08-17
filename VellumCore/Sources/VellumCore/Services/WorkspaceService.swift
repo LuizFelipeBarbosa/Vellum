@@ -1,6 +1,9 @@
 import Foundation
+import os
 
 public actor WorkspaceService {
+    private static let logger = Logger(subsystem: "com.vellum", category: "workspace")
+
     private let notes: any NoteRepository
     private let proposals: any AgentProposalRepository
     private let activityRepository: any ActivityRepository
@@ -69,7 +72,12 @@ public actor WorkspaceService {
         var saved = note
         saved.deletedAt = persisted.deletedAt
         saved.updatedAt = timestamp
-        saved.revision += 1
+        if persisted.revision > note.revision {
+            Self.logger.warning(
+                "Saving stale note \(note.id.uuidString, privacy: .public): caller revision \(note.revision), persisted revision \(persisted.revision)."
+            )
+        }
+        saved.revision = max(note.revision, persisted.revision) + 1
         try await notes.saveNote(saved)
 
         let updateInstant = ContinuousClock().now

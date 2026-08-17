@@ -54,8 +54,8 @@ private actor FailingSaveNoteRepository: NoteRepository {
         try await wrapped.saveNote(note)
     }
 
-    func deleteNote(id: UUID) async throws {
-        try await wrapped.deleteNote(id: id)
+    func destroyNotePackage(id: UUID) async throws {
+        try await wrapped.destroyNotePackage(id: id)
     }
 
     func purgeNote(id: UUID) async throws -> Bool {
@@ -790,7 +790,11 @@ final class NoteSplitStateTests: XCTestCase {
 
         model.handleSplitContainerResize(containerSize)
         model.split.removePane(id: first.id)
-        try await Task.sleep(for: .milliseconds(400))
+
+        let regridFinished = try await waitUntil {
+            model.split.panes.map(\.id) == [middle.id, trailing.id]
+        }
+        XCTAssertTrue(regridFinished, "resize regrid after pane removal did not finish")
 
         XCTAssertEqual(model.split.panes.map(\.id), [middle.id, trailing.id])
         assertFractions(
@@ -933,7 +937,11 @@ final class NoteSplitStateTests: XCTestCase {
         )
 
         model.handleSplitContainerResize(containerSize)
-        try await Task.sleep(for: .milliseconds(300))
+
+        let evictedEarly = try await waitUntil(timeout: 0.3) {
+            model.split.panes.map(\.id) != originalPaneIDs
+        }
+        XCTAssertFalse(evictedEarly, "resize incorrectly evicted panes that still fit")
 
         XCTAssertEqual(model.split.panes.map(\.id), originalPaneIDs)
         assertFractions(

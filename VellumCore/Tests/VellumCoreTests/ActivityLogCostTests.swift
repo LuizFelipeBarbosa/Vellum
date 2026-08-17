@@ -336,8 +336,8 @@ private actor CountingNoteRepository: NoteRepository {
         try await wrapped.saveNote(note)
     }
 
-    func deleteNote(id: UUID) async throws {
-        try await wrapped.deleteNote(id: id)
+    func destroyNotePackage(id: UUID) async throws {
+        try await wrapped.destroyNotePackage(id: id)
     }
 
     func purgeNote(id: UUID) async throws -> Bool {

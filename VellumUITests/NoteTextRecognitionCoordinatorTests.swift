@@ -102,6 +102,8 @@ final class NoteTextRecognitionCoordinatorTests: XCTestCase {
         let coordinator = makeCoordinator(recognizer: recognizer)
         let note = try await container.workspace.createNote(title: "Untitled")
         let input = TextRecognitionInput(note: note, drawingData: nil)
+        let applier = RecordingRecognitionApplier(input: input)
+        coordinator.register(applier, noteID: note.id)
 
         coordinator.noteDidSave(input)
         let didWriteSidecar = try await waitUntil {
@@ -171,6 +173,58 @@ final class NoteTextRecognitionCoordinatorTests: XCTestCase {
             sidecar.inputFingerprint,
             TextRecognitionService.fingerprint(for: input)
         )
+        let didPruneRetainedState = try await waitUntil {
+            !coordinator.retainsRecognitionState(for: note.id)
+        }
+        XCTAssertTrue(didPruneRetainedState)
+    }
+
+    func testRegisterCancelsClosedRecognitionAndNextSaveSelfHeals() async throws {
+        let recognizer = ScriptedInkRecognizer(
+            lines: [line("Stale recognition")],
+            delay: .milliseconds(100)
+        )
+        let coordinator = makeCoordinator(recognizer: recognizer)
+        let original = try await saveNote(
+            title: "Manual title",
+            titleOrigin: .manual,
+            typedTexts: ["Original source"]
+        )
+        coordinator.noteDidSave(TextRecognitionInput(note: original, drawingData: nil))
+        let didStartClosedRecognition = try await waitUntil {
+            await recognizer.numberOfCalls() == 1
+        }
+        XCTAssertTrue(didStartClosedRecognition)
+
+        let reopenedApplier = RecordingRecognitionApplier(input: nil)
+        coordinator.register(reopenedApplier, noteID: original.id)
+
+        var reopenedNote = try await container.workspace.loadNote(id: original.id)
+        reopenedNote.pages[0].elements.append(textElement("Reopened edit", y: 160))
+        let persistedReopenedNote = try await container.workspace.saveNote(reopenedNote)
+        let reopenedInput = TextRecognitionInput(note: persistedReopenedNote, drawingData: nil)
+        reopenedApplier.input = reopenedInput
+        await recognizer.setLines([line("Fresh recognition")])
+        coordinator.noteDidSave(reopenedInput)
+
+        let didSelfHeal = try await waitUntil {
+            let recognitionCallCount = await recognizer.numberOfCalls()
+            return reopenedApplier.outcomes.count == 1 && recognitionCallCount == 2
+        }
+        XCTAssertTrue(didSelfHeal)
+        let completionCount = await recognizer.numberOfCompletions()
+        XCTAssertEqual(completionCount, 1)
+        XCTAssertEqual(reopenedApplier.outcomes.first?.pageTexts, [
+            persistedReopenedNote.pages[0].id: "Fresh recognition\nOriginal source\nReopened edit",
+        ])
+
+        let reloaded = try await container.workspace.loadNote(id: original.id)
+        XCTAssertEqual(reloaded.revision, persistedReopenedNote.revision)
+        XCTAssertEqual(
+            reloaded.pages[0].elements.map(\.id),
+            persistedReopenedNote.pages[0].elements.map(\.id)
+        )
+        XCTAssertFalse(reloaded.pages[0].plainText.contains("Stale recognition"))
     }
 
     func testSidecarWithUnpersistedPageTextRerunsRecognition() async throws {

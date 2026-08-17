@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import SwiftUI
 import UIKit
 import VellumCore
@@ -27,6 +28,8 @@ struct Toast: Equatable, Identifiable {
 @MainActor
 @Observable
 final class VellumAppModel {
+    private static let memoryLogger = Logger(subsystem: "com.vellum", category: "memory")
+
     let container: AppContainer
     let library: LibraryScreenModel
     let graphScreen: GraphScreenModel
@@ -95,6 +98,7 @@ final class VellumAppModel {
 
     private var toastTask: Task<Void, Never>?
     private var askNavigationTask: Task<Void, Never>?
+    private var memoryWarningTask: Task<Void, Never>?
     private var workspaceRefreshTask: Task<Void, Never>?
     private var workspaceRefreshToken: UUID?
     private var workspaceRefreshBurstStart: ContinuousClock.Instant?
@@ -188,6 +192,19 @@ final class VellumAppModel {
         split.onPaneRemoved = { [weak self] noteID in
             self?.container.textRecognition.unregister(noteID: noteID)
         }
+        let memoryWarnings = NotificationCenter.default.notifications(
+            named: UIApplication.didReceiveMemoryWarningNotification
+        )
+        memoryWarningTask = Task { [weak self] in
+            for await _ in memoryWarnings {
+                guard let self else { return }
+                Self.memoryLogger.notice("Clearing editor image caches after memory warning")
+                for pane in self.split.panes {
+                    pane.noteModel.pdfCache.clearCaches()
+                    pane.noteModel.canvasElements.clearImageCaches()
+                }
+            }
+        }
     }
 
     func bootstrap() async {
@@ -245,6 +262,7 @@ final class VellumAppModel {
                     )
                 }
 
+                guard rowCount > 0 else { continue }
                 for _ in 1..<rowCount {
                     guard let note = noteIterator.next() else { break }
                     await openNote(
@@ -634,7 +652,12 @@ final class VellumAppModel {
         showToast(text, actionLabel: "Undo") { [weak self] in
             guard let self else { return }
             Task {
-                try? await self.container.workspace.restoreNotes(ids: ids)
+                do {
+                    try await self.container.workspace.restoreNotes(ids: ids)
+                } catch {
+                    // Undo-of-delete failing silently reads as data loss to the user.
+                    self.library.errorMessage = "Couldn't restore: \(error.localizedDescription)"
+                }
                 await self.trashScreen.refresh()
                 await self.library.refresh()
                 await self.refreshStats()
@@ -706,7 +729,8 @@ final class VellumAppModel {
             )
             _ = try await container.workspace.saveNote(note)
         } catch {
-            print("WARNING: auto-title fixture seeding failed: \(error)")
+            Logger(subsystem: "com.vellum", category: "seeding")
+                .warning("Auto-title fixture seeding failed: \(String(describing: error), privacy: .public)")
         }
     }
     #endif

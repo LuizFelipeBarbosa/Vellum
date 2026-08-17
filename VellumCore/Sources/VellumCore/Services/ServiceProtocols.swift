@@ -12,7 +12,7 @@ public protocol NoteRepository: Sendable {
     func importNote(_ note: Note, assets: [(relativePath: String, data: Data)]) async throws
     func loadNote(id: UUID) async throws -> Note
     func saveNote(_ note: Note) async throws
-    func deleteNote(id: UUID) async throws
+    func destroyNotePackage(id: UUID) async throws
     @discardableResult
     func purgeNote(id: UUID) async throws -> Bool
     func loadAsset(noteID: UUID, relativePath: String) async throws -> Data?

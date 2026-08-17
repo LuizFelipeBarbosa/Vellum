@@ -21,6 +21,7 @@ private actor DrawingSerializer {
 @Observable
 final class NoteScreenModel {
     private static let imageLogger = Logger(subsystem: "com.vellum", category: "images")
+    private static let analysisLogger = Logger(subsystem: "com.vellum", category: "analysis")
 
     enum SaveState: Equatable {
         case saved
@@ -957,7 +958,7 @@ final class NoteScreenModel {
             try await performAnalysis()
             try await saveAgentAnalysisState(textHash: textHash)
         } catch {
-            print("WARNING: auto-analyze failed: \(error)")
+            Self.analysisLogger.error("WARNING: auto-analyze failed: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -982,7 +983,7 @@ final class NoteScreenModel {
                 from: data
             )
         } catch {
-            print("WARNING: auto-analyze state could not be loaded: \(error)")
+            Self.analysisLogger.error("WARNING: auto-analyze state could not be loaded: \(String(describing: error), privacy: .public)")
             return nil
         }
     }
@@ -1085,10 +1086,14 @@ final class NoteScreenModel {
                 if let newAssetPath,
                    let oldAssetPath,
                    newAssetPath != oldAssetPath {
-                    try? await notes.deleteAsset(
-                        noteID: noteSnapshot.id,
-                        relativePath: oldAssetPath
-                    )
+                    do {
+                        try await notes.deleteAsset(
+                            noteID: noteSnapshot.id,
+                            relativePath: oldAssetPath
+                        )
+                    } catch {
+                        Self.imageLogger.error("Old drawing asset delete failed for \(oldAssetPath, privacy: .public): \(String(describing: error), privacy: .public)")
+                    }
                 }
                 await refreshProposalsAfterSave()
                 if let input = currentRecognitionInput() {

@@ -99,6 +99,7 @@ private struct SchemaProbe: Decodable {
 
 public actor FileNoteRepository: NoteRepository {
     private let rootDirectory: URL
+    private var hasSweptStaging = false
 
     public init(rootDirectory: URL) {
         self.rootDirectory = rootDirectory
@@ -266,8 +267,16 @@ public actor FileNoteRepository: NoteRepository {
         try FilePersistence.write(normalized, to: package.appendingPathComponent("manifest.json"))
     }
 
-    public func deleteNote(id: UUID) async throws {
-        let package = try FilePersistence.requirePackage(rootDirectory: rootDirectory, noteID: id)
+    public func destroyNotePackage(id: UUID) async throws {
+        // Schema-unchecked on purpose: destruction must stay able to remove a trashed
+        // note this build cannot otherwise load. See `decodedManifest`.
+        let note = try decodedManifest(id: id, requireSupportedSchema: false)
+        guard note.deletedAt != nil else {
+            throw VellumError.persistenceFailure(
+                "Refusing to destroy note \(id.uuidString) because it is not trashed."
+            )
+        }
+        let package = FilePersistence.packageURL(rootDirectory: rootDirectory, noteID: id)
         do {
             try FileManager.default.removeItem(at: package)
         } catch {
@@ -477,6 +486,8 @@ public actor FileNoteRepository: NoteRepository {
         for note: Note,
         assets: [(relativePath: String, data: Data)]
     ) throws {
+        sweepStagingDirectoriesIfNeeded()
+
         let fileManager = FileManager.default
         let finalPackage = FilePersistence.packageURL(
             rootDirectory: rootDirectory,
@@ -508,6 +519,31 @@ public actor FileNoteRepository: NoteRepository {
         } catch {
             try? fileManager.removeItem(at: stagingPackage)
             throw error
+        }
+    }
+
+    private func sweepStagingDirectoriesIfNeeded() {
+        guard !hasSweptStaging else { return }
+        hasSweptStaging = true
+
+        let fileManager = FileManager.default
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: []
+        ) else {
+            return
+        }
+
+        for entry in entries where entry.lastPathComponent.hasPrefix(".staging-") {
+            guard let values = try? entry.resourceValues(
+                forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+            ),
+            values.isDirectory == true,
+            values.isSymbolicLink != true else {
+                continue
+            }
+            try? fileManager.removeItem(at: entry)
         }
     }
 
