@@ -9,12 +9,20 @@ struct SelectionPasteboardPayload: Codable {
     var imageAssets: [String: Data]
 }
 
+/// Immutable UIImage snapshot handed to a detached JPEG encode; UIKit does not mark it Sendable.
+private struct SystemImageJPEGEncodingRequest: @unchecked Sendable {
+    let image: UIImage
+}
+
 enum SelectionPasteboard {
     static let pasteboardType = "com.luiz.vellum.canvas-selection"
 
     @MainActor
-    static func write(_ payload: SelectionPasteboardPayload) -> Bool {
-        guard let data = try? VellumJSONCoding.encoder().encode(payload) else { return false }
+    static func write(_ payload: SelectionPasteboardPayload) async -> Bool {
+        let data = await Task.detached(priority: .userInitiated) {
+            try? VellumJSONCoding.encoder().encode(payload)
+        }.value
+        guard let data else { return false }
         UIPasteboard.general.setData(data, forPasteboardType: pasteboardType)
         return true
     }
@@ -55,8 +63,14 @@ enum SelectionPasteboard {
                 return data
             }
         }
-        if let data = UIPasteboard.general.image?.jpegData(compressionQuality: 0.9) {
-            return data
+        if let image = UIPasteboard.general.image {
+            let request = SystemImageJPEGEncodingRequest(image: image)
+            let encoded = await Task.detached(priority: .userInitiated) {
+                request.image.jpegData(compressionQuality: 0.9)
+            }.value
+            if let encoded {
+                return encoded
+            }
         }
         for provider in UIPasteboard.general.itemProviders {
             guard provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else {

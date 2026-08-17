@@ -4,6 +4,7 @@ import VellumCore
 struct VellumLibraryView: View {
     @Bindable var model: VellumAppModel
     @State private var isImportingPDF = false
+    @State private var isCreatingNote = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 16), count: 3)
 
@@ -514,7 +515,10 @@ struct VellumLibraryView: View {
     }
 
     private func createNote() {
+        guard !isCreatingNote else { return }
+        isCreatingNote = true
         Task {
+            defer { isCreatingNote = false }
             guard let noteID = await model.library.createNote() else { return }
             await model.refreshStats()
             await model.openNote(noteID, isNewlyCreated: true)

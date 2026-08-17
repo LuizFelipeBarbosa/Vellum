@@ -54,6 +54,7 @@ final class CanvasSelectionController {
         drawingBeforeHide != nil
     }
 
+    private var isPasting = false
     private var captureStart: CGPoint?
     private var captureMode: SelectionMode?
     private var captureRect: CGRect?
@@ -813,7 +814,7 @@ final class CanvasSelectionController {
             imageAssets[image.assetPath] = data
         }
 
-        return SelectionPasteboard.write(
+        return await SelectionPasteboard.write(
             SelectionPasteboardPayload(
                 drawingData: PKDrawing(strokes: strokes).dataRepresentation(),
                 elements: elements,
@@ -828,6 +829,9 @@ final class CanvasSelectionController {
     }
 
     func pasteFromPasteboard(at target: CGPoint? = nil) async {
+        guard !isPasting else { return }
+        isPasting = true
+        defer { isPasting = false }
         dismissPasteAffordance()
         guard let payload = SelectionPasteboard.read() else {
             guard SelectionPasteboard.hasSystemImage,
@@ -970,6 +974,7 @@ final class CanvasSelectionController {
                 )
             }
 
+            var duplicates: [CanvasElement] = []
             for elementID in selection.elementIDs {
                 guard let element = elementsStore.elements.first(where: { $0.id == elementID })
                 else { continue }
@@ -983,8 +988,9 @@ final class CanvasSelectionController {
                     layerPlacement: element.layerPlacement
                 )
                 duplicatedElementIDs.insert(duplicate.id)
-                elementsStore.addElement(duplicate)
+                duplicates.append(duplicate)
             }
+            elementsStore.addElements(duplicates)
         }
 
         let duplicatedSelection = Selection(

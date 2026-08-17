@@ -22,7 +22,6 @@ enum NoteExportError: LocalizedError {
     }
 }
 
-@MainActor
 enum NoteExporter {
     enum Format: String, CaseIterable {
         case pdf
@@ -38,11 +37,13 @@ enum NoteExporter {
         }
     }
 
-    struct Output: Identifiable {
+    struct Output: Identifiable, Sendable {
         let id = UUID()
         let urls: [URL]
         let directory: URL
     }
+
+    private static let renderer = NoteExportRenderer()
 
     /// Renders the export page count (an empty note produces one blank page) and
     /// writes the files into a fresh temporary directory.
@@ -150,25 +151,16 @@ enum NoteExporter {
                 }
                 prefetchedBands[pageIndex] = .vector(data)
             }
-            let renderer = UIGraphicsPDFRenderer(
-                bounds: CGRect(origin: .zero, size: pdfPageSize)
+            let result = try await renderer.renderPDF(
+                PDFExportRenderRequest(
+                    content: content,
+                    prefetchedBands: prefetchedBands,
+                    pageCount: pageCount,
+                    url: url,
+                    pageSize: pdfPageSize
+                )
             )
-            try renderer.writePDF(to: url) { context in
-                for pageIndex in 0..<pageCount {
-                    context.beginPage()
-                    let scale = pdfPageSize.width / content.geometry.contentWidth
-                    context.cgContext.saveGState()
-                    context.cgContext.scaleBy(x: scale, y: scale)
-                    NotePageRenderer.draw(
-                        pageIndex: pageIndex,
-                        content: content,
-                        resolvedPdf: prefetchedBands[pageIndex],
-                        in: context.cgContext
-                    )
-                    context.cgContext.restoreGState()
-                }
-            }
-            return [url]
+            return result.urls
 
         case .png, .jpeg:
             var prefetchedBands: [Int: ResolvedPdfBand] = [:]
@@ -189,38 +181,17 @@ enum NoteExporter {
                 prefetchedBands[pageIndex] = .raster(raster)
             }
 
-            var urls: [URL] = []
-            for pageIndex in 0..<pageCount {
-                let image = await NotePageRenderer.image(
-                    pageIndex: pageIndex,
+            let result = try await renderer.renderRasterPages(
+                RasterExportRenderRequest(
                     content: content,
-                    resolvedPdf: prefetchedBands[pageIndex],
-                    pointSize: CGSize(
-                        width: content.geometry.contentWidth,
-                        height: content.geometry.pageHeight
-                    ),
-                    scale: 2
+                    prefetchedBands: prefetchedBands,
+                    pageCount: pageCount,
+                    directory: directory,
+                    title: title,
+                    format: format
                 )
-                let data: Data?
-                switch format {
-                case .png:
-                    data = image.pngData()
-                case .jpeg:
-                    data = image.jpegData(compressionQuality: 0.9)
-                case .pdf:
-                    data = nil
-                }
-                guard let data else {
-                    throw CocoaError(.fileWriteUnknown)
-                }
-
-                let url = directory.appendingPathComponent(
-                    "\(title) – Page \(pageIndex + 1).\(format.rawValue)"
-                )
-                try data.write(to: url, options: .atomic)
-                urls.append(url)
-            }
-            return urls
+            )
+            return result.urls
         }
     }
 
@@ -230,5 +201,90 @@ enum NoteExporter {
             .replacingOccurrences(of: ":", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return sanitized.isEmpty ? "Untitled" : sanitized
+    }
+}
+
+/// Immutable render snapshot handed to the private serial export actor.
+private struct PDFExportRenderRequest: @unchecked Sendable {
+    let content: NotePageRenderer.Content
+    let prefetchedBands: [Int: ResolvedPdfBand]
+    let pageCount: Int
+    let url: URL
+    let pageSize: CGSize
+}
+
+/// Immutable render snapshot handed to the private serial export actor.
+private struct RasterExportRenderRequest: @unchecked Sendable {
+    let content: NotePageRenderer.Content
+    let prefetchedBands: [Int: ResolvedPdfBand]
+    let pageCount: Int
+    let directory: URL
+    let title: String
+    let format: NoteExporter.Format
+}
+
+/// Immutable render result handed back from the private serial export actor.
+private struct NoteExportRenderResult: @unchecked Sendable {
+    let urls: [URL]
+}
+
+private actor NoteExportRenderer {
+    func renderPDF(_ request: PDFExportRenderRequest) throws -> NoteExportRenderResult {
+        let renderer = UIGraphicsPDFRenderer(
+            bounds: CGRect(origin: .zero, size: request.pageSize)
+        )
+        try renderer.writePDF(to: request.url) { context in
+            for pageIndex in 0..<request.pageCount {
+                context.beginPage()
+                let scale = request.pageSize.width / request.content.geometry.contentWidth
+                context.cgContext.saveGState()
+                context.cgContext.scaleBy(x: scale, y: scale)
+                NotePageRenderer.draw(
+                    pageIndex: pageIndex,
+                    content: request.content,
+                    resolvedPdf: request.prefetchedBands[pageIndex],
+                    in: context.cgContext
+                )
+                context.cgContext.restoreGState()
+            }
+        }
+        return NoteExportRenderResult(urls: [request.url])
+    }
+
+    func renderRasterPages(
+        _ request: RasterExportRenderRequest
+    ) async throws -> NoteExportRenderResult {
+        var urls: [URL] = []
+        for pageIndex in 0..<request.pageCount {
+            let image = await NotePageRenderer.image(
+                pageIndex: pageIndex,
+                content: request.content,
+                resolvedPdf: request.prefetchedBands[pageIndex],
+                pointSize: CGSize(
+                    width: request.content.geometry.contentWidth,
+                    height: request.content.geometry.pageHeight
+                ),
+                scale: 2
+            )
+            let data: Data?
+            switch request.format {
+            case .png:
+                data = image.pngData()
+            case .jpeg:
+                data = image.jpegData(compressionQuality: 0.9)
+            case .pdf:
+                data = nil
+            }
+            guard let data else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+
+            let url = request.directory.appendingPathComponent(
+                "\(request.title) – Page \(pageIndex + 1).\(request.format.rawValue)"
+            )
+            try data.write(to: url, options: .atomic)
+            urls.append(url)
+        }
+        return NoteExportRenderResult(urls: urls)
     }
 }

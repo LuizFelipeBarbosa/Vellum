@@ -46,6 +46,20 @@ final class PagedCanvasView: PKCanvasView {
     var paneUndoManager: UndoManager?
     override var undoManager: UndoManager? { paneUndoManager ?? super.undoManager }
 
+#if DEBUG
+    // Flow tests observe the cheap PencilKit object count without serializing the drawing.
+    private let strokeCountAccessibilityElement: UIView = {
+        let element = UIView()
+        element.translatesAutoresizingMaskIntoConstraints = false
+        element.backgroundColor = .clear
+        element.isUserInteractionEnabled = false
+        element.isAccessibilityElement = true
+        element.accessibilityIdentifier = "vellum-canvas-stroke-count"
+        element.accessibilityValue = "0"
+        return element
+    }()
+#endif
+
     let haptics = CanvasHaptics()
     private(set) var isAnimatingZoomSnap = false
     private var zoomSnapDisplayLink: CADisplayLink?
@@ -71,6 +85,41 @@ final class PagedCanvasView: PKCanvasView {
         defer { isInRepresentableUpdate = previous }
         body()
     }
+
+#if DEBUG
+    // Attached to the WINDOW, not the canvas: PKCanvasView is a scroll view whose
+    // internal accessibility container hides plain subviews from XCUITest, and a
+    // content-coordinate 1×1 view drifts offscreen with scroll/zoom anyway.
+    fileprivate func installStrokeCountAccessibilityElement() {
+        guard let window, strokeCountAccessibilityElement.superview !== window else { return }
+        strokeCountAccessibilityElement.removeFromSuperview()
+        window.addSubview(strokeCountAccessibilityElement)
+        NSLayoutConstraint.activate([
+            strokeCountAccessibilityElement.leadingAnchor.constraint(
+                equalTo: window.leadingAnchor
+            ),
+            strokeCountAccessibilityElement.topAnchor.constraint(
+                equalTo: window.topAnchor
+            ),
+            strokeCountAccessibilityElement.widthAnchor.constraint(equalToConstant: 1),
+            strokeCountAccessibilityElement.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        updateStrokeCountAccessibilityValue()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            strokeCountAccessibilityElement.removeFromSuperview()
+        } else {
+            installStrokeCountAccessibilityElement()
+        }
+    }
+
+    fileprivate func updateStrokeCountAccessibilityValue() {
+        strokeCountAccessibilityElement.accessibilityValue = "\(drawing.strokes.count)"
+    }
+#endif
 
     var topContentInset: CGFloat = 0 {
         didSet {
@@ -292,6 +341,8 @@ enum PencilSqueezePhase: Sendable {
 struct PencilCanvasView: UIViewRepresentable {
     let drawingData: Data?
     let onDrawingChanged: (Data) -> Void
+    var drawingVersion: Int = 0
+    var onDrawingObjectChanged: ((PKDrawing) -> Int)? = nil
     var isTransparent: Bool = false
     var tool: (any PKTool)? = nil
     var showsSystemToolPicker: Bool = true
@@ -314,6 +365,7 @@ struct PencilCanvasView: UIViewRepresentable {
             onDrawingChanged: onDrawingChanged,
             onViewportChanged: onViewportChanged
         )
+        coordinator.onDrawingObjectChanged = onDrawingObjectChanged
         coordinator.onExternalDrawingChange = onExternalDrawingChange
         coordinator.onPencilSqueeze = onPencilSqueeze
         coordinator.onTwoFingerTap = onTwoFingerTap
@@ -324,6 +376,9 @@ struct PencilCanvasView: UIViewRepresentable {
     func makeUIView(context: Context) -> PKCanvasView {
         let canvasView = PagedCanvasView()
         canvasView.performRepresentableUpdate {
+#if DEBUG
+            canvasView.installStrokeCountAccessibilityElement()
+#endif
             canvasView.contentInsetAdjustmentBehavior = .never
             canvasView.contentWidthInContentSpace = contentWidth
             canvasView.contentHeightInContentSpace = contentHeight
@@ -395,6 +450,7 @@ struct PencilCanvasView: UIViewRepresentable {
     func updateUIView(_ canvasView: PKCanvasView, context: Context) {
         let updateCanvas = {
             context.coordinator.onDrawingChanged = onDrawingChanged
+            context.coordinator.onDrawingObjectChanged = onDrawingObjectChanged
             context.coordinator.onViewportChanged = onViewportChanged
             context.coordinator.onExternalDrawingChange = onExternalDrawingChange
             context.coordinator.onPencilSqueeze = onPencilSqueeze
@@ -437,20 +493,43 @@ struct PencilCanvasView: UIViewRepresentable {
                 canvasView.overrideUserInterfaceStyle = inkDisplayStyle
             }
 
-            guard !context.coordinator.hasTransientDrawingOverride,
-                  !canvasView.isZooming,
-                  (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true,
-                  let drawingData,
-                  drawingData != context.coordinator.lastSyncedDrawingData,
-                  let drawing = try? PKDrawing(data: drawingData) else {
-                return
-            }
+            if context.coordinator.onDrawingObjectChanged != nil {
+                guard !context.coordinator.hasTransientDrawingOverride,
+                      !canvasView.isZooming,
+                      (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true,
+                      drawingVersion != context.coordinator.lastSyncedDrawingVersion,
+                      let drawingData,
+                      let drawing = try? PKDrawing(data: drawingData) else {
+                    return
+                }
 
-            context.coordinator.isUpdatingFromModel = true
-            canvasView.drawing = drawing
-            context.coordinator.isUpdatingFromModel = false
-            context.coordinator.lastSyncedDrawingData = drawingData
-            context.coordinator.onExternalDrawingChange?()
+                context.coordinator.isUpdatingFromModel = true
+                canvasView.drawing = drawing
+                context.coordinator.isUpdatingFromModel = false
+#if DEBUG
+                (canvasView as? PagedCanvasView)?.updateStrokeCountAccessibilityValue()
+#endif
+                context.coordinator.lastSyncedDrawingVersion = drawingVersion
+                context.coordinator.onExternalDrawingChange?()
+            } else {
+                guard !context.coordinator.hasTransientDrawingOverride,
+                      !canvasView.isZooming,
+                      (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true,
+                      let drawingData,
+                      drawingData != context.coordinator.lastSyncedDrawingData,
+                      let drawing = try? PKDrawing(data: drawingData) else {
+                    return
+                }
+
+                context.coordinator.isUpdatingFromModel = true
+                canvasView.drawing = drawing
+                context.coordinator.isUpdatingFromModel = false
+#if DEBUG
+                (canvasView as? PagedCanvasView)?.updateStrokeCountAccessibilityValue()
+#endif
+                context.coordinator.lastSyncedDrawingData = drawingData
+                context.coordinator.onExternalDrawingChange?()
+            }
 
             if showsSystemToolPicker,
                !beganObservingToolPicker,
@@ -492,6 +571,7 @@ struct PencilCanvasView: UIViewRepresentable {
         UIGestureRecognizerDelegate {
         let toolPicker = PKToolPicker()
         var onDrawingChanged: (Data) -> Void
+        var onDrawingObjectChanged: ((PKDrawing) -> Int)?
         var onViewportChanged: ((CanvasViewport) -> Void)?
         var isProgrammaticChange = false
         private(set) var suppressedChangeOccurred = false
@@ -501,6 +581,7 @@ struct PencilCanvasView: UIViewRepresentable {
         var onThreeFingerTap: (() -> Void)?
         var isUpdatingFromModel = false
         var lastSyncedDrawingData: Data?
+        var lastSyncedDrawingVersion: Int = 0
         var isObservingToolPicker = false
         private var lastReportedViewport: CanvasViewport?
         private var hasPendingDeferredViewportReport = false
@@ -526,9 +607,16 @@ struct PencilCanvasView: UIViewRepresentable {
         func endProgrammaticChange(_ canvasView: PKCanvasView) {
             isProgrammaticChange = false
             if suppressedChangeOccurred {
-                let drawingData = canvasView.drawing.dataRepresentation()
-                lastSyncedDrawingData = drawingData
-                onDrawingChanged(drawingData)
+#if DEBUG
+                (canvasView as? PagedCanvasView)?.updateStrokeCountAccessibilityValue()
+#endif
+                if let onDrawingObjectChanged {
+                    lastSyncedDrawingVersion = onDrawingObjectChanged(canvasView.drawing)
+                } else {
+                    let drawingData = canvasView.drawing.dataRepresentation()
+                    lastSyncedDrawingData = drawingData
+                    onDrawingChanged(drawingData)
+                }
             }
         }
 
@@ -543,6 +631,9 @@ struct PencilCanvasView: UIViewRepresentable {
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             (canvasView as? PagedCanvasView)?.resyncContentSizeIfStomped()
+#if DEBUG
+            (canvasView as? PagedCanvasView)?.updateStrokeCountAccessibilityValue()
+#endif
             guard !isUpdatingFromModel else { return }
             if isProgrammaticChange {
                 suppressedChangeOccurred = true
@@ -555,9 +646,13 @@ struct PencilCanvasView: UIViewRepresentable {
                 hasPendingDrawingSyncAfterGesture = true
                 return
             }
-            let drawingData = canvasView.drawing.dataRepresentation()
-            lastSyncedDrawingData = drawingData
-            onDrawingChanged(drawingData)
+            if let onDrawingObjectChanged {
+                lastSyncedDrawingVersion = onDrawingObjectChanged(canvasView.drawing)
+            } else {
+                let drawingData = canvasView.drawing.dataRepresentation()
+                lastSyncedDrawingData = drawingData
+                onDrawingChanged(drawingData)
+            }
             onExternalDrawingChange?()
         }
 
@@ -566,9 +661,16 @@ struct PencilCanvasView: UIViewRepresentable {
             guard !canvasView.isZooming,
                   (canvasView as? PagedCanvasView)?.isAnimatingZoomSnap != true else { return }
             hasPendingDrawingSyncAfterGesture = false
-            let drawingData = canvasView.drawing.dataRepresentation()
-            lastSyncedDrawingData = drawingData
-            onDrawingChanged(drawingData)
+#if DEBUG
+            (canvasView as? PagedCanvasView)?.updateStrokeCountAccessibilityValue()
+#endif
+            if let onDrawingObjectChanged {
+                lastSyncedDrawingVersion = onDrawingObjectChanged(canvasView.drawing)
+            } else {
+                let drawingData = canvasView.drawing.dataRepresentation()
+                lastSyncedDrawingData = drawingData
+                onDrawingChanged(drawingData)
+            }
             onExternalDrawingChange?()
         }
 

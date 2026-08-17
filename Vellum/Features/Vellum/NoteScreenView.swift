@@ -25,6 +25,7 @@ struct NoteScreenView: View {
     @State private var photosPickerItem: PhotosPickerItem?
     @State private var exportOutput: NoteExporter.Output?
     @State private var exportDirectoryToCleanUp: URL?
+    @State private var isExporting = false
     @State private var topOverlayHeight: CGFloat = 0
     @State private var leftClusterFrame: CGRect = .zero
     @State private var rightClusterFrame: CGRect = .zero
@@ -269,11 +270,11 @@ struct NoteScreenView: View {
                 isPresented: $model.isShowingFileImporter,
                 allowedContentTypes: [.image]
             ) { result in
-                guard let file = SecurityScopedFile.read(result, onFailure: {
-                    model.errorMessage = $0
-                }) else { return }
-
                 Task {
+                    guard let file = await SecurityScopedFile.read(result, onFailure: {
+                        model.errorMessage = $0
+                    }) else { return }
+
                     if let id = await model.importImage(
                         file.data,
                         visibleContentRect: currentVisibleContentRect
@@ -512,6 +513,12 @@ struct NoteScreenView: View {
             onDrawingChanged: { data in
                 model.drawingChanged(data)
                 refreshPageCount()
+            },
+            drawingVersion: model.drawingVersion,
+            onDrawingObjectChanged: { drawing in
+                let version = model.drawingObjectChanged(drawing)
+                refreshPageCount()
+                return version
             },
             isTransparent: true,
             tool: activeTool,
@@ -1074,12 +1081,15 @@ struct NoteScreenView: View {
     }
 
     private func exportNote(_ format: NoteExporter.Format) {
+        guard !isExporting else { return }
         guard !model.isLoading, model.note != nil else {
             model.errorMessage = "The note must finish loading before it can be exported."
             return
         }
 
+        isExporting = true
         Task {
+            defer { isExporting = false }
             await model.flushPendingSave()
 
             do {
@@ -1091,6 +1101,7 @@ struct NoteScreenView: View {
                     format: format,
                     minimumFilledPages: model.note?.pages.count ?? 0
                 )
+                cleanUpExportDirectory()
                 exportDirectoryToCleanUp = output.directory
                 exportOutput = output
             } catch {

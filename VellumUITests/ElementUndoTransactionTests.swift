@@ -24,6 +24,27 @@ final class ElementUndoTransactionTests: XCTestCase {
         XCTAssertEqual(changes, [[element], [], [element]])
     }
 
+    func testBatchAddMatchesSequentialOrderingAndNotifiesOnce() {
+        let elements = [
+            makeElement(text: "First"),
+            makeElement(text: "Second"),
+            makeElement(text: "Third"),
+            makeElement(text: "Fourth"),
+        ]
+        let (sequentialStore, _) = makeStore()
+        for element in elements {
+            sequentialStore.addElement(element)
+        }
+
+        let (batchStore, _) = makeStore()
+        var changes: [[CanvasElement]] = []
+        batchStore.onElementsChanged = { changes.append($0) }
+        batchStore.addElements(elements)
+
+        XCTAssertEqual(batchStore.elements, sequentialStore.elements)
+        XCTAssertEqual(changes, [batchStore.elements])
+    }
+
     func testNoOpTransactionDoesNotRegisterUndo() {
         let (store, undoManager) = makeStore()
 

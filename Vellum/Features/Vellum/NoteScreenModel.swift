@@ -5,6 +5,18 @@ import PencilKit
 import UIKit
 import VellumCore
 
+/// The fourth sanctioned `@unchecked Sendable` PencilKit snapshot wrapper in the app;
+/// the other three are in `PageThumbnailStore`, `NotePageRenderer`, and `PdfPageImageCache`.
+private struct DrawingSerializationRequest: @unchecked Sendable {
+    let drawing: PKDrawing
+}
+
+private actor DrawingSerializer {
+    func serialize(_ request: DrawingSerializationRequest) async -> Data {
+        request.drawing.dataRepresentation()
+    }
+}
+
 @MainActor
 @Observable
 final class NoteScreenModel {
@@ -61,7 +73,9 @@ final class NoteScreenModel {
     private var editGeneration = 0
     private var savedGeneration = 0
     private var inFlightSave: Task<Void, Never>?
-    private var drawingDataPendingSave: Data?
+    private let drawingSerializer = DrawingSerializer()
+    private var latestDrawing: PKDrawing?
+    private var savedDrawingVersion = 0
     private var autosaveDisabled = false
     private var pendingPageMutationSave = false
     // Written from cachedImage(for:)'s miss callback during view body evaluation;
@@ -81,6 +95,7 @@ final class NoteScreenModel {
         }
     }
     var drawingData: Data?
+    private(set) var drawingVersion: Int = 0
     var hasInkInMemory: Bool? {
         guard let note else { return nil }
         guard !note.pages.isEmpty else { return false }
@@ -88,8 +103,9 @@ final class NoteScreenModel {
         let orderedFirstPage = note.pages.sorted(by: NotePage.byOrder).first
         guard orderedFirstPage?.id == note.pages.first?.id else { return nil }
 
-        if let drawingDataPendingSave {
-            return !drawingDataPendingSave.isEmpty
+        if latestDrawing != nil {
+            // Even an empty PKDrawing produces a nonempty archive when it is saved.
+            return true
         }
         if let drawingData {
             return !drawingData.isEmpty
@@ -290,7 +306,9 @@ final class NoteScreenModel {
             noteTitles = Dictionary(uniqueKeysWithValues: summaries.map { ($0.id, $0.title) })
             editGeneration = 0
             savedGeneration = 0
-            drawingDataPendingSave = nil
+            drawingVersion = 0
+            savedDrawingVersion = 0
+            latestDrawing = nil
             autosaveDisabled = false
             saveState = .saved
             errorMessage = nil
@@ -307,6 +325,7 @@ final class NoteScreenModel {
                     return
                 }
                 loadedPKDrawing = decodedDrawing
+                latestDrawing = decodedDrawing
             } else {
                 loadedPKDrawing = PKDrawing()
             }
@@ -354,9 +373,25 @@ final class NoteScreenModel {
     func drawingChanged(_ data: Data) {
         guard drawingData != data else { return }
         drawingData = data
-        drawingDataPendingSave = data
+        if let drawing = try? PKDrawing(data: data) {
+            latestDrawing = drawing
+        } else {
+            // Preserve the legacy entry point's permissive raw-byte behavior. With no
+            // valid object snapshot, the save loop falls back to these exact bytes.
+            latestDrawing = nil
+        }
+        drawingVersion += 1
         noteWasEdited()
         materializePagesForFilledBands()
+    }
+
+    @discardableResult
+    func drawingObjectChanged(_ drawing: PKDrawing) -> Int {
+        latestDrawing = drawing
+        drawingVersion += 1
+        noteWasEdited()
+        materializePagesForFilledBands()
+        return drawingVersion
     }
 
     func elementsChanged(_ elements: [CanvasElement]) {
@@ -384,6 +419,8 @@ final class NoteScreenModel {
         let drawingBounds: CGRect
         if let liveDrawing = canvasElements.canvasReference?.canvasView?.drawing {
             drawingBounds = liveDrawing.bounds
+        } else if let latestDrawing {
+            drawingBounds = latestDrawing.bounds
         } else if let drawingData,
                   let persistedDrawing = try? PKDrawing(data: drawingData) {
             drawingBounds = persistedDrawing.bounds
@@ -447,6 +484,8 @@ final class NoteScreenModel {
         let drawingBounds: CGRect
         if let liveDrawing = canvasElements.canvasReference?.canvasView?.drawing {
             drawingBounds = liveDrawing.bounds
+        } else if let latestDrawing {
+            drawingBounds = latestDrawing.bounds
         } else if let drawingData,
                   let persistedDrawing = try? PKDrawing(data: drawingData) {
             drawingBounds = persistedDrawing.bounds
@@ -752,7 +791,9 @@ final class NoteScreenModel {
             let reloadedDrawing = try await loadDrawingAsset(for: reloadedNote)
             note = reloadedNote
             drawingData = reloadedDrawing
-            drawingDataPendingSave = nil
+            latestDrawing = reloadedDrawing.flatMap { try? PKDrawing(data: $0) }
+            drawingVersion = 0
+            savedDrawingVersion = 0
             editGeneration = 0
             savedGeneration = 0
             saveState = .saved
@@ -1000,7 +1041,22 @@ final class NoteScreenModel {
         while savedGeneration < editGeneration, !autosaveDisabled {
             guard var noteSnapshot = note else { return }
             let generationBeingSaved = editGeneration
-            let drawingSnapshot = drawingDataPendingSave
+            let drawingVersionBeingSaved: Int?
+            let drawingSnapshot: Data?
+            if drawingVersion != savedDrawingVersion {
+                drawingVersionBeingSaved = drawingVersion
+                let serializationRequest = latestDrawing.map {
+                    DrawingSerializationRequest(drawing: $0)
+                }
+                if let serializationRequest {
+                    drawingSnapshot = await drawingSerializer.serialize(serializationRequest)
+                } else {
+                    drawingSnapshot = drawingData
+                }
+            } else {
+                drawingVersionBeingSaved = nil
+                drawingSnapshot = nil
+            }
             let oldAssetPath = noteSnapshot.pages.first?.drawingAssetPath
             var newAssetPath: String?
 
@@ -1022,6 +1078,7 @@ final class NoteScreenModel {
                     savedNote,
                     snapshot: noteSnapshot,
                     savedGeneration: generationBeingSaved,
+                    savedDrawingVersion: drawingVersionBeingSaved,
                     savedDrawingData: drawingSnapshot,
                     newAssetPath: newAssetPath
                 )
@@ -1053,6 +1110,7 @@ final class NoteScreenModel {
         _ savedNote: Note,
         snapshot: Note,
         savedGeneration generation: Int,
+        savedDrawingVersion drawingVersion: Int?,
         savedDrawingData: Data?,
         newAssetPath: String?
     ) {
@@ -1073,8 +1131,9 @@ final class NoteScreenModel {
             note = savedNote
         }
 
-        if drawingDataPendingSave == savedDrawingData {
-            drawingDataPendingSave = nil
+        if let drawingVersion {
+            savedDrawingVersion = drawingVersion
+            drawingData = savedDrawingData
         }
 
         if let currentNote = note {

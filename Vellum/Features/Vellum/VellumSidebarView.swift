@@ -7,6 +7,7 @@ struct VellumSidebarView: View {
     @State private var showingActivity = false
     @State private var showingSettings = false
     @State private var isImportingPDF = false
+    @State private var isCreatingNote = false
     @State private var pendingSpaceDeletion: Space?
     @State private var spaceEditor: SpaceEditorContext?
 
@@ -338,7 +339,10 @@ struct VellumSidebarView: View {
     }
 
     private func createNote() {
+        guard !isCreatingNote else { return }
+        isCreatingNote = true
         Task {
+            defer { isCreatingNote = false }
             guard let noteID = await model.library.createNote() else { return }
             await model.refreshStats()
             await model.openNote(noteID, isNewlyCreated: true)

@@ -38,6 +38,52 @@ final class NoteExporterTests: XCTestCase {
         try await assertThreePageRasterExport(format: .jpeg)
     }
 
+    func testConcurrentExportsProduceIndependentOutputs() async throws {
+        let content = makeThreePageContent()
+        async let pdfExport = NoteExporter.export(
+            content: content,
+            title: "Concurrent PDF",
+            format: .pdf
+        )
+        async let pngExport = NoteExporter.export(
+            content: content,
+            title: "Concurrent PNG",
+            format: .png
+        )
+
+        let (pdfOutput, pngOutput) = try await (pdfExport, pngExport)
+        defer {
+            removeOutput(pdfOutput)
+            removeOutput(pngOutput)
+        }
+
+        assertOutputDirectory(pdfOutput)
+        assertOutputDirectory(pngOutput)
+        XCTAssertNotEqual(
+            pdfOutput.directory.standardizedFileURL,
+            pngOutput.directory.standardizedFileURL
+        )
+
+        let pdfFilenames = try FileManager.default.contentsOfDirectory(
+            at: pdfOutput.directory,
+            includingPropertiesForKeys: nil
+        ).map(\.lastPathComponent)
+        XCTAssertEqual(pdfFilenames, ["Concurrent PDF.pdf"])
+        let pdfDocument = try XCTUnwrap(CGPDFDocument(pdfOutput.urls[0] as CFURL))
+        XCTAssertEqual(pdfDocument.numberOfPages, 3)
+
+        let expectedPNGFilenames = (1...3).map { "Concurrent PNG – Page \($0).png" }
+        let pngFilenames = try FileManager.default.contentsOfDirectory(
+            at: pngOutput.directory,
+            includingPropertiesForKeys: nil
+        ).map(\.lastPathComponent).sorted()
+        XCTAssertEqual(pngFilenames, expectedPNGFilenames)
+        XCTAssertEqual(pngOutput.urls.map(\.lastPathComponent), expectedPNGFilenames)
+        for url in pngOutput.urls {
+            XCTAssertNotNil(UIImage(contentsOfFile: url.path))
+        }
+    }
+
     func testEmptyContentExportsOnePageForEveryFormat() async throws {
         let content = NotePageRenderer.Content(
             drawing: PKDrawing(),

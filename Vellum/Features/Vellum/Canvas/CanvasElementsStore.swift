@@ -113,6 +113,18 @@ final class CanvasElementsStore {
         }
     }
 
+    /// Batch insert: appends every element and materializes z-order ONCE, instead of the
+    /// O(k·n) cost of k sequential `addElement` calls each re-materializing the whole
+    /// array. Fires onElementsChanged exactly once (via performTransaction), same as a
+    /// single addElement call.
+    func addElements(_ newElements: [CanvasElement]) {
+        guard !newElements.isEmpty else { return }
+        performTransaction("Add \(newElements.count) Elements") {
+            elements.append(contentsOf: newElements)
+            elements = elements.zOrderMaterialized()
+        }
+    }
+
     func updateElement(_ element: CanvasElement) {
         performTransaction("Update Element") {
             guard let index = elements.firstIndex(where: { $0.id == element.id }) else {

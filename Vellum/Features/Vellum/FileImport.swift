@@ -5,10 +5,11 @@ import UniformTypeIdentifiers
 enum SecurityScopedFile {
     /// Reads a `.fileImporter` result inside its security scope, reporting any failure — the
     /// picker's own or the read's — through `onFailure` and returning `nil`.
+    @MainActor
     static func read(
         _ result: Result<URL, Error>,
         onFailure: (String) -> Void
-    ) -> (url: URL, data: Data)? {
+    ) async -> (url: URL, data: Data)? {
         switch result {
         case .success(let url):
             let isAccessing = url.startAccessingSecurityScopedResource()
@@ -19,7 +20,10 @@ enum SecurityScopedFile {
             }
 
             do {
-                return (url, try Data(contentsOf: url))
+                let data = try await Task.detached(priority: .userInitiated) {
+                    try Data(contentsOf: url)
+                }.value
+                return (url, data)
             } catch {
                 onFailure(error.localizedDescription)
                 return nil
@@ -47,12 +51,12 @@ fileprivate struct PDFImportModifier: ViewModifier {
             isPresented: $isPresented,
             allowedContentTypes: [.pdf]
         ) { result in
-            guard let file = SecurityScopedFile.read(result, onFailure: {
-                model.library.errorMessage = $0
-            }) else { return }
-
-            let suggestedTitle = file.url.deletingPathExtension().lastPathComponent
             Task {
+                guard let file = await SecurityScopedFile.read(result, onFailure: {
+                    model.library.errorMessage = $0
+                }) else { return }
+
+                let suggestedTitle = file.url.deletingPathExtension().lastPathComponent
                 guard let noteID = await model.library.createNoteFromPDF(
                     data: file.data,
                     suggestedTitle: suggestedTitle

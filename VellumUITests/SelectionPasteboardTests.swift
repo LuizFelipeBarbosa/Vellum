@@ -70,6 +70,51 @@ final class SelectionPasteboardTests: XCTestCase {
         )
     }
 
+    func testConcurrentPasteDropsReentrantCall() async throws {
+        let assetPath = "assets/concurrent-paste.png"
+        let element = makeImageElement(assetPath: assetPath)
+        let harness = CanvasHarness.make(
+            strokes: [
+                CanvasFixtures.makeStroke(
+                    locations: [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 40)]
+                ),
+            ],
+            elements: [element]
+        )
+        let imageData = try XCTUnwrap(makePNGData())
+        let image = try XCTUnwrap(UIImage(data: imageData))
+        harness.store.cacheImage(image, data: imageData, forAssetPath: assetPath)
+        selectMixedContent(in: harness)
+        let originalStrokeCount = harness.canvasView.drawing.strokes.count
+        let originalElementCount = harness.store.elements.count
+
+        let copySucceeded = await harness.controller.copySelection()
+        guard copySucceeded else {
+            return XCTFail("Expected the mixed selection to copy before concurrent paste")
+        }
+
+        let persistenceGate = PastePersistenceGate()
+        harness.controller.persistImageData = { _ in
+            await persistenceGate.wait()
+            return "assets/concurrent-paste-copy.png"
+        }
+        let firstPaste = Task { @MainActor in
+            await harness.controller.pasteFromPasteboard()
+        }
+        await persistenceGate.waitUntilFirstCall()
+        let resumePersistence = Task { @MainActor in
+            await Task.yield()
+            await persistenceGate.open()
+        }
+
+        await harness.controller.pasteFromPasteboard()
+        await resumePersistence.value
+        await firstPaste.value
+
+        XCTAssertEqual(harness.canvasView.drawing.strokes.count, originalStrokeCount + 1)
+        XCTAssertEqual(harness.store.elements.count, originalElementCount + 1)
+    }
+
     func testPasteAtTargetCentersPayloadBounds() async throws {
         let element = CanvasFixtures.makeTextElement(frame: CanvasRect(x: 60, y: 20, width: 30, height: 30))
         let harness = CanvasHarness.make(
@@ -608,4 +653,31 @@ final class SelectionPasteboardTests: XCTestCase {
         )
     }
 
+}
+
+private actor PastePersistenceGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func waitUntilFirstCall() async {
+        while waiters.isEmpty {
+            await Task.yield()
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let waitingContinuations = waiters
+        waiters.removeAll()
+        for continuation in waitingContinuations {
+            continuation.resume()
+        }
+    }
 }

@@ -69,11 +69,18 @@ the package's `.iOS(.v17)` describes the package, not the app.
   `Vellum/Features/Vellum/Canvas/StrokeEditing.swift:7` (a pure-function namespace)
   and a synthesis helper in `VellumFlowUITests/ShapeFlowTestHelpers.swift:95`. Adding
   a third to silence a diagnostic is a smell — fix the isolation instead.
-- The **only** sanctioned `@unchecked Sendable` is the render-snapshot idiom: a
-  private request/result struct that hands an immutable UIKit/PDFKit snapshot to a
-  private `actor` renderer and gets an image back. Three sites, all the same shape:
-  `Export/PageThumbnailStore.swift`, `Export/NotePageRenderer.swift`,
-  `Pdf/PdfPageImageCache.swift`. Anything else needs a real reason.
+- The **only** sanctioned `@unchecked Sendable` is the snapshot-handoff idiom: a
+  private request/result struct that hands an immutable UIKit/PencilKit snapshot
+  (`UIImage`, `PKDrawing`, a renderer `Content`) across an isolation boundary — into a
+  private `actor` renderer/serializer or a detached encode — and gets an image or
+  serialized data back. Five files, all the same shape:
+  `Export/PageThumbnailStore.swift`, `Export/NotePageRenderer.swift` (`Content`),
+  `Export/NoteExporter.swift`, `Canvas/SelectionPasteboard.swift`, and
+  `NoteScreenModel.swift` (`DrawingSerializationRequest`/`DrawingSerializer`).
+  Live PDFKit objects are NOT eligible — `PdfDocumentStore` (an actor) is the sole
+  owner of every `PDFDocument`/`PDFPage`, and nothing crosses out of it but Sendable
+  metadata, `UIImage` rasters, and single-page PDF `Data`. Anything else needs a real
+  reason.
 
 ## The save path must stay O(1) — this caused a shipped freeze
 
