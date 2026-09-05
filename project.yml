@@ -93,4 +93,18 @@ schemes:
       config: Debug
       targets:
         - VellumUITests
-        - VellumFlowUITests
+        - name: VellumFlowUITests
+          skippedTests:
+            - RealModelQAFlowUITests
+
+  VellumRealModelQA:
+    build:
+      targets:
+        Vellum: all
+        VellumFlowUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - name: VellumFlowUITests
+          selectedTests:
+            - RealModelQAFlowUITests

@@ -28,8 +28,8 @@ same for `VellumUITests` / `VellumFlowUITests`), and `.gitignore:5` ignores
 
 | Target | XcodeGen type | What it actually is |
 |---|---|---|
-| `VellumUITests` | `bundle.unit-test` (+ `TEST_HOST`) | **Unit tests.** 450 XCTest functions (2026-08-16 count) across 51 files, **zero** `XCUIApplication`. Runs in-process against the app. |
-| `VellumFlowUITests` | `bundle.ui-testing` | The real XCUITest target. 44 tests across 12 files, drives the simulator, owns every launch-argument contract. |
+| `VellumUITests` | `bundle.unit-test` (+ `TEST_HOST`) | **Unit tests.** Runs in-process against the app; no `XCUIApplication`. |
+| `VellumFlowUITests` | `bundle.ui-testing` | The real XCUITest target. Drives the simulator and exercises launch-argument contracts. `RealModelQAFlowUITests` runs separately through the opt-in `VellumRealModelQA` scheme. |
 
 Asked to "add a UI test", the name alone points at the wrong target. Decide by what
 the test does: touching a model or a pure function → `VellumUITests`; needing a real
@@ -54,7 +54,7 @@ Drawing data crosses the boundary as `Data`, never `PKDrawing`
 (`grep -r 'PKDrawing' VellumCore` → 0 hits). PencilKit encoding/decoding stays on the
 app side.
 
-The app's `deploymentTarget` is **iOS 18.0** on all three targets (`project.yml`);
+The app's `deploymentTarget` is **iOS 26.0** on all three targets (`project.yml`);
 the package's `.iOS(.v17)` describes the package, not the app.
 
 ## State and concurrency conventions
@@ -65,11 +65,10 @@ the package's `.iOS(.v17)` describes the package, not the app.
 - **`SWIFT_STRICT_CONCURRENCY: complete`** with `SWIFT_VERSION: "6.0"`
   (`project.yml`), and `swiftLanguageModes: [.v6]` in the package. MainActor app,
   actor-isolated core.
-- **Zero `@preconcurrency`.** Exactly two `nonisolated` in the whole repo:
-  `Vellum/Features/Vellum/Canvas/StrokeEditing.swift:7` (a pure-function namespace)
-  and a synthesis helper in `VellumFlowUITests/ShapeFlowTestHelpers.swift:95`. Adding
-  a third to silence a diagnostic is a smell — fix the isolation instead.
-- The **only** sanctioned `@unchecked Sendable` is the snapshot-handoff idiom: a
+- **Zero `@preconcurrency`.** `nonisolated` is used for pure helpers and protocol
+  entry points that do not access actor-isolated mutable state. Do not add it merely
+  to suppress an isolation diagnostic.
+- The app uses `@unchecked Sendable` for the snapshot-handoff idiom: a
   private request/result struct that hands an immutable UIKit/PencilKit snapshot
   (`UIImage`, `PKDrawing`, a renderer `Content`) across an isolation boundary — into a
   private `actor` renderer/serializer or a detached encode — and gets an image or
@@ -79,8 +78,10 @@ the package's `.iOS(.v17)` describes the package, not the app.
   `NoteScreenModel.swift` (`DrawingSerializationRequest`/`DrawingSerializer`).
   Live PDFKit objects are NOT eligible — `PdfDocumentStore` (an actor) is the sole
   owner of every `PDFDocument`/`PDFPage`, and nothing crosses out of it but Sendable
-  metadata, `UIImage` rasters, and single-page PDF `Data`. Anything else needs a real
-  reason.
+  metadata, `UIImage` rasters, and single-page PDF `Data`. The core also uses a
+  private `CoderDateFormatter` wrapper: each encoder/decoder owns its formatters,
+  which never escape that coder's serial operation. Other uses need an explicit
+  ownership or synchronization argument.
 
 ## The save path must stay O(1) — this caused a shipped freeze
 
@@ -206,10 +207,10 @@ The full table — argument, DEBUG gating, read site, and the test that depends 
 ## Tests: commands and expected counts
 
 ```sh
-# 439 tests, 14 suites, ~1s, no simulator — the fast loop
-cd VellumCore && swift test
+# From the repository root; no simulator — the fast loop
+swift test --package-path VellumCore
 
-# 450 tests, ~23s
+# App-hosted unit tests
 xcodegen generate
 xcodebuild test -project Vellum.xcodeproj -scheme Vellum \
   -destination 'platform=iOS Simulator,id=9FB0400F-D7AE-4101-8543-AD49E58B09A4' \
@@ -227,6 +228,11 @@ suspended run looks identical to a hung one.
 Simulator `9FB0400F-D7AE-4101-8543-AD49E58B09A4` is "iPad Pro 13-inch (M5)". Pass the
 UDID rather than `name:` — the device set changes.
 
+See `docs/repository-consolidation.md` for the dated validation results. Counts in
+older audit records describe those historical commits, not the current checkout.
+The `VellumRealModelQA` scheme collects manual screenshots and observations; it is
+excluded from the default scheme and is not a correctness gate for generated content.
+
 **Two pre-existing failures** (2026-08-10; the second was confirmed by A/B against
 `main` @ `c3be8d9` in a throwaway worktree, so do not blame your branch for it):
 `PhotoInteractionFlowUITests.testSelectedPhotoCanMoveAcrossInkZOrder` fails with
@@ -236,9 +242,10 @@ including on `main` — treat a *consistently* failing pasteboard test as enviro
 and A/B it rather than re-running forever. And:
 `ShapeRecognitionFlowUITests.testDraggingASelectedShapeSettlesItOnThePageLattice`
 fails deterministically on `main` with `XCTAssertTrue failed - the line was not
-selected` (`ShapeRecognitionFlowUITests.swift:318`). A full run ending with **exactly
-those two failures** is green. One split-pane test reports as skipped via a
-fixture-shape `XCTSkip` guard (it needs ~24 sidebar rows; the seed provides 8).
+selected` (`ShapeRecognitionFlowUITests.swift:318`). Report these failures explicitly;
+matching a historical failure signature does not make a test pass. One split-pane
+test reports as skipped via a fixture-shape `XCTSkip` guard (it needs ~24 sidebar
+rows; the seed provides 8).
 
 **The pasteboard-dependent flow tests are flaky — re-run before believing a
 failure.** `PasteAffordanceFlowUITests` and `PhotoInteractionFlowUITests` fail
@@ -257,11 +264,13 @@ the name, concluded their tests covered a test double, and proposed deleting all
 167 lines. Renamed for that reason — do not reintroduce a `Mock` prefix here.
 
 `HeuristicVellumAgent` and `HeuristicAskAnswerer` (both in
-`VellumCore/Sources/VellumCore/Agent/`) are the **production** implementations of
-`VellumAgent` and `AskAnswering`, constructed in `AppContainer.live(rootDirectory:)`
-(`Vellum/App/AppContainer.swift:21,37`). They are deterministic on-device behavior
-behind a protocol seam, not test doubles. Deleting or stubbing them breaks the
-shipping app.
+`VellumCore/Sources/VellumCore/Agent/`) are shipping implementations of `VellumAgent`
+and `AskAnswering`. `AppContainer.live(rootDirectory:)` uses
+`FoundationModelsVellumAgent` with the heuristic agent as fallback, and uses
+`HeuristicAskAnswerer` for workspace-wide Ask. Per-note Ask uses
+`FoundationModelsNoteAskProvider` with `KeywordNoteAskProvider` as fallback. The DEBUG
+`-vellum-heuristic-ai` hook selects deterministic providers for tests. Deleting or
+stubbing the heuristics breaks shipping fallback behavior.
 
 ## Type-checker budget
 
@@ -277,9 +286,9 @@ xcodebuild build -project Vellum.xcodeproj -scheme Vellum \
   OTHER_SWIFT_FLAGS='-Xfrontend -warn-long-function-bodies=150 -Xfrontend -warn-long-expression-type-checking=150'
 ```
 
-The per-site baseline table is in `docs/quality-baseline.md`. Anything above its
-number there is a regression. (That file's *test counts* are pre-cleanup — 370/379 —
-and are superseded by the 375/368 above.)
+The per-site historical table is in `docs/quality-baseline.md`. Re-measure a clean
+build before comparing: that document records why the old timings were not
+reproducible run-to-run.
 
 ## Toolchain
 

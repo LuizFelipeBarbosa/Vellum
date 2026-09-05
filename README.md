@@ -9,11 +9,11 @@ running analysis on every edit.
 
 | Path | What it is |
 |---|---|
-| `VellumCore/` | Local SwiftPM package: domain models, workspace/graph/ask services, file-backed repositories, and the mock agent. 52 files, importing only `Foundation` and `CoreGraphics` — no UIKit, SwiftUI, or PencilKit. |
-| `Vellum/` | The iPad app: `App/` (entry point + container), `Features/Vellum/` (library, note editor, canvas, split panes, toolbar, export, PDF), `Platform/` (PencilKit bridge), `Resources/`. 94 files. |
-| `VellumUITests/` | **Unit tests, despite the name.** XcodeGen `type: bundle.unit-test` with a `TEST_HOST`, so it runs in-process against the app target. 364 XCTest functions, zero `XCUIApplication`. |
-| `VellumFlowUITests/` | The real UI-test target (`type: bundle.ui-testing`). 43 XCUITest functions driving the simulator; owns every launch-argument contract below. |
-| `docs/` | `quality-baseline.md` (measured test counts and type-checker costs) and `quality-report.md` (audit findings, open issues). |
+| `VellumCore/` | Local SwiftPM package: domain models, workspace/graph/ask services, file-backed repositories, and heuristic agents. Uses `Foundation`, `CoreGraphics`, `CryptoKit`, and `os`; no UIKit, SwiftUI, or PencilKit. |
+| `Vellum/` | The iPad app: `App/` (entry point + container), `AI/` (Foundation Models adapters), `Features/Vellum/` (library, note editor, canvas, split panes, toolbar, export, PDF), `Platform/` (PencilKit bridge), `Resources/`. |
+| `VellumUITests/` | **Unit tests, despite the name.** XcodeGen `type: bundle.unit-test` with a `TEST_HOST`, so it runs in-process against the app target. |
+| `VellumFlowUITests/` | The real UI-test target (`type: bundle.ui-testing`), driving the simulator and exercising launch-argument contracts. Includes an opt-in manual QA suite. |
+| `docs/` | Dated validation records, historical quality baselines, and audit findings. |
 
 The project makes two deliberate layout deviations from the original brief: the core
 is a SwiftPM package so it can be tested without Xcode or a simulator, and
@@ -37,40 +37,55 @@ Re-run `xcodegen generate` after adding or removing **any** file under `Vellum/`
 `VellumUITests/`, or `VellumFlowUITests/` — `project.yml` declares directory-based
 `sources:`, so new files are invisible to the build until the project is regenerated.
 
-Select an iPad simulator running **iPadOS 18.0 or newer** (all three targets set
-`deploymentTarget: "18.0"`), then build and run the `Vellum` scheme. `VellumCore`
+Select an iPad simulator running **iPadOS 26.0 or newer** (all three targets set
+`deploymentTarget: "26.0"`), then build and run the `Vellum` scheme. `VellumCore`
 itself declares `.iOS(.v17)` / `.macOS(.v14)` so that `swift test` runs on the Mac
-without a simulator; the app requires 18.
+without a simulator; the app requires 26.
 
 ## Tests
 
 ```sh
-# Core package — 353 tests, ~0.4s, no simulator needed
-cd VellumCore && swift test
+# Run all commands from the repository root.
+# Core package — no simulator needed
+swift test --package-path VellumCore
 
-# App-hosted unit tests — 364 tests, ~19s
+# App-hosted unit tests
 xcodegen generate
 xcodebuild test -project Vellum.xcodeproj -scheme Vellum \
   -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5)' \
   -derivedDataPath build/DerivedData -only-testing:VellumUITests
 
-# Everything, including the simulator-driving flow tests — ~26 minutes
+# Automated suite, including simulator-driving flow tests — roughly 26 minutes
 caffeinate -i xcodebuild test -project Vellum.xcodeproj -scheme Vellum \
   -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5)' \
   -derivedDataPath build/DerivedData
 ```
 
-`VellumFlowUITests` accounts for essentially all of the full-suite runtime. One test
-in it, `ShapeRecognitionFlowUITests.testDraggingASelectedShapeSettlesItOnThePageLattice`,
-fails deterministically on `main`; a run with exactly that one failure is green. See
-`docs/quality-baseline.md`.
+`VellumFlowUITests` accounts for essentially all of the full-suite runtime. Known
+failures involving shape selection and pasteboard setup are recorded in `CLAUDE.md`;
+report them separately from passing tests. Historical audit counts are not a current
+validation result. See [the consolidation validation record](docs/repository-consolidation.md)
+for the checks performed when the outstanding branches were brought onto `main`.
+
+The `VellumRealModelQA` scheme runs only `RealModelQAFlowUITests`, which collects
+screenshots and observations using the live model or its fallback:
+
+```sh
+caffeinate -i xcodebuild test -project Vellum.xcodeproj -scheme VellumRealModelQA \
+  -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5)' \
+  -derivedDataPath build/DerivedData
+```
+
+This manual suite is excluded from the default `Vellum` scheme. Review its result
+attachments: a passing test does not establish that Apple Intelligence was available
+or that model-generated answers and proposals were correct.
 
 On a Mac with only Command Line Tools installed, Swift Testing sits in a non-default
 framework search path and plain `swift test` fails with `no such module 'Testing'`.
 Use the wrapper instead:
 
 ```sh
-cd VellumCore && ./test-clt.sh
+(cd VellumCore && ./test-clt.sh)
 ```
 
 ## Launch arguments
@@ -110,11 +125,12 @@ builds notes from imported PDFs and is wired through `LibraryScreenModel`.
 
 ## Built-in agent implementations
 
-`HeuristicVellumAgent` (implementing `VellumAgent`) and `HeuristicAskAnswerer` (implementing
-`AskAnswering`) are **shipping implementations**, not test doubles — deterministic
-on-device behavior behind protocol seams, constructed in
-`AppContainer.live(rootDirectory:)`. To use a real provider, implement the protocol in
-`VellumCore` and swap the constructor call there. No AI-provider code is bundled.
+`AppContainer.live(rootDirectory:)` uses `FoundationModelsVellumAgent` for organization
+and `FoundationModelsNoteAskProvider` for per-note Ask. They fall back to
+`HeuristicVellumAgent` and `KeywordNoteAskProvider` when the system model is unavailable.
+The workspace-wide Ask service uses `HeuristicAskAnswerer`. These deterministic
+implementations are shipping code behind protocol seams, not test doubles. The DEBUG
+`-vellum-heuristic-ai` argument selects deterministic providers for flow tests.
 
 ## Known behavior
 
